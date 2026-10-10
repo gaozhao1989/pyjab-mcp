@@ -1,0 +1,30 @@
+# --- build and cache ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.DS_Store
+
+# --- maintainer notes, deliberately not published ----------------------------------
+#
+# These are on disk and in version control's *ignore* list, not in it. Two reasons, and
+# the second is the one that matters:
+#
+#   1. they change for reasons that have nothing to do with the code;
+#   2. the plan contains product strategy, competitive analysis and a monetisation
+#      outline, and DESIGN.md refers to local machine paths. A public repository is the
+#      wrong place for either.
+#
+# What *is* published is the technical architecture and what the project is: README.md
+# and docs/ARCHITECTURE.md.
+AGENTS.md
+docs/PLAN.md
+docs/DESIGN.md

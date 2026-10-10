@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyjab-mcp"
+dynamic = ["version"]
+description = "Drive Java desktop applications from an AI agent, through the JVM's own accessibility tree"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Gary Gao", email = "gaozhao89@qq.com" }]
+keywords = ["mcp", "java", "accessibility", "automation", "swing", "ai-agent"]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    # NOTE: the "License ::" classifier is intentionally absent.  PEP 639 makes the SPDX
+    # `license` expression authoritative, and setuptools rejects a build that carries
+    # both.  See [project].license above.  Learned by running `pip install -e .` on this
+    # skeleton and reading the error, rather than by copying the shape from memory.
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Utilities",
+]
+
+dependencies = [
+    # The substrate. Pinned to a range rather than a floor once 1.9.0 exists, because the
+    # tree-walk API this project needs (docs/DESIGN.md D1) does not.
+    "pyjab>=1.8.0",
+    # The official SDK. FastMCP's decorator registration is what the plan's tool surface
+    # is written against.
+    "mcp>=1.0.0",
+    # FastMCP's own boundary type; declared because this project's tool signatures use it.
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[project.urls]
+Homepage = "https://github.com/gaozhao1989/pyjab-mcp"
+Repository = "https://github.com/gaozhao1989/pyjab-mcp"
+Issues = "https://github.com/gaozhao1989/pyjab-mcp/issues"
+
+[project.scripts]
+# The name the MCP client config will use. Not a guess: it is what docs/PLAN.md 4 fixes
+# as the server name, per the {service}_mcp convention.
+pyjab-mcp = "pyjab_mcp.__main__:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "pyjab_mcp.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["pyjab_mcp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+# A hung call into the accessibility bridge is the one failure a portable suite cannot
+# see. faulthandler is built in, so this needs no dependency; on the timeout it prints
+# every thread's stack, which names the call that never returned.
+faulthandler_timeout = 300

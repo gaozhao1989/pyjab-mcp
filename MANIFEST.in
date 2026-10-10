@@ -1,0 +1,17 @@
+include LICENSE
+include README.md
+include pyproject.toml
+recursive-include src *.py
+recursive-include tests *.py
+
+# ARCHITECTURE.md ships; the two notes below do not. Excluded by name rather than by a
+# pattern over docs/, precisely so that adding a third public page is a one-line change
+# rather than a pattern that has to be reasoned about.
+include docs/ARCHITECTURE.md
+#
+# This file exists for the same reason pyjab has one: an sdist is built from the working
+# tree, so .gitignore does not protect it. A note that is ignored by git and not excluded
+# here is published by the next `python -m build`.
+exclude AGENTS.md
+exclude docs/PLAN.md
+exclude docs/DESIGN.md

@@ -1,0 +1,47 @@
+name: CI
+
+# A starting point, not a finished pipeline. It runs the portable suite on the three
+# platforms and nothing else. What it deliberately does not have yet:
+#
+#   * a windows-gui job. It is the only layer that can drive a live application, and
+#     pyjab's wording about its own equivalent applies here verbatim: a green run of this
+#     file says nothing about a live application, and a red one blocks nothing. Add it
+#     when there is a server to drive.
+#   * a release job. Nothing is published yet, and a release pipeline written before the
+#     first release encodes guesses.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: tests (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.12"]
+        include:
+          # The versions the classifiers claim, on one platform, so that a claim in
+          # pyproject.toml has something behind it.
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.13"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Run the portable suite
+        run: python -m pytest tests/
