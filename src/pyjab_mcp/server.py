@@ -29,7 +29,7 @@ from . import __version__
 from .backend import AttachedWindow, PyjabApiGap, PyjabUnavailable, open_backend
 from .bridge import BridgeClosed, BridgeNotStarted, BridgeStartupError, BridgeThread
 from .diagnostics import collect
-from .handles import HandleTable, locator_for
+from .handles import HandleTable, locator_for, verify
 from .tree import DEFAULT_FIELDS, KNOWN_FIELDS
 from .windows import JavaWindow, WindowLookupError, render_windows, resolve_window
 
@@ -409,6 +409,247 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
             + f"\n{rendered.shown} element(s) shown, about {rendered.estimated_tokens} "
             "tokens. Handles are positions, not references: re-snapshot after the window "
             "changes."
+        )
+
+    @server.tool(
+        name="java_find",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
+    )
+    async def java_find(
+        session_id: str,
+        name: str = "",
+        role: str = "",
+        description: str = "",
+        states: str = "",
+        xpath: str = "",
+        max_results: int = 20,
+    ) -> str:
+        """Search an attached window and get a handle for each match.
+
+        Use this when a snapshot is too large to read, or when you know what the control is
+        called and do not want to walk the tree to find it. A snapshot shows you the shape of
+        the window; this asks a question about it.
+
+        Give **exactly one** selector. `name` and `description` are exact matches -- for a
+        substring use `xpath` with `contains()`, which is pyjab's locator syntax:
+        `//push button[@name=contains('Save')]`. `states` takes a comma-joined list such as
+        `"enabled,showing"`.
+
+        Every match gets a handle, and a handle is checked before it is used: the locator
+        recorded here is resolved again later and compared against the role, name, position
+        and bounds seen now. If a match cannot be given a locator that finds it again, it is
+        listed **without** a handle rather than with one that might resolve to something else.
+
+        Args:
+            session_id: From java_attach_window.
+            name: Exact accessible name.
+            role: Role, as pyjab spells it: "push button", "text", "check box", "table".
+            description: Exact accessible description, for controls with no name.
+            states: Comma-joined states, e.g. "enabled,showing".
+            xpath: A pyjab locator, for substrings, unions and paths.
+            max_results: Stop after this many matches.
+
+        Returns:
+            One line per match with its handle and locator, or a measurement that nothing
+            matched -- with the selector that found nothing in it, so the next attempt can be
+            narrower rather than identical.
+
+        Errors:
+            ``is_error`` for an unknown session id, for no selector or more than one, or when
+            the window can no longer be read.
+        """
+        selectors = {
+            "name": name, "role": role, "description": description,
+            "states": states, "xpath": xpath,
+        }
+        chosen = {key: value for key, value in selectors.items() if value}
+        if len(chosen) != 1:
+            raise ToolError(
+                "give exactly one selector, and these are the ones there are: "
+                + ", ".join(sorted(selectors))
+                + f". You gave {sorted(chosen) if chosen else 'none'}."
+            )
+        by, value = next(iter(chosen.items()))
+        try:
+            bridge = await state.started_bridge()
+            attached = state.session(session_id)
+            matches = await bridge.call_backend(
+                "find", attached.window_id, by=by, value=value, limit=max(1, max_results)
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise _tool_error(exc) from exc
+
+        if not matches:
+            return (
+                f"Nothing in window {attached.title!r} matches {by}={value!r}. "
+                "The search covers this window's whole tree, so an empty result means no "
+                "element matched rather than that the view was cut short. Names are exact: "
+                "for part of a name use xpath, "
+                "e.g. xpath=\"//push button[@name=contains('Save')]\"."
+            )
+
+        lines = [f"{len(matches)} match(es) for {by}={value!r}:"]
+        unaddressable = 0
+        for record, locator in matches:
+            if locator is None:
+                unaddressable += 1
+                lines.append(f"  (no handle) {record.label}")
+                continue
+            handle = state.handles.add(
+                session_id=session_id, window_id=attached.window_id,
+                locator=locator, expected=record,
+            )
+            lines.append(f"  [{handle}] {record.label}  {locator}")
+        if unaddressable:
+            lines.append(
+                f"{unaddressable} match(es) have no handle because no locator found them "
+                "again reliably. They are real elements; they simply cannot be named by a "
+                "later call. Use java_snapshot and a handle from there instead."
+            )
+        return "\n".join(lines)
+
+    @server.tool(
+        name="java_get_element",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
+    )
+    async def java_get_element(session_id: str, handle: str) -> str:
+        """Everything known about one element, and whether it is still the same element.
+
+        Use this after java_snapshot or java_find to look at one control in detail, or to
+        confirm that a handle still points at what it did. The handle is resolved again and
+        compared against what was recorded when it was handed out; if anything differs --
+        role, name, position among siblings, bounds -- this reports the difference instead of
+        presenting the element as if nothing had changed.
+
+        Args:
+            session_id: From java_attach_window.
+            handle: An ``e:...`` handle from a snapshot or a find.
+
+        Returns:
+            The element's role, name, description, states, bounds, index and depth, its
+            locator, and the verification result.
+
+        Errors:
+            ``is_error`` for an unknown handle (the message says to take a fresh snapshot),
+            for a handle belonging to another session, or when the element has changed.
+        """
+        try:
+            bridge = await state.started_bridge()
+            attached = state.session(session_id)
+            entry = state.handles.get(handle)
+            if entry is None:
+                live = state.handles.handles_for(session_id)
+                raise PyjabUnavailable(
+                    f"unknown handle {handle!r}."
+                    + (f" This session has {len(live)} live handle(s); "
+                       "java_snapshot lists them." if live else
+                       " No handles are live for this session -- take a java_snapshot first.")
+                )
+            if entry.session_id != session_id:
+                raise PyjabUnavailable(
+                    f"handle {handle!r} belongs to session {entry.session_id!r}, not "
+                    f"{session_id!r}."
+                )
+            resolved = await bridge.call_backend("resolve", entry.window_id, entry.locator)
+        except Exception as exc:  # noqa: BLE001
+            raise _tool_error(exc) from exc
+
+        result = verify(entry.expected, resolved)
+        if not result.ok:
+            raise ToolError(result.message() + f" (handle {handle}, locator {entry.locator})")
+
+        record = resolved
+        bounds = (
+            f"({record.bounds.get('x')},{record.bounds.get('y')},"
+            f"{record.bounds.get('width')}x{record.bounds.get('height')})"
+            if record.bounds else "not reported"
+        )
+        return "\n".join([
+            f"[{handle}] {record.label}",
+            f"  locator:     {entry.locator}",
+            f"  description: {record.description!r}" if record.description else "  description: (none)",
+            f"  states:      {', '.join(record.states) if record.states else '(none)'}",
+            f"  bounds:      {bounds}",
+            f"  index:       {record.index_in_parent}",
+            f"  depth:       {record.object_depth}",
+            f"  children:    {record.children_count}",
+            "  verified:    unchanged since the snapshot",
+        ])
+
+    @server.tool(
+        name="java_get_text",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
+    )
+    async def java_get_text(
+        session_id: str, handle: str, start: int = 0, length: int = 2000
+    ) -> str:
+        """Read the text of an element: a label, a text field, a table cell, a document.
+
+        Use this on a handle from a snapshot or a find. The same verification applies, so a
+        text field that has been replaced since the snapshot reports the change instead of
+        returning whatever is there now.
+
+        Long values are cut, and the cut is reported: the reply says how much of the whole
+        text it carries and what the whole text's length is, so a partial read is never
+        presented as the value.
+
+        Args:
+            session_id: From java_attach_window.
+            handle: An ``e:...`` handle from a snapshot or a find.
+            start: Character to start at, 0-based.
+            length: How many characters to return.
+
+        Returns:
+            The slice of the element's text, with its length and whether it was cut.
+
+        Errors:
+            ``is_error`` for an unknown handle, a handle from another session, an element
+            that has changed, or an element with no text at all -- which is reported as such,
+            because "this control has no text" and "this control is empty" are different
+            answers.
+        """
+        try:
+            bridge = await state.started_bridge()
+            attached = state.session(session_id)
+            entry = state.handles.get(handle)
+            if entry is None:
+                live = state.handles.handles_for(session_id)
+                raise PyjabUnavailable(
+                    f"unknown handle {handle!r}."
+                    + (f" This session has {len(live)} live handle(s); "
+                       "java_snapshot lists them." if live else
+                       " No handles are live for this session -- take a java_snapshot first.")
+                )
+            if entry.session_id != session_id:
+                raise PyjabUnavailable(
+                    f"handle {handle!r} belongs to session {entry.session_id!r}, not "
+                    f"{session_id!r}."
+                )
+            resolved = await bridge.call_backend("resolve", entry.window_id, entry.locator)
+            result = verify(entry.expected, resolved)
+            if not result.ok:
+                raise ToolError(
+                    result.message() + f" (handle {handle}, locator {entry.locator})"
+                )
+            text = await bridge.call_backend("text", entry.window_id, entry.locator)
+        except Exception as exc:  # noqa: BLE001
+            raise _tool_error(exc) from exc
+
+        if text is None:
+            return (
+                f"{resolved.label} has no text interface, so it has no text to read. "
+                "That is not the same as being empty: an empty text field returns an empty "
+                "string instead."
+            )
+        start = max(0, start)
+        chunk = text[start:start + max(1, length)]
+        cut = start + len(chunk) < len(text)
+        return (
+            f"{resolved.label}: {len(text)} character(s)"
+            + (f", showing {start}..{start + len(chunk)}" if (start or cut) else "")
+            + "\n"
+            + chunk
+            + ("\n[cut: ask again with start=" f"{start + len(chunk)}]" if cut else "")
         )
 
     return server

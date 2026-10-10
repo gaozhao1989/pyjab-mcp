@@ -161,6 +161,26 @@ under **Unreleased** until it is tagged.
   `bin`). A mismatched pair fails as "pyjab cannot see my window", which is the hardest
   failure in this project to tell apart from a bridge that is simply not enabled.
 
+### Added
+
+* **M3: `java_find`, `java_get_element` and `java_get_text`.** A snapshot shows the shape of a
+  window; these ask questions about it.
+
+  `java_find` takes exactly one selector — `name`, `role`, `description`, `states` or `xpath`
+  (so substrings via pyjab's `contains()`) — and returns a handle per match. A match is only
+  given a handle if a locator finds *it* again: the candidates are tried in order, most
+  survivable first, and each is resolved and compared before it is kept. A match that no
+  locator can pin down is listed **without** a handle, because D2 is explicit that a handle
+  which might point at something else is worse than no handle. Every element the search hands
+  over is released, including the ones past the result limit — the shape of the leak pyjab's
+  own walk had to be fixed for.
+
+  `java_get_element` reports one element in full and says whether it is still the element it
+  was; `java_get_text` reads its text, slices it client-side (pyjab's only public text API
+  returns the whole string), and reports how much of the whole it carries. An element with no
+  text interface says so, which is a different answer from an empty string and is reported as
+  one.
+
 ### Fixed
 
 * **The handle path called a method ``JABDriver`` does not have.** `resolve_driver` released

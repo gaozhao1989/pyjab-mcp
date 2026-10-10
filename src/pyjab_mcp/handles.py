@@ -110,6 +110,69 @@ def locator_for(walk: Walk, index: int) -> Optional[str]:
     return "//" + "/".join(steps)
 
 
+def locator_candidates(record: Record) -> "Tuple[str, ...]":
+    """Locators that should find *record*, most survivable first.
+
+    Ordered by what survives a change in the application, which is pyjab's own ordering for
+    the same problem in ``inspector.suggest_locators``: a name is stable, an index is not, so
+    the index appears only as a fallback and only alongside the name when there is one.
+
+    This exists for elements that were *found* rather than *walked*: a walk knows the path
+    from the window and :func:`locator_for` can write it out, while a search result knows only
+    what it is. The caller resolves each candidate and keeps the first that comes back the
+    same element, which is the disambiguation D2 asks for -- and an element none of them can
+    find is one this project refuses to hand out a handle for.
+    """
+    role = record.role
+    candidates: "List[str]" = []
+
+    # A description is usable on its own, not only as a tie-breaker next to a name: in an
+    # accessibility tree an unnamed control with a description is an ordinary thing, and it
+    # is addressable. (pyjab's `suggest_locators` offers the description only alongside a
+    # name; this is a superset, which is safe because every candidate is resolved and checked
+    # before it becomes a handle.)
+    try:
+        by_name = f"[@name={_quote(record.name)}]" if record.name else ""
+        by_description = (
+            f"[@description={_quote(record.description)}]" if record.description else ""
+        )
+    except ValueError:
+        # The name holds both kinds of quote and cannot be an xpath literal. Skipping those
+        # candidates leaves the index ones, which is better than raising: the element is still
+        # addressable, just less specifically.
+        by_name = by_description = ""
+
+    if by_name:
+        candidates.append(f"//{role}{by_name}")
+        if by_description:
+            candidates.append(f"//{role}{by_name}{by_description}")
+        prefix = f"//{role}{by_name}"
+    elif by_description:
+        candidates.append(f"//{role}{by_description}")
+        prefix = f"//{role}{by_description}"
+    else:
+        prefix = f"//{role}"
+
+    if record.index_in_parent >= 0:
+        candidates.append(f"{prefix}[@indexinparent={record.index_in_parent}]")
+    if not candidates and role:
+        candidates.append(f"//{role}")
+    return tuple(candidates)
+
+
+def _quote(value: str) -> str:
+    """Quote for an xpath literal, picking the quote the value does not contain.
+
+    A name holding both kinds of quote cannot be expressed as a literal at all, and saying so
+    is better than emitting something that parses as a different locator.
+    """
+    if "'" not in value:
+        return f"'{value}'"
+    if '"' not in value:
+        return f'"{value}"'
+    raise ValueError(f"the name contains both quote characters: {value!r}")
+
+
 def verify(expected: Record, actual: Record) -> Verification:
     """Compare a re-resolved element against the record the snapshot stored.
 

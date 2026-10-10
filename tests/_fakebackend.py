@@ -44,6 +44,9 @@ class FakeBackend:
         items: Sequence = (),
         attach_error: Optional[BaseException] = None,
         listing_error: Optional[BaseException] = None,
+        matches: Optional[Dict[Any, Any]] = None,
+        locators: Optional[Dict[str, Any]] = None,
+        texts: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.owner = threading.get_ident()
         self.windows = list(windows)
@@ -52,6 +55,9 @@ class FakeBackend:
         self.window_calls = 0
         self.attach_calls = 0
         self.walk_calls = 0
+        self.find_calls = 0
+        self.resolve_calls = 0
+        self.text_calls = 0
         self.close_calls = 0
         self.closed = False
         self.threads_seen: "set[int]" = set()
@@ -59,6 +65,12 @@ class FakeBackend:
         self.attach_error = attach_error
         self.listing_error = listing_error
         self.attached: "Dict[str, AttachedWindow]" = {}
+        #: ``(by, value) -> [(Record, locator | None)]`` for the search the tool runs.
+        self.matches = dict(matches or {})
+        #: ``locator -> record`` for re-resolution.
+        self.locators = dict(locators or {})
+        #: ``locator -> text``.
+        self.texts = dict(texts or {})
 
     def bind(self, owner: int) -> "FakeBackend":
         """Declare which thread owns this backend.
@@ -126,7 +138,27 @@ class FakeBackend:
 
     def resolve(self, window_id: str, locator: str) -> "Record":
         self._check("resolve")
-        raise AssertionError("this fake does not resolve locators yet")
+        self.resolve_calls += 1
+        if locator not in self.locators:
+            from pyjab_mcp.backend import PyjabUnavailable
+
+            raise PyjabUnavailable(f"the locator {locator!r} no longer resolves")
+        return Record.from_pyjab(self.locators[locator])
+
+    def find(self, window_id: str, *, by: str, value: Any, visible: bool = False,
+             limit: int = 20):
+        self._check("find")
+        self.find_calls += 1
+        return list(self.matches.get((by, value), []))[:limit]
+
+    def text(self, window_id: str, locator: str) -> "Optional[str]":
+        self._check("text")
+        self.text_calls += 1
+        if locator not in self.texts:
+            from pyjab_mcp.backend import PyjabUnavailable
+
+            raise PyjabUnavailable(f"the locator {locator!r} no longer resolves")
+        return self.texts[locator]
 
     def close(self) -> None:
         self._check("close")

@@ -10,12 +10,16 @@ which is what makes this usable against a production Java client that you cannot
 
 ## Status
 
-**M1 and M2 are implemented; nothing here has driven a live Java application yet.**
-`java_diagnostics`, `java_list_windows`, `java_attach_window` and `java_snapshot` exist and
-are covered by the L1 suite plus a real stdio handshake, but **no tool has yet been run
-against a real window** — that needs a Windows desktop, and the end-to-end run is a separate
-step. It needs `pyjab>=1.9.0`, which is the first release with the tree walk a snapshot is
-built on.
+**M1, M2 and M3 are implemented.** `java_diagnostics`, `java_list_windows`,
+`java_attach_window`, `java_snapshot`, `java_find`, `java_get_element` and `java_get_text`.
+It needs `pyjab>=1.9.0`, which is the first release with the tree walk a snapshot is built on.
+
+Live behaviour is verified on a hosted Windows runner by `windows-gui.yml`: the end-to-end
+suite attaches to a real Swing application, snapshots it, resolves a handle against the real
+element, and checks that a window opened *after* the bridge had been idle is still seen. That
+last one is the reason the layer exists — a message pump on the wrong thread passes every
+other test in this repository. What it still cannot cover is your application: the run drives
+pyjab's test app, and the one that matters is the one you care about.
 
 Two gaps in pyjab are recorded rather than worked around, and both are visible in
 `java_diagnostics` (`AGENTS.md` §6.2):

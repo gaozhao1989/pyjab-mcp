@@ -25,9 +25,22 @@ import importlib.util
 import json
 import subprocess
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Protocol,
+    Sequence,
+    Tuple,
+)
 
+from .handles import locator_candidates, verify
 from .tree import Record, Walk, walked_nodes
 from .windows import JavaWindow
 
@@ -270,6 +283,13 @@ class Backend(Protocol):
     def resolve(self, window_id: str, locator: str) -> Record:
         """Re-resolve a locator against the attached window."""
 
+    def find(self, window_id: str, *, by: str, value: Any, visible: bool = False,
+             limit: int = 20) -> "List[Tuple[Record, Optional[str]]]":
+        """Search the window, returning each match with the locator that finds it again."""
+
+    def text(self, window_id: str, locator: str) -> Optional[str]:
+        """The text of the element a locator resolves to, or None when it has none."""
+
     def close(self) -> None:
         """Release what this backend holds, without touching the applications it observes."""
 
@@ -380,6 +400,17 @@ class PyjabBackend:
         """Re-resolve a locator against the attached window.  See :func:`resolve_driver`."""
         return resolve_driver(self._driver(window_id), locator)
 
+    def find(self, window_id: str, *, by: str, value: Any, visible: bool = False,
+             limit: int = 20) -> "List[Tuple[Record, Optional[str]]]":
+        """Search the attached window.  See :func:`find_driver`."""
+        return find_driver(
+            self._driver(window_id), by=by, value=value, visible=visible, limit=limit
+        )
+
+    def text(self, window_id: str, locator: str) -> Optional[str]:
+        """Read text through the attached window.  See :func:`text_driver`."""
+        return text_driver(self._driver(window_id), locator)
+
     def close(self) -> None:
         """Drop the bound drivers **without ending the applications they observe**.
 
@@ -454,16 +485,22 @@ def walk_driver(driver: Any, *, max_depth: Optional[int] = None,
     )
 
 
-def resolve_driver(driver: Any, locator: str) -> Record:
-    """Re-resolve *locator* and release the reference before returning.
+@contextmanager
+def element_for(driver: Any, locator: str) -> "Iterator[Any]":
+    """Yield the element *locator* resolves to, and give its reference back afterwards.
 
-    The reference is released in a ``finally`` because the verification happens between
-    taking it and giving it back, and a check that raises must not leak. This is the whole
-    of D2 in four lines: take it, read it, check it, give it back.
+    The reference is released in a ``finally`` because the caller does work between taking it
+    and giving it back, and work that raises must not leak -- which is the shape of the
+    ownership rule pyjab has broken twice, and issue #43's shape.
+
+    ``element.release_jabelement()`` and not ``driver.release_jabelement(element)``: the
+    release belongs to ``JABElement``, and the version of this file that said otherwise
+    survived the L1 suite because the fake was shaped like the guess. A contract test on a
+    real Windows runner is what found it.
 
     Raises:
-        PyjabUnavailable: When the locator no longer resolves.  That is an ordinary outcome
-            of a tree that moved, so it is reported with the locator in it.
+        PyjabUnavailable: When the locator does not resolve. That is an ordinary outcome of a
+            tree that moved, so it is reported with the locator in it.
     """
     try:
         element = driver.find_element_by_xpath(locator)
@@ -474,17 +511,80 @@ def resolve_driver(driver: Any, locator: str) -> Record:
     if element is None:
         raise PyjabUnavailable(f"the locator {locator!r} no longer resolves")
     try:
-        return Record.from_pyjab(element.as_record())
+        yield element
     finally:
-        # The caller never sees the element, so this is the only place it can be released --
-        # and releasing it is what keeps a long session from accumulating Java objects,
-        # which is issue #43's shape.
-        #
-        # `element.release_jabelement()`, not `driver.release_jabelement(element)`:
-        # JABDriver has no such method, and this line said it did until the contract test ran
-        # on a real Windows runner and failed. The L1 fake was shaped the same way as the
-        # mistake, so it agreed -- see tests/_fakedriver.py, which now mirrors pyjab.
         element.release_jabelement()
+
+
+def resolve_driver(driver: Any, locator: str) -> Record:
+    """Re-resolve *locator* and return what is there now, holding nothing afterwards."""
+    with element_for(driver, locator) as element:
+        return Record.from_pyjab(element.as_record())
+
+
+def text_driver(driver: Any, locator: str) -> Optional[str]:
+    """The text of the element *locator* resolves to, or None when it has no text interface.
+
+    pyjab's only public text API returns the whole string; there is no public range read. So
+    the whole value is fetched and the tool slices what it returns, which is a real cost on a
+    document-sized text area rather than a hot path -- stated here because the alternative
+    (reaching for the private range helpers) is what this project does not do.
+    """
+    with element_for(driver, locator) as element:
+        return element.text
+
+
+def find_driver(driver: Any, *, by: str, value: Any, visible: bool = False,
+                limit: int = 20) -> "List[Tuple[Record, Optional[str]]]":
+    """Search the window and return each match with the locator that finds it again.
+
+    The search methods hand out elements this function owns, so every one of them is released
+    here. Each match then gets a locator: the candidates from
+    :func:`~pyjab_mcp.handles.locator_candidates` are resolved one at a time and the first
+    that comes back as the same element wins. **An element none of them can find gets no
+    locator** -- D2 is explicit that a locator which might point at something else is worse
+    than no handle at all.
+
+    ``by`` is matched with an explicit chain rather than ``getattr(driver, f"find_elements_by_{by}")``
+    on purpose: a dynamically built method name is invisible to
+    ``tools/check_pyjab_api_surface.py``, and a guard with a hole in it is worse than no guard.
+    """
+    methods = {
+        "name": driver.find_elements_by_name,
+        "role": driver.find_elements_by_role,
+        "description": driver.find_elements_by_description,
+        "states": driver.find_elements_by_states,
+        "xpath": driver.find_elements_by_xpath,
+    }
+    method = methods.get(by)
+    if method is None:
+        raise ValueError(
+            f"unknown search {by!r}; use one of {', '.join(sorted(methods))}"
+        )
+
+    elements = method(value, visible) or []
+    found: "List[Tuple[Record, Optional[str]]]" = []
+    try:
+        for element in elements[:limit]:
+            record = Record.from_pyjab(element.as_record())
+            found.append((record, _first_matching_locator(driver, record)))
+    finally:
+        # Every element the search handed over is ours, including the ones past the limit.
+        for element in elements:
+            element.release_jabelement()
+    return found
+
+
+def _first_matching_locator(driver: Any, record: Record) -> Optional[str]:
+    """The first locator candidate that resolves back to *record*, or None."""
+    for candidate in locator_candidates(record):
+        try:
+            resolved = resolve_driver(driver, candidate)
+        except PyjabUnavailable:
+            continue
+        if verify(record, resolved).ok:
+            return candidate
+    return None
 
 
 def _public_window_listing() -> Optional[Callable[[], Any]]:

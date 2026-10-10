@@ -141,7 +141,7 @@ MINIMAL_ARCHITECTURE = """# Architecture
 | diagnostics | `java_diagnostics` | M1 |
 | session | `java_list_windows`, `java_attach_window` | M1 |
 | observe | `java_snapshot` | M2 |
-| observe | `java_find` | M3 |
+| observe | `java_get_table` | M4 |
 """
 
 
@@ -183,10 +183,10 @@ def test_the_documented_surface_guard_catches_a_planned_tool_already_registered(
     problems = docs_guard.check(
         architecture=page, package=REPO_ROOT / "src" / "pyjab_mcp",
         registered=["java_diagnostics", "java_list_windows", "java_attach_window",
-                    "java_find"],
+                    "java_get_table"],
     )
 
-    assert any("NOT YET: java_find" in problem for problem in problems)
+    assert any("NOT YET: java_get_table" in problem for problem in problems)
 
 
 def test_the_documented_surface_guard_catches_an_undocumented_module(tmp_path):

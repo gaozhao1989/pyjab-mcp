@@ -13,6 +13,7 @@ from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 
 from pyjab_mcp.backend import PyjabApiGap, PyjabUnavailable, requirement
 from pyjab_mcp.server import ServerState, create_server
+from pyjab_mcp.tree import Record
 from tests._fakebackend import FakeBackend, FakeFactory, window
 from tests._fakedriver import record
 
@@ -24,6 +25,9 @@ TOOL_ORDER = [
     "java_list_windows",
     "java_attach_window",
     "java_snapshot",
+    "java_find",
+    "java_get_element",
+    "java_get_text",
 ]
 
 
@@ -239,3 +243,196 @@ async def test_snapshot_rejects_an_unknown_field():
         )
 
     assert "unknown field" in str(caught.value)
+
+
+# ---------------------------------------------------------------------------------
+# M3: the read tools
+# ---------------------------------------------------------------------------------
+
+BUTTON = Record.from_pyjab(record("push button", "OK", index_in_parent=1))
+BUTTON_LOCATOR = "//push button[@name='OK']"
+
+
+async def attached_server(**kwargs):
+    """A server with one attached window and whatever the backend was told to answer."""
+    backend = FakeBackend(**kwargs)
+    server, state = make_server(backend)
+    attached = await server.call_tool("java_attach_window", {"title": "Alpha"})
+    session_id = (await text_of(attached)).split(" ", 1)[0]
+    return server, state, backend, session_id
+
+
+async def test_find_returns_a_handle_per_match():
+    server, state, backend, session_id = await attached_server(
+        matches={("name", "OK"): [(BUTTON, BUTTON_LOCATOR)]},
+    )
+
+    result = await server.call_tool("java_find", {"session_id": session_id, "name": "OK"})
+
+    assert result.is_error is False
+    text = await text_of(result)
+    assert "[e:" in text and BUTTON_LOCATOR in text
+    assert backend.find_calls == 1
+    assert len(state.handles) == 1
+
+
+async def test_find_reports_a_measurement_when_nothing_matches():
+    server, _state, _backend, session_id = await attached_server(matches={})
+
+    result = await server.call_tool(
+        "java_find", {"session_id": session_id, "role": "push button"}
+    )
+
+    text = await text_of(result)
+    assert "Nothing in window" in text
+    assert "contains(" in text, "an empty result should say how to widen the search"
+
+
+async def test_find_requires_exactly_one_selector():
+    server, _state, _backend, session_id = await attached_server()
+
+    with pytest.raises(ToolError) as none_given:
+        await server.call_tool("java_find", {"session_id": session_id})
+    assert "exactly one selector" in str(none_given.value)
+
+    with pytest.raises(ToolError) as two_given:
+        await server.call_tool(
+            "java_find", {"session_id": session_id, "name": "OK", "role": "push button"}
+        )
+    assert "exactly one selector" in str(two_given.value)
+
+
+async def test_find_lists_a_match_it_cannot_address_without_a_handle():
+    server, state, _backend, session_id = await attached_server(
+        matches={("name", "OK"): [(BUTTON, None)]},
+    )
+
+    result = await server.call_tool("java_find", {"session_id": session_id, "name": "OK"})
+
+    text = await text_of(result)
+    assert "(no handle)" in text
+    assert "no locator found them again reliably" in text
+    assert len(state.handles) == 0
+
+
+async def test_get_element_renders_the_record_and_says_it_is_unchanged():
+    server, _state, _backend, session_id = await attached_server(
+        matches={("name", "OK"): [(BUTTON, BUTTON_LOCATOR)]},
+        locators={BUTTON_LOCATOR: record("push button", "OK", index_in_parent=1)},
+    )
+    found = await server.call_tool("java_find", {"session_id": session_id, "name": "OK"})
+    handle = (await text_of(found)).split("[", 1)[1].split("]", 1)[0]
+
+    result = await server.call_tool(
+        "java_get_element", {"session_id": session_id, "handle": handle}
+    )
+
+    assert result.is_error is False
+    text = await text_of(result)
+    assert 'push button "OK"' in text
+    assert "verified:    unchanged" in text
+    assert BUTTON_LOCATOR in text
+
+
+async def test_get_element_refuses_an_element_that_changed():
+    """D2's whole point: the difference is reported instead of acted on."""
+    server, _state, _backend, session_id = await attached_server(
+        matches={("name", "OK"): [(BUTTON, BUTTON_LOCATOR)]},
+        locators={BUTTON_LOCATOR: record("push button", "Cancel", index_in_parent=1)},
+    )
+    found = await server.call_tool("java_find", {"session_id": session_id, "name": "OK"})
+    handle = (await text_of(found)).split("[", 1)[1].split("]", 1)[0]
+
+    with pytest.raises(ToolError) as caught:
+        await server.call_tool(
+            "java_get_element", {"session_id": session_id, "handle": handle}
+        )
+
+    assert "name was 'OK', now 'Cancel'" in str(caught.value)
+    assert "fresh snapshot" in str(caught.value)
+
+
+async def test_an_unknown_handle_says_how_to_get_one():
+    server, _state, _backend, session_id = await attached_server()
+
+    with pytest.raises(ToolError) as caught:
+        await server.call_tool(
+            "java_get_element", {"session_id": session_id, "handle": "e:ffff"}
+        )
+
+    assert "unknown handle" in str(caught.value)
+    assert "java_snapshot" in str(caught.value)
+
+
+async def test_a_handle_from_another_session_is_refused():
+    server, state, _backend, session_id = await attached_server(
+        locators={BUTTON_LOCATOR: record("push button", "OK")},
+    )
+    other = state.new_session(next(iter(state.sessions.values())))
+    handle = state.handles.add(
+        session_id=other, window_id="w1", locator=BUTTON_LOCATOR,
+        expected=Record.from_pyjab(record("push button", "OK")),
+    )
+
+    with pytest.raises(ToolError) as caught:
+        await server.call_tool(
+            "java_get_text", {"session_id": session_id, "handle": handle}
+        )
+
+    assert "belongs to session" in str(caught.value)
+
+
+async def test_get_text_returns_the_text_and_its_length():
+    server, _state, _backend, session_id = await attached_server(
+        matches={("name", "OK"): [(BUTTON, BUTTON_LOCATOR)]},
+        locators={BUTTON_LOCATOR: record("push button", "OK", index_in_parent=1)},
+        texts={BUTTON_LOCATOR: "hello world"},
+    )
+    found = await server.call_tool("java_find", {"session_id": session_id, "name": "OK"})
+    handle = (await text_of(found)).split("[", 1)[1].split("]", 1)[0]
+
+    result = await server.call_tool(
+        "java_get_text", {"session_id": session_id, "handle": handle}
+    )
+
+    text = await text_of(result)
+    assert "11 character(s)" in text
+    assert "hello world" in text
+    assert "cut" not in text
+
+
+async def test_get_text_slices_and_says_it_cut():
+    server, _state, _backend, session_id = await attached_server(
+        matches={("name", "OK"): [(BUTTON, BUTTON_LOCATOR)]},
+        locators={BUTTON_LOCATOR: record("push button", "OK", index_in_parent=1)},
+        texts={BUTTON_LOCATOR: "0123456789"},
+    )
+    found = await server.call_tool("java_find", {"session_id": session_id, "name": "OK"})
+    handle = (await text_of(found)).split("[", 1)[1].split("]", 1)[0]
+
+    result = await server.call_tool(
+        "java_get_text", {"session_id": session_id, "handle": handle, "start": 2, "length": 3}
+    )
+
+    text = await text_of(result)
+    assert "showing 2..5" in text
+    assert "234" in text
+    assert "start=5" in text
+
+
+async def test_get_text_distinguishes_no_text_interface_from_empty_text():
+    server, _state, _backend, session_id = await attached_server(
+        matches={("name", "OK"): [(BUTTON, BUTTON_LOCATOR)]},
+        locators={BUTTON_LOCATOR: record("push button", "OK", index_in_parent=1)},
+        texts={BUTTON_LOCATOR: None},
+    )
+    found = await server.call_tool("java_find", {"session_id": session_id, "name": "OK"})
+    handle = (await text_of(found)).split("[", 1)[1].split("]", 1)[0]
+
+    result = await server.call_tool(
+        "java_get_text", {"session_id": session_id, "handle": handle}
+    )
+
+    text = await text_of(result)
+    assert "no text interface" in text
+    assert "not the same as being empty" in text

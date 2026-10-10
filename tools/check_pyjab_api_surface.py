@@ -223,6 +223,37 @@ SURFACE: Dict[Touchpoint, Entry] = {
         "is the walk's own record of having hit its limit; this project also tracks its own "
         "early stop, since stopping the iteration is not the same as pyjab stopping it.",
     ),
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> text"): Entry(
+        PUBLIC, "1.8.0",
+        "The only public text API: a property returning the whole string, None when the "
+        "element has no Accessible Text interface, and \"\" when it has one and is empty "
+        "(pyjab changed it from raising, which turned 'the field is now empty' into a "
+        "RuntimeError). There is no public range read, so java_get_text fetches the whole "
+        "value and slices what it returns rather than reaching for the private helpers in "
+        "common/textreader.py.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.find_elements_by_name"): Entry(
+        PUBLIC, "1.8.0",
+        "Search by exact accessible name. Returns elements the caller owns, so find_driver "
+        "releases every one of them -- including the ones past its result limit, which is the "
+        "leak a 'break' would leave.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.find_elements_by_role"): Entry(
+        PUBLIC, "1.8.0",
+        "Search by role, as pyjab's role names spell it ('push button', 'text', ...).",
+    ),
+    ("pyjab.jabdriver", "JABDriver.find_elements_by_description"): Entry(
+        PUBLIC, "1.8.0",
+        "Search by accessible description, for controls whose name is empty.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.find_elements_by_states"): Entry(
+        PUBLIC, "1.8.0",
+        "Search by state list; takes a list or a comma-joined string.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.find_elements_by_xpath"): Entry(
+        PUBLIC, "1.8.0",
+        "Search by locator, which is also what java_find's xpath selector uses.",
+    ),
     ("pyjab.jabdriver", "JABDriver.title"): Entry(
         PUBLIC, "1.8.0",
         "Documented property; reported with the session.",

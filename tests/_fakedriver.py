@@ -68,19 +68,29 @@ class FakeElement:
         self.path = path
         self.released = False
 
-    def as_record(self) -> Dict[str, Any]:
+    def _read(self) -> None:
+        """Both reads go through here, so 'a read that raises' covers text as well."""
         if self.released:
             raise UseAfterRelease(f"{self.path} was read after release")
         if self.path in self._driver.explode:
-            # A read that raises is the interesting case for ownership: the reference has
-            # been taken and the caller still has to give it back.
+            # The interesting case for ownership: the reference has been taken and the caller
+            # still has to give it back.
             raise RuntimeError(f"the bridge refused to read {self.path}")
+
+    def as_record(self) -> Dict[str, Any]:
+        self._read()
         return dict(self._data)
 
     def walk(self, max_depth: Optional[int] = None,
              limit: Optional[int] = None) -> "FakeTree":
         """pyjab's ``JABElement.walk``, in the shape ``walk_driver`` expects."""
         return self._driver.make_tree(max_depth, limit)
+
+    @property
+    def text(self) -> "Optional[str]":
+        """pyjab's ``JABElement.text``: the whole string, None when there is no text interface."""
+        self._read()
+        return self._driver.element_text(self.path)
 
     def release_jabelement(self) -> None:
         """pyjab's ``JABElement.release_jabelement``: the element gives its own reference back.
@@ -169,6 +179,8 @@ class FakeDriver:
         locators: Optional[Mapping[str, Any]] = None,
         walk_limit: Optional[int] = None,
         explode: Sequence[str] = (),
+        search: Optional[Mapping[Any, Sequence[Mapping[str, Any]]]] = None,
+        text: Optional[Mapping[str, Optional[str]]] = None,
     ) -> None:
         self._root = FakeElement(
             root or record("root pane", "", children_count=len(items)), self, "root"
@@ -177,6 +189,9 @@ class FakeDriver:
         self._locators = dict(locators or {})
         self._walk_limit = walk_limit
         self.explode = set(explode)
+        self._search_records = {key: list(value) for key, value in (search or {}).items()}
+        self._text = dict(text or {})
+        self.searches: List[Dict[str, Any]] = []
         self.outstanding = 0
         self.handed_out = 0
         self.walk_calls: List[Dict[str, Any]] = []
@@ -199,6 +214,36 @@ class FakeDriver:
         self.outstanding += 1
         self.handed_out += 1
         return FakeElement(target, self, locator)
+
+    # -- what find_driver uses -------------------------------------------------------
+
+    def search_elements(self, by: str, value: Any) -> "List[FakeElement]":
+        self.searches.append({"by": by, "value": value})
+        records = self._search_records.get((by, value), [])
+        elements = []
+        for index, data in enumerate(records):
+            self.outstanding += 1
+            self.handed_out += 1
+            elements.append(FakeElement(data, self, f"{by}:{value}:{index}"))
+        return elements
+
+    def find_elements_by_name(self, value: Any, visible: bool = False) -> "List[FakeElement]":
+        return self.search_elements("name", value)
+
+    def find_elements_by_role(self, value: Any, visible: bool = False) -> "List[FakeElement]":
+        return self.search_elements("role", value)
+
+    def find_elements_by_description(self, value: Any, visible: bool = False) -> "List[FakeElement]":
+        return self.search_elements("description", value)
+
+    def find_elements_by_states(self, value: Any, visible: bool = False) -> "List[FakeElement]":
+        return self.search_elements("states", value)
+
+    def find_elements_by_xpath(self, value: Any, visible: bool = False) -> "List[FakeElement]":
+        return self.search_elements("xpath", value)
+
+    def element_text(self, path: str) -> "Optional[str]":
+        return self._text.get(path)
 
     # -- convenience -----------------------------------------------------------------
 

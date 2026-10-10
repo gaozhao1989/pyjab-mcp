@@ -188,7 +188,19 @@ def test_releasing_a_reference_is_something_the_element_does():
 
 @windows_only
 def test_the_walk_result_still_reports_its_own_truncation():
+    """``truncated`` is a property; ``limit_hit`` is set per instance in ``__init__``.
+
+    The second half of that sentence is why this test looks the way it does: an earlier
+    version asserted ``hasattr(JABTree, "limit_hit")``, which is False for an instance
+    attribute, and real CI said so. Asserting the shape rather than a class attribute is what
+    makes it both true and useful.
+    """
     from pyjab.jabelement import JABTree
 
-    for name in ("truncated", "limit_hit", "count"):
-        assert hasattr(JABTree, name), f"JABTree.{name} is read by walk_driver / render"
+    assert isinstance(inspect.getattr_static(JABTree, "truncated"), property), (
+        "walk_driver reads .truncated to tell a cut-short walk from a complete one"
+    )
+    assert "self.limit_hit" in inspect.getsource(JABTree.__init__), (
+        "walk_driver reads .limit_hit as well, because stopping the iteration is not the "
+        "same as pyjab stopping it"
+    )
