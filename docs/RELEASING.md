@@ -59,6 +59,24 @@ The pipeline can only pre-check the **PyPI version** and the **GitHub release**.
 itself** stays manual for a reason that is structural rather than a gap: the tag is what starts
 the run, so a pipeline running on it cannot also be what refuses it.
 
+**When the refusal is legitimate, this is the repair.** The refusal is about a *new* tag whose
+version is not on PyPI. It also fires when the version is on PyPI for a good reason — the tag
+published successfully and a job *after* `pypi` failed, which is what the `registry` job did at
+0.1.0. Do **not** reach for a patch release to fix a metadata publish: that mints a new,
+immutable version for something that is not a code change. The package is already published, so
+publish only the metadata, by hand:
+
+```console
+gh workflow run publish-registry.yml -f version=X.Y.Z
+```
+
+`publish-registry.yml` is `workflow_call` for the normal path and `workflow_dispatch` for exactly
+this repair path. Prefer it over `gh run rerun <id>`: a rerun replays the *tag's* `release.yml`,
+which re-runs `verify` and meets this refusal again, and it is not documented anywhere whether
+`gh run rerun --failed` re-runs a prerequisite job that already succeeded. If anything else
+reached PyPI and genuinely needs a code fix, a patch release is still the answer — see "If the tag
+is wrong" below.
+
 ### The click, and why nothing can stand in for it
 
 The `pypi` environment on `gaozhao1989/pyjab-mcp` has **required reviewers = `gaozhao1989`** and

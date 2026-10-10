@@ -45,8 +45,9 @@ The verdicts, and why each is a refusal
   a release is not permission to continue: an index that could not be read is not an index
   that said the version is absent.
 * ``200`` with a body that cannot be parsed: still **refuse**, because the status said the
-  version is there and the body is not what decides that -- but the line says the body could
-  not be parsed, so an index that answered wrongly is visible rather than implied.
+  version is there and the body is not what decides that -- but the line leads with what was
+  seen (an HTTP 200 whose body is not PyPI's JSON, which a proxy or a captive portal
+  produces) rather than with the verdict, so the two states cannot be confused.
 
 ``--release-code`` is the same status for ``GET /repos/<owner>/<repo>/releases/tags/v<version>``
 and is **informational only: it never changes the verdict and never fails the run.** A
@@ -176,10 +177,14 @@ def decide(
         refused = True
         reported = _reported_version(pypi_body)
         if reported is None:
+            # Lead with what was seen, not with the verdict: PyPI's own 200 always parses, so an
+            # unparsable one is a proxy or a captive portal answering instead. The decision is
+            # the same refusal, but the headline must not tell a maintainer that this index said
+            # the version is there when what actually happened is that the answer was not read.
             lines.append(
-                f"::{verdict}::{PROJECT} {version} is already published ({url}) -- a published "
-                "version cannot be replaced, so this release needs a new version. "
-                "The index's body could not be parsed, so the version it reports is unknown"
+                f"::{verdict}::the index answered 200 for {url} but the body could not be "
+                f"parsed -- treating {version} as already published; confirm by hand before "
+                "bumping a version. A published version cannot be replaced"
             )
         elif reported == version:
             lines.append(
