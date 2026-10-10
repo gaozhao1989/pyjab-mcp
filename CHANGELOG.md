@@ -30,6 +30,17 @@ under **Unreleased** until it is tagged.
 
 ### Changed
 
+* **The aggregator guidance was wrong in two places, measured rather than remembered.** The
+  Registry's own documentation says aggregators *scrape* its read-only API on an infrequent
+  schedule — so the listing follows from the registry entry rather than from a form. Checked
+  each of the four on 2026-10-10: **PulseMCP's submissions are paused** ("we will reopen as soon
+  as it is ready"), **Smithery is not a form at all** (a public Streamable HTTP URL, or a local
+  MCPB bundle — the first is blocked by this project's deliberate stdio-only decision), LobeHub
+  takes a GitHub issue whose template asks for the **official Registry name**, and mcp.so has a
+  `/submit` form. `docs/RELEASING.md` now says that instead of what it assumed.
+
+### Changed
+
 * **`java_send_keys` sends chords where pyjab provides the API.** pyjab closed
   [pyjab#168](https://github.com/gaozhao1989/pyjab/issues/168) as completed and `master` has
   `JABDriver.send_keys`, `JABElement.send_keys` and `Win32Utils.send_keys`, while the newest
