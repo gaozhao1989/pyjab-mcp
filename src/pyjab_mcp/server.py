@@ -1060,12 +1060,15 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
         toolbar shortcut, a keystroke a canvas-drawn control listens for.
 
         **Nothing is focused and nothing is clicked.** The chord goes to whichever window
-        currently has the keyboard focus — normally the attached one, because attaching
-        brought it forward. That is deliberate on pyjab's side: clicking a control to focus
-        its window would activate that control, and a shortcut usually exists to avoid
-        exactly that. If a call seems to do nothing, the window probably does not have focus;
-        `java_click` something harmless in it first, or use `java_wait_for` to watch for the
-        result.
+        currently has the keyboard focus. That is deliberate on pyjab's side: clicking a
+        control to focus its window would activate that control, and a shortcut usually exists
+        to avoid exactly that.
+
+        So if a call seems to do nothing, the window probably does not have focus — and
+        **attaching does not focus it** (measured in pyjab#180). What does bring a window
+        forward is an interactive call: `java_click` something harmless in it, then send the
+        chord. There is no public way to focus a window as such yet, which is
+        [#24](https://github.com/gaozhao1989/pyjab-mcp/issues/24).
 
         Chords are written with `+` between key names and are case-insensitive:
         `ctrl`, `alt`, `shift`, `tab`, `enter`, `escape`, `spacebar`, the arrow keys, and
@@ -1111,9 +1114,11 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
         except Exception as exc:  # noqa: BLE001
             raise _tool_error(exc) from exc
         return (
-            f"Sent {keys!r} to the focused window. Nothing is focused for you, so if the "
-            "application did not react, give the window focus first. Check the result with "
-            "java_get_text, java_snapshot or java_wait_for."
+            f"Sent {keys!r}. The chord goes to whichever window has the keyboard focus, and "
+            "nothing focused one for you: if the application did not react, click something "
+            "harmless in it first — an interactive call is what brings a window forward in "
+            "pyjab (there is no public way to focus one yet: pyjab#180). Then check the "
+            "result with java_get_text, java_snapshot or java_wait_for."
         )
 
     # -----------------------------------------------------------------------------
