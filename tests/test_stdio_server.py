@@ -59,6 +59,23 @@ def test_help_says_what_it_is_and_what_it_needs():
     assert "mcpServers" in result.stdout, "and how a client is supposed to start it"
 
 
+def test_help_says_where_to_get_help():
+    """The support line lives where a person reads, which is `--help`, not the diagnostics report.
+
+    The plan asked for it in `java_diagnostics`'s output (F1). That output is structured findings
+    an agent reads; the address belongs where a human is looking, and the decision is pinned here
+    in both directions so it cannot drift back by accident.
+    """
+    result = run_cli("--help")
+
+    assert result.returncode == 0
+    assert "issues" in result.stdout and "github.com" in result.stdout
+    assert "gaozhao89@qq.com" in result.stdout, "the commercial address is part of it"
+    assert "no licence key" in result.stdout, (
+        "and the line says the free version is complete, which is the part a user wonders about"
+    )
+
+
 def test_an_argument_nobody_reads_is_refused_rather_than_ignored():
     """`--help` used to print nothing and exit 0, which reads as a broken install."""
     result = run_cli("--serve")

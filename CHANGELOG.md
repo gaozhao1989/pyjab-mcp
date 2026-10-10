@@ -29,6 +29,21 @@ under **Unreleased** until it is tagged.
   filter case, and the ordinary case where nothing is added.
 
 ### Added
+
+* **`--help` says where to get help, and what the free version includes.** The plan's F1 asked
+  for a commercial-support line inside `java_diagnostics`'s output; that output is structured
+  findings an agent reads to work out what is wrong with an environment, and a support address
+  in it is prose addressed to somebody who is not there. It goes where a person is looking
+  instead — `--help` and the README — with the sentence a user actually wonders about: no
+  licence key, no quota, nothing held back. Two tests pin that decision in both directions.
+
+* **The enterprise gaps are documented rather than implied.** The plan's F4 reserved five
+  capabilities architecturally and never wrote them down: remote transport, multi-tenancy, an
+  audit log, general batch execution, and CI integration. The README now lists each with what
+  adding it would take — a policy, an authentication story, a decision about user data — because
+  "we did not think about it" reads worse than "this is deliberately stdio-only, one session at
+  a time, and the audit trail is your client's transcript". The capability-boundaries section
+  above it is about what the *substrate* cannot reach; this one is about choices.
 ## [0.1.1] - 2026-10-10
 
 **A patch release, because the MCP Registry registers a PyPI package by reading a line out of

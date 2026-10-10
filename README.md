@@ -166,6 +166,24 @@ Also worth knowing:
 * **A picture is not structure.** `java_screenshot` is for looking; anything you want to
   *act* on has to be found in the tree, because that is where handles and names live.
 
+## Deliberately not in scope
+
+The list above is what the *substrate* cannot reach. This is the other kind: things this server
+could do and does not, so that somebody evaluating it against a hosted alternative knows what
+they would be giving up — and what would have to change to add each one.
+
+| not there | why, and what adding it would take |
+|---|---|
+| **Remote transport** (streamable HTTP, SSE) | It speaks MCP over **stdio** only: a client starts it locally, and it attaches to applications on the same desktop. A remote transport means a Windows host to connect to, an authentication story, and deciding what a second client may do to an application the first one is driving. |
+| **More than one session at a time** | Sessions are cheap and independent (`java_attach_window` per window), so several *windows* work today; what is missing is multi-tenant arbitration — who owns an application, what happens when two agents drive it at once. That is a policy, not a feature. |
+| **An audit log** | Nothing here writes a journal of what it did. The transcript the MCP client keeps is the audit trail, and its completeness is the client's business. A server-side log would be an append-only file plus a decision about what it must never contain (window titles and cell values are user data). |
+| **Batch execution** | `java_fill_form` is the one batch tool, and it is bounded on purpose. A general "run these tool calls in order" would be a scripting language with a security model attached, and the client already has one. |
+| **CI integration** | The end-to-end layer in this repository is the answer for *this* repository. Driving somebody else's application from their pipeline needs a headless-ish Windows runner with a desktop session — which exists (the `windows-gui` job uses one) — plus their application installed and JAB-enabled on it. |
+
+Each is a deliberate boundary rather than an unfinished feature, and the ones that are
+architectural (transport, multi-tenancy) would change the shape of `ServerState` rather than sit
+beside it.
+
 ## Support
 
 * **Free support** — bugs, questions and feature requests go to

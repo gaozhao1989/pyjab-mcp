@@ -38,6 +38,12 @@ that is not in place rather than leaving a tool call to fail.
 Options:
   -h, --help      show this message and exit
   -V, --version   show the version and exit
+
+This is free software, and complete: no licence key, no quota, nothing held back. Bugs and
+questions go to https://github.com/gaozhao1989/pyjab-mcp/issues -- include the output of
+`pyjab-mcp --version` and of the java_diagnostics tool, which between them answer most
+environmental questions before they are asked. Commercial and enterprise support (a restricted
+network, an adaptation to one application, an SLA) is available: gaozhao89@qq.com.
 """
 
 
