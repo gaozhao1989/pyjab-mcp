@@ -79,15 +79,15 @@ See `docs/PLAN.md` §2.3.2. The control is what makes the six mean anything.
 
 ## Install
 
-Not published yet.
-
 ```console
-pip install -e ".[dev]"
+pip install pyjab-mcp
 ```
+
+Working on the server itself is `pip install -e ".[dev]"` — see [Working on it](#working-on-it).
 
 ## Use
 
-Not published yet, so the client config is a command rather than a package name:
+The console script the package installs:
 
 ```json
 {
