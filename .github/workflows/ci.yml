@@ -77,6 +77,11 @@ jobs:
       - name: Maintainer notes stay out of git and out of the sdist
         run: python tools/check_local_only_files.py
 
+      # Needs the network: pyjab's changelog is read from GitHub, so nothing is vendored.
+      # The state it checks against -- acknowledged.yaml -- is in this repository.
+      - name: Every marked pyjab change has an answer here
+        run: python tools/check_pyjab_changelog.py --strict
+
       # Report-only on purpose: this one goes red the day pyjab ships the release, and a
       # job that fails until somebody else publishes is a job people learn to ignore.
       - name: Report what pyjab still owes this project

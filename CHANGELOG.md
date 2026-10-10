@@ -10,6 +10,48 @@ under **Unreleased** until it is tagged.
 
 ### Added
 
+* **pyjab 1.9.0 is the floor, and M2 is built on it.** The release shipped the tree walk
+  (`JABElement.walk` → `JABTree` with a truncation flag) and `JABElement.as_record()`, which
+  is what the precheck called R3 and what `java_snapshot` needed. The pin moved to
+  `pyjab>=1.9.0` in the same change that started using them, and each API's `released_in` in
+  `tools/check_pyjab_api_surface.py` was verified against the 1.9.0 wheel and the 1.8.0 sdist
+  rather than remembered.
+
+* **`java_snapshot`: a bounded, handle-carrying view of the tree.** `depth`, `max_nodes` and
+  `only_interactive` bound both the walk and the view; when either is cut short the reply
+  says so and names the way to narrow it, because a truncated view that does not admit it is
+  indistinguishable from a window with less in it. The default budget is asserted under
+  4,000 estimated tokens in the tests — a release criterion, not a hope.
+
+* **Element handles that hold no JAB references (D2).** A handle is an opaque id mapped to
+  `{session, locator, expected identity}`; nothing is held between calls, the element is
+  re-found with `find_element_by_xpath`, checked against what the snapshot recorded (role,
+  name, position among siblings, bounds), and released immediately — in a `finally`, because
+  the check runs between taking the reference and giving it back. The reference-counting fake
+  in `tests/_fakedriver.py` fails the tests if either half of that is wrong.
+
+  Two consequences, both deliberate: eviction releases nothing (there is nothing to release,
+  which is the whole argument for this design over a table of live references), and an element
+  whose position the application does not report gets **no handle** rather than one that might
+  resolve to something else.
+
+* **`java_list_windows` works, through the documented `pyjab-inspect windows --json`.** pyjab
+  1.9.0 has the function this needs (`inspector.bridge_without_window`) and does not publish
+  it — it is not in that module's `__all__`. The CLI built on it *is* public, so the listing
+  runs through that, in a subprocess, and R1 stays recorded. A cost is stated rather than
+  hidden: a listing costs a process, not a bridge call.
+
+* **The pyjab drift mechanism (AGENTS.md §1a).** `tools/check_pyjab_changelog.py` fails while
+  a pyjab changelog line marked `Affects: pyjab-mcp` has no entry in `acknowledged.yaml`, and
+  fails for an entry whose marker has gone — so the answer cannot outlive the question.
+  `tests/contract/test_pyjab_contract.py` pins the three shapes this project actually reads
+  (the walk, `as_record()`'s fields, the pump), and `.github/workflows/pyjab-drift.yml` runs
+  the whole suite against `pyjab@master` weekly on `windows-latest`, which catches drift
+  before a release rather than after. `acknowledged.yaml` records the four pre-convention
+  commits as unenforced context, because calling them acknowledgements would be a claim the
+  check cannot verify.
+
+
 * **Guards — five checks that make the project's rules mechanical instead of remembered.**
   Modelled on pyjab's `tools/check_*.py`, and on its reasoning: a rule kept by hand is kept
   until somebody is in a hurry. Each prints a report, exits non-zero on a violation, and is
@@ -99,6 +141,22 @@ under **Unreleased** until it is tagged.
   `MANIFEST.in` prunes them from the sdist.
 
 ### Changed
+
+* **R3 is retired, R1 and R2 are restated against 1.9.0** (`AGENTS.md` §6, and the
+  `REQUIREMENTS` tuple in `backend.py` that the tools' error messages come from). A
+  requirement that outlives its release is a lie the code tells in its own messages.
+
+* **`tools/check_pyjab_readiness.py` distinguishes a release question from a pin question.**
+  The tree walk is answered by the pin (`pyjab>=1.9.0` requires the release that has it), not
+  by a probe that cannot run off Windows; R1 and R2 are still release questions and still
+  report `NOT READY`.
+
+* **The API-surface guard follows a driver passed as an argument.** Extracting the walk and
+  the re-resolution into functions that take the driver — which is what makes the ownership
+  rule testable off Windows — moved ten touchpoints out of the analyzer's reach until they
+  were declared in `DRIVER_PARAMETERS`. The guard noticed the moment they changed, which is
+  the property that matters: it fails loudly rather than silently checking less.
+
 
 * **The MCP SDK floor is `mcp>=2.0`.** The 2.x line renamed `FastMCP` to
   `mcp.server.mcpserver.MCPServer` and `mcp.server.fastmcp` now raises an `ImportError`

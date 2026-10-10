@@ -31,11 +31,11 @@ classifiers = [
 ]
 
 dependencies = [
-    # The substrate. Pinned to a floor rather than a range while M1 is the only shipped
-    # milestone: M1's own tools do not call the tree-walk API. M2 raises this to >=1.9.0 in
-    # the same change that first calls walk, because a floor that permits a version without
-    # the API is a lie. See AGENTS.md 6 for what 1.8.0 does and does not have.
-    "pyjab>=1.8.0",
+    # The substrate. 1.9.0 is the floor because it is the first release with
+    # `JABElement.walk` / `JABTree` (the M2 snapshot) and `JABElement.as_record` (the fields
+    # a handle records and re-verifies against). 1.8.0 has neither, so a floor below 1.9.0
+    # would permit an install that cannot snapshot. See AGENTS.md 6.
+    "pyjab>=1.9.0",
     # The official SDK. `mcp.server.mcpserver.MCPServer` is the 2.x name for what used to be
     # FastMCP -- 1.x exposes `mcp.server.fastmcp` instead, so the floor is genuinely 2.0 and
     # a 1.x install fails at import, not at runtime.
@@ -54,6 +54,9 @@ dev = [
     # how pyjab's ci.yml and release.yml drifted and a release failed after its tag.
     "build>=1.2",
     "twine>=5.0",
+    # `tools/check_pyjab_changelog.py` reads `acknowledged.yaml`, which is the record of
+    # what was done about each pyjab change marked as affecting this project (AGENTS.md 1a).
+    "PyYAML>=6.0",
 ]
 
 [project.urls]

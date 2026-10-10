@@ -66,6 +66,19 @@ class Report:
 # ---------------------------------------------------------------------------------
 
 
+def one_line(text: str) -> str:
+    """*text* as a single line, because pyjab's Windows-only ImportError is a paragraph.
+
+    The first line is the sentence; the rest is advice that belongs in a document rather
+    than in a table cell. Used by the row that reports it and by the readiness check, so the
+    two cannot disagree about what a fact says.
+    """
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    return lines[0] + (" ..." if len(lines) > 1 else "")
+
+
 def check_accessibility_properties(path: Any, expected: str) -> Row:
     """Whether *path* already enables Java Access Bridge.
 
@@ -243,7 +256,7 @@ def _fact_row(fact: Fact) -> Row:
     else:
         value = f"UNAVAILABLE ({fact.detail})" if fact.detail else "UNAVAILABLE"
     detail = fact.detail if fact.status != UNKNOWN else ""
-    return Row(f"  pyjab API: {fact.name}", value, status, detail)
+    return Row(f"  pyjab API: {fact.name}", one_line(value), status, detail)
 
 
 def _jab_rows(

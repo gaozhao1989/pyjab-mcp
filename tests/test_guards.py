@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 import tools.check_dist_contents as dist_guard
+import tools.check_pyjab_changelog as changelog_guard
 import tools.check_documented_surface as docs_guard
 import tools.check_local_only_files as local_guard
 import tools.check_pyjab_api_surface as surface_guard
@@ -140,6 +141,7 @@ MINIMAL_ARCHITECTURE = """# Architecture
 | diagnostics | `java_diagnostics` | M1 |
 | session | `java_list_windows`, `java_attach_window` | M1 |
 | observe | `java_snapshot` | M2 |
+| observe | `java_find` | M3 |
 """
 
 
@@ -181,10 +183,10 @@ def test_the_documented_surface_guard_catches_a_planned_tool_already_registered(
     problems = docs_guard.check(
         architecture=page, package=REPO_ROOT / "src" / "pyjab_mcp",
         registered=["java_diagnostics", "java_list_windows", "java_attach_window",
-                    "java_snapshot"],
+                    "java_find"],
     )
 
-    assert any("NOT YET: java_snapshot" in problem for problem in problems)
+    assert any("NOT YET: java_find" in problem for problem in problems)
 
 
 def test_the_documented_surface_guard_catches_an_undocumented_module(tmp_path):
@@ -290,28 +292,33 @@ def test_the_dist_guard_says_so_when_nothing_has_been_built(tmp_path):
 # ---------------------------------------------------------------------------------
 
 
-def _report(status: str, detail: str = "because"):
-    from pyjab_mcp.backend import Fact
+def _report(status: str, detail: str = "because", version: str = "9.9.9"):
+    from pyjab_mcp.backend import Fact, PyjabApiReport
 
     facts = tuple(
-        Fact(name, status, detail) for _key, name, _req in readiness_guard.WAITING
+        Fact(name, status, detail) for _key, name, _req, _resolved in readiness_guard.WAITING
     )
-    from pyjab_mcp.backend import PyjabApiReport
-
-    return PyjabApiReport("9.9.9", None, facts)
+    return PyjabApiReport(version, None, facts)
 
 
-def test_readiness_is_ready_only_when_the_probe_says_available():
+def test_readiness_is_ready_when_the_probe_says_available_or_the_pin_resolves_it():
+    verdicts = readiness_guard.readiness(_report("available"))
+
+    # The walk entry is a pin question: 1.9.0 shipped it, so the pin is the answer even if
+    # a probe on this platform cannot measure it.
+    assert verdicts["list_windows"][0] == readiness_guard.READY
+    assert verdicts["walk"][0] == readiness_guard.RESOLVED
+
+    old = readiness_guard.readiness(_report("available", version="1.8.0"))
     assert all(
-        verdict == readiness_guard.READY
-        for verdict, _ in readiness_guard.readiness(_report("available")).values()
-    )
+        verdict != readiness_guard.RESOLVED for verdict, _ in old.values()
+    ), "an older pyjab must not be reported as having the release"
 
 
 @pytest.mark.parametrize("status", ["missing", "unknown"])
 def test_readiness_treats_missing_and_unknown_as_not_ready(status):
     """'I could not measure it' is not 'it is there' -- AGENTS.md 2.4, applied to a wait."""
-    verdicts = readiness_guard.readiness(_report(status))
+    verdicts = readiness_guard.readiness(_report(status, version="1.8.0"))
 
     assert all(verdict == readiness_guard.NOT_READY for verdict, _ in verdicts.values())
 
@@ -323,7 +330,7 @@ def test_every_waiting_entry_names_a_fact_the_probe_actually_produces():
     api = probe_public_api()
     measured = {fact.name for fact in api.facts}
 
-    for key, fact_name, requirement_key in readiness_guard.WAITING:
+    for key, fact_name, requirement_key, resolved_in in readiness_guard.WAITING:
         assert fact_name in measured, (
             f"the readiness check waits on {key!r} via the fact {fact_name!r}, which "
             "probe_public_api does not produce"
@@ -332,6 +339,125 @@ def test_every_waiting_entry_names_a_fact_the_probe_actually_produces():
             from pyjab_mcp.backend import requirement
 
             assert requirement(requirement_key).key == requirement_key
+        elif resolved_in is None:
+            raise AssertionError(
+                f"{key!r} has neither a requirement nor a release that resolved it, so "
+                "nothing would ever make it READY"
+            )
+
+
+# ---------------------------------------------------------------------------------
+# tools/check_pyjab_changelog.py
+# ---------------------------------------------------------------------------------
+
+CHANGELOG_WITH_MARKERS = """\
+1.9.0 - 2026-01-01
+------------------
+
+Changed
+~~~~~~~
+
+* **A thing moved.** ``Affects: pyjab-mcp`` and it says why.
+
+* **A thing with a commit.** ``Affects: pyjab-mcp`` (a5dacfb)
+
+Unreleased
+----------
+
+Added
+~~~~~
+
+* **A note that mentions pyjab-mcp** without the marker word.
+"""
+
+
+def test_the_changelog_guard_finds_markers_and_ignores_mentions():
+    found = changelog_guard.markers(CHANGELOG_WITH_MARKERS)
+
+    assert len(found) == 2
+    assert found[0].section.startswith("1.9.0")
+    assert found[1].id == "a5dacfb", "a commit on the line is the id to acknowledge"
+    assert found[0].id.startswith("line:"), (
+        "without a commit the id comes from the text, so rewording forces a re-answer"
+    )
+
+
+def test_the_changelog_guard_catches_an_unacknowledged_marker():
+    found = changelog_guard.markers(CHANGELOG_WITH_MARKERS)
+
+    problems = changelog_guard.check(found, {"a5dacfb": "nothing needed"})
+
+    assert any("UNACKNOWLEDGED" in problem for problem in problems)
+    assert any(found[0].id in problem for problem in problems)
+
+
+def test_the_changelog_guard_passes_when_every_marker_is_answered():
+    found = changelog_guard.markers(CHANGELOG_WITH_MARKERS)
+    acknowledged = {marker.id: "looked at it" for marker in found}
+
+    assert changelog_guard.check(found, acknowledged) == []
+
+
+def test_the_changelog_guard_catches_an_acknowledgement_whose_marker_has_gone():
+    """A stale entry is a claim about a change that no longer exists."""
+    problems = changelog_guard.check([], {"deadbee": "nothing needed"})
+
+    assert any("STALE" in problem for problem in problems)
+    assert any("deadbee" in problem for problem in problems)
+
+
+def test_reworded_marker_needs_a_new_answer():
+    """The content-derived id is what makes that true rather than aspirational."""
+    first = changelog_guard.markers("* something. Affects: pyjab-mcp\n")[0]
+    second = changelog_guard.markers("* something else. Affects: pyjab-mcp\n")[0]
+
+    assert first.id != second.id
+    assert changelog_guard.check([second], {first.id: "answered the old wording"})
+
+
+def test_the_changelog_guard_reports_a_source_it_could_not_read(tmp_path, capsys):
+    """'I could not read it' is not 'nothing was marked' -- AGENTS.md 2.4."""
+    missing = tmp_path / "nowhere" / "CHANGELOG.rst"
+
+    text, where = changelog_guard.read_changelog(str(missing))
+
+    assert text is None or isinstance(text, str)
+    if text is None:
+        assert "nowhere" in where
+
+
+def test_the_acknowledgement_file_is_a_list_of_commits_and_whats():
+    acknowledged, context, error = changelog_guard.load_acknowledged()
+
+    assert error is None, error
+    assert isinstance(acknowledged, dict)
+    assert isinstance(context, dict)
+    assert context, (
+        "the pre-convention entries are how the reasons for the current pin survive; an "
+        "empty context means somebody deleted them rather than moving them"
+    )
+
+
+def test_the_acknowledgement_loader_reports_a_missing_file_rather_than_passing(tmp_path):
+    acknowledged, context, error = changelog_guard.load_acknowledged(tmp_path / "no.yaml")
+
+    assert error and "does not exist" in error
+    assert acknowledged == {} and context == {}
+
+
+def test_the_changelog_guard_script_answers_for_one_explicit_file(tmp_path):
+    """The CLI, with a source given, so this test never needs the network."""
+    changelog = tmp_path / "CHANGELOG.rst"
+    changelog.write_text("1.9.0 - 2026-01-01\n\n* Affects: pyjab-mcp\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "tools" / "check_pyjab_changelog.py"),
+         "--changelog", str(changelog)],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=180,
+    )
+
+    assert result.returncode == 1, "an unanswered marker has to fail the check"
+    assert "UNACKNOWLEDGED" in result.stdout
 
 
 # ---------------------------------------------------------------------------------

@@ -50,9 +50,12 @@ PACKAGE = REPO_ROOT / "src" / "pyjab_mcp"
 MODULE_HEADING = "## Where the code lives"
 TOOL_HEADING = "## Tool surface"
 
-#: The milestone whose tools must be registered right now.  Everything else in the tool
+#: The milestones whose tools must be registered right now.  Everything else in the tool
 #: table is a plan, and a plan that is already registered is a documentation bug.
-SHIPPED_MILESTONE = "M1"
+#:
+#: This list moves as milestones land, and moving it is the deliberate act: it is what makes
+#: a tool's presence in the code a claim the page has to agree with.
+SHIPPED_MILESTONES = ("M1", "M2")
 
 _BACKTICKED = re.compile(r"`([^`]+)`")
 
@@ -155,8 +158,8 @@ def check(
         )
 
     documented = documented_tools(architecture)
-    shipped = {name for name, ships in documented.items() if ships == SHIPPED_MILESTONE}
-    planned = {name for name, ships in documented.items() if ships != SHIPPED_MILESTONE}
+    shipped = {name for name, ships in documented.items() if ships in SHIPPED_MILESTONES}
+    planned = {name for name, ships in documented.items() if ships not in SHIPPED_MILESTONES}
 
     for name in sorted(set(registered) - shipped):
         if name in planned:
@@ -172,7 +175,7 @@ def check(
             )
     for name in sorted(shipped - set(registered)):
         problems.append(
-            f"MISSING TOOL: {name} is documented as shipping in {SHIPPED_MILESTONE} but the "
+            f"MISSING TOOL: {name} is documented as shipping ({documented[name]}) but the "
             "server does not register it. A documented tool that is not there fails at the "
             "first call."
         )
@@ -186,7 +189,7 @@ def main() -> int:
 
     print(f"registered tools ({len(registered)}): {', '.join(registered)}")
     for name in sorted(documented):
-        mark = "ship" if documented[name] == SHIPPED_MILESTONE else "plan"
+        mark = "ship" if documented[name] in SHIPPED_MILESTONES else "plan"
         registered_mark = "registered" if name in registered else "not registered"
         print(f"  [{mark}] {name}  ({documented[name]}) -- {registered_mark}")
     print(

@@ -112,6 +112,8 @@ rule for its own module list.
 | `src/pyjab_mcp/bridge.py` | `BridgeThread`: the one thread that owns the bridge, its pump and its work queue |
 | `src/pyjab_mcp/backend.py` | the only module that imports pyjab, plus the recorded requirements it is waiting on |
 | `src/pyjab_mcp/diagnostics.py` | the environment report, where `UNAVAILABLE` is never `0` |
+| `src/pyjab_mcp/tree.py` | tree records and the bounded renderer: what a snapshot shows, and what it says it left out |
+| `src/pyjab_mcp/handles.py` | element handles — a locator plus an expected identity, holding no JAB reference |
 | `src/pyjab_mcp/windows.py` | plain window records, and turning a title or hwnd into exactly one of them |
 
 `tools/` holds the guards and verification scripts. They ship in the sdist and not in the
@@ -128,8 +130,9 @@ is not, or registered without being documented.
 | group | tools | ships |
 |---|---|---|
 | diagnostics | `java_diagnostics` | M1 |
-| session | `java_list_windows`, `java_attach_window` | M1 (blocked on a pyjab release — see the note below) |
-| observe | `java_snapshot`, `java_find`, `java_get_element`, `java_get_text`, `java_get_table`, `java_screenshot` | M2–M6 |
+| session | `java_list_windows`, `java_attach_window` | M1 |
+| observe | `java_snapshot` | M2 |
+| observe | `java_find`, `java_get_element`, `java_get_text`, `java_get_table`, `java_screenshot` | M3–M6 |
 | act | `java_click`, `java_set_text`, `java_select`, `java_send_keys`, `java_fill_form` | M5 |
 | wait | `java_wait_for` | M6 |
 
@@ -137,12 +140,19 @@ is not, or registered without being documented.
 through the JVM's own `AccessibleTable` interface, with paging, rather than through a
 platform bridge that does not carry that information.
 
-**Status.** M1 ships the diagnostics and session groups: `java_diagnostics` works today, and
-`java_list_windows` / `java_attach_window` are wired but answer with a requirement instead
-of a window list, because released pyjab (1.8.0) has no public way to arm a bridge without
-binding an application window. That is one of three recorded pyjab-side requirements, and
-the report is deliberate — the alternative is importing a private name and depending on
-behaviour nobody promised. `README.md` states the user-facing consequence.
+**Status.** M1 and M2 have shipped: `java_diagnostics`, `java_list_windows`,
+`java_attach_window` and `java_snapshot`. Two of pyjab's own gaps are still recorded rather
+than worked around (`AGENTS.md` §6.2): there is no public API that lists Java windows, so
+the listing runs through pyjab's documented `pyjab-inspect windows --json`; and there is no
+non-destructive detach, so a bound window stays bound for the life of the process. Neither
+is a correctness problem for a server driving one application, and both are the reason a
+tool's error message names a requirement instead of a private import.
+
+`java_snapshot` reads a bounded part of the tree — pyjab 1.9.0's `JABElement.walk`, which
+releases every JAB reference as it advances — and gives each rendered element a handle.
+Nothing is held between calls: a handle is a locator plus the identity the snapshot
+recorded, and a later call re-finds the element and checks role, name, position and bounds
+before doing anything.
 
 ## Verification
 

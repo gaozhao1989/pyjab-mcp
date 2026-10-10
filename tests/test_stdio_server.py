@@ -38,6 +38,7 @@ async def test_the_console_script_answers_a_real_mcp_handshake():
                 "java_diagnostics",
                 "java_list_windows",
                 "java_attach_window",
+                "java_snapshot",
             ]
 
             # A tool call over the wire, not just tools/list: this is the end of the

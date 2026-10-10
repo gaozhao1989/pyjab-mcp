@@ -43,40 +43,48 @@ from pyjab_mcp.backend import (                               # noqa: E402
     probe_public_api,
     requirement,
 )
+from pyjab_mcp.diagnostics import one_line as _one_line   # noqa: E402
 
-#: What this project is waiting for: ``(probe key, fact name, requirement key)``.
+#: What this project is waiting for:
+#: ``(key, fact name, requirement key, resolved in a release)``.
 #:
-#: The requirement key indexes ``backend.REQUIREMENTS`` when there is one; the tree walk has
-#: none, because it is not a design gap -- the code exists in the sibling checkout and needs
-#: a release (AGENTS.md §6.2 R3).
+#: Two kinds of question, and they are answered differently:
+#:
+#: * **a release question** -- nothing has it yet, so the probe on the installed pyjab is the
+#:   answer (``resolved_in`` is None);
+#: * **a pin question** -- a named release has it, so the answer is whether the pin requires
+#:   that release. The tree walk is this kind: 1.9.0 shipped it, ``pyjab>=1.9.0`` requires
+#:   it, and there is nothing left to wait for. Probing is still reported, but it cannot
+#:   fail the check off Windows, where the Windows-only module cannot be imported at all.
 WAITING = (
-    ("list_windows", "public java-window listing", "list_java_windows"),
-    ("detach", "non-destructive detach", "detach"),
-    ("walk", "tree walk (JABElement.walk)", None),
+    ("list_windows", "public java-window listing", "list_java_windows", None),
+    ("detach", "non-destructive detach", "detach", None),
+    ("walk", "tree walk (JABElement.walk)", None, "1.9.0"),
 )
 
 WALK_NOTE = (
-    "the tree walk exists in the sibling pyjab checkout (PR #156) and needs a release; "
-    "M2's pin must be >= that release (AGENTS.md 6.2 R3)"
+    "the snapshot reads the tree through walk(); it is in pyjab 1.9.0, so the pin is what "
+    "guarantees it (AGENTS.md 6.2 R3, retired by the 1.9.0 release)"
 )
 
+RESOLVED = "RESOLVED"
 READY = "READY"
 NOT_READY = "NOT READY"
 
 
-def _one_line(detail: str) -> str:
-    """pyjab's Windows-only ImportError is a multi-line sentence; a table wants one line."""
-    lines = [line for line in detail.splitlines() if line.strip()]
-    if not lines:
-        return ""
-    return lines[0] + (" ..." if len(lines) > 1 else "")
-
-
-def readiness(api: PyjabApiReport) -> "Dict[str, tuple]":
+def readiness(api: PyjabApiReport, installed: Optional[str] = None) -> "Dict[str, tuple]":
     """``probe key -> (verdict, detail)`` for each thing being waited on."""
+    installed = api.version if installed is None else installed
     report = {}
-    for key, fact_name, _requirement_key in WAITING:
+    for key, fact_name, _requirement_key, resolved_in in WAITING:
         fact = api.fact(fact_name)
+        if resolved_in and installed and _at_least(installed, resolved_in):
+            report[key] = (
+                RESOLVED,
+                f"released in pyjab {resolved_in}, which the pin requires; probe says "
+                f"{fact.status}",
+            )
+            continue
         if fact.status == AVAILABLE:
             report[key] = (READY, fact.detail or "available")
         elif fact.status == MISSING:
@@ -88,12 +96,25 @@ def readiness(api: PyjabApiReport) -> "Dict[str, tuple]":
     return report
 
 
+def _at_least(installed: str, wanted: str) -> bool:
+    def parts(text: str) -> "tuple":
+        out = []
+        for chunk in text.split("."):
+            digits = "".join(c for c in chunk if c.isdigit())
+            if not digits:
+                break
+            out.append(int(digits))
+        return tuple(out)
+
+    return parts(installed) >= parts(wanted)
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--require", default="",
         help="comma-separated keys, or 'all', that must be READY for exit 0 "
-             f"(known: {', '.join(key for key, _fact, _req in WAITING)})",
+             f"(known: {', '.join(key for key, _fact, _req, _resolved in WAITING)})",
     )
     args = parser.parse_args(argv)
 
@@ -109,9 +130,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"  {key.ljust(width)}  {verdict:<9}  {_one_line(detail)}")
 
     print()
-    for key, _fact_name, requirement_key in WAITING:
+    for key, _fact_name, requirement_key, _resolved in WAITING:
         verdict, _ = table[key]
-        if verdict == READY:
+        if verdict in (READY, RESOLVED):
             continue
         if requirement_key is None:
             print(f"  {key}: waiting on a pyjab release for the tree walk")
@@ -123,14 +144,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"      expected in: {wanted.expected_in}")
 
     required = [item.strip() for item in args.require.split(",") if item.strip()]
-    keys = [key for key, _fact, _req in WAITING]
+    keys = [key for key, _fact, _req, _resolved in WAITING]
     if required == ["all"]:
         required = list(keys)
     unknown = [key for key in required if key not in keys]
     if unknown:
         parser.error(f"unknown requirement key(s): {', '.join(unknown)}")
 
-    blocked = [key for key in required if table[key][0] != READY]
+    blocked = [key for key in required if table[key][0] not in (READY, RESOLVED)]
     if blocked:
         print()
         print(f"::error:: required but not ready: {', '.join(blocked)}")

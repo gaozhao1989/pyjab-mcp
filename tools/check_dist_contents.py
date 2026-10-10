@@ -53,12 +53,15 @@ SDIST_REQUIRED = (
     "CHANGELOG.md",
     "LICENSE",
     "README.md",
+    "acknowledged.yaml",
     "pyproject.toml",
     "docs/ARCHITECTURE.md",
     "src/pyjab_mcp/__main__.py",
     "src/pyjab_mcp/bridge.py",
+    "tests/contract/test_pyjab_contract.py",
     "tests/test_packaging.py",
     "tools/check_pyjab_api_surface.py",
+    "tools/check_pyjab_changelog.py",
 )
 
 

@@ -10,21 +10,26 @@ which is what makes this usable against a production Java client that you cannot
 
 ## Status
 
-**M1 is implemented; nothing here has driven a live Java application yet.** The bridge
-thread, the environment self-check and the session tools exist and are covered by the L1
-suite plus a real stdio handshake, but **no tool has yet been run against a real window** —
-that needs a Windows desktop, and the end-to-end run is a separate step.
+**M1 and M2 are implemented; nothing here has driven a live Java application yet.**
+`java_diagnostics`, `java_list_windows`, `java_attach_window` and `java_snapshot` exist and
+are covered by the L1 suite plus a real stdio handshake, but **no tool has yet been run
+against a real window** — that needs a Windows desktop, and the end-to-end run is a separate
+step. It needs `pyjab>=1.9.0`, which is the first release with the tree walk a snapshot is
+built on.
 
-M1 is also blocked in one specific, measured way. Against released `pyjab` (1.8.0) there is
-**no public way to list the Java windows JAB can see**: `JABDriver` cannot be constructed
-without binding a window, and the piece that arms a bridge without one
-(`pyjab.inspector.bridge_without_window()`) is private. So `java_list_windows` and
-`java_attach_window` report exactly what is missing and why the workaround is not
-acceptable, rather than reaching into a private API. One further requirement — a
-non-destructive detach, without which a session cannot be released without killing the
-application — and one sequencing fact — the tree walk M2 needs is unreleased — are recorded
-the same way. The audit is in `AGENTS.md` §6 and the requirements are data in
-`src/pyjab_mcp/backend.py`.
+Two gaps in pyjab are recorded rather than worked around, and both are visible in
+`java_diagnostics` (`AGENTS.md` §6.2):
+
+* **no public API lists Java windows**, so `java_list_windows` runs through pyjab's
+  documented `pyjab-inspect windows --json` in a subprocess — a public interface, at the cost
+  of a process per listing;
+* **there is no non-destructive detach**, so a bound window stays bound for the life of the
+  process. The server holds one driver per attached window, never one per call, and never
+  calls `JABDriver.__exit__`, which would terminate the application.
+
+A handle from `java_snapshot` is a position, not a reference. A later call re-finds the
+element and checks its role, name, position and bounds before doing anything, so a window
+that moved on produces a message rather than an action on the wrong control.
 
 The one thing that was already settled is the question the whole direction rested on.
 Measured on a real Java window, through the same `UIAutomationCore` that generic Windows
@@ -87,6 +92,8 @@ python tools/check_pyjab_api_surface.py    # every pyjab call is public, release
 python tools/check_documented_surface.py   # this README's tool list and the code agree
 python tools/check_local_only_files.py     # maintainer notes stay unpublished
 python tools/check_pyjab_readiness.py      # what pyjab still owes this project
+python tools/check_pyjab_changelog.py      # every marked pyjab change has an answer here
+python -m pytest tests/contract/           # the pyjab shapes this project depends on
 python -m build && python tools/check_dist_contents.py --dist dist
 ```
 

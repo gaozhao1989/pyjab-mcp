@@ -2,6 +2,10 @@ include LICENSE
 include README.md
 include CHANGELOG.md
 include pyproject.toml
+# The record of what was done about each marked pyjab change. It ships so that a source
+# checkout can run its own guards -- tools/check_pyjab_changelog.py reads it, and the guard
+# is not much use if the file it checks is missing from the sdist.
+include acknowledged.yaml
 recursive-include src *.py
 recursive-include tests *.py
 # The guards and verification scripts. sdist only, like pyjab's tools/: they are maintainer

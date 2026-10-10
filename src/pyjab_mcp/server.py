@@ -26,9 +26,11 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 from . import __version__
-from .backend import PyjabApiGap, PyjabUnavailable, open_backend
+from .backend import AttachedWindow, PyjabApiGap, PyjabUnavailable, open_backend
 from .bridge import BridgeClosed, BridgeNotStarted, BridgeStartupError, BridgeThread
 from .diagnostics import collect
+from .handles import HandleTable, locator_for
+from .tree import DEFAULT_FIELDS, KNOWN_FIELDS
 from .windows import JavaWindow, WindowLookupError, render_windows, resolve_window
 
 logger = logging.getLogger(__name__)
@@ -68,7 +70,9 @@ class ServerState:
         self._start_timeout = start_timeout
         self._lock = threading.Lock()
         self._bridge: Optional[BridgeThread] = None
-        self._sessions: "dict[str, JavaWindow]" = {}
+        self._sessions: "dict[str, AttachedWindow]" = {}
+        #: Element handles, bounded and holding no JAB references -- see handles.py.
+        self._handles = HandleTable()
 
     # -- the bridge ---------------------------------------------------------------
 
@@ -110,24 +114,48 @@ class ServerState:
 
     # -- sessions -----------------------------------------------------------------
 
-    def attach(self, window: JavaWindow) -> str:
-        """Record *window* under a new session id.
+    def new_session(self, attached: "AttachedWindow") -> str:
+        """Record a window the backend has bound, under a new session id.
 
-        The id is short and opaque, the same shape the element handles will use in M2.  M1
-        deliberately holds **no JAB reference** for a session: pyjab has no non-destructive
-        detach (see ``backend.REQUIREMENTS``), so holding a driver would either leak a Java
-        object per attach or end the user's application when the session closed.
+        The session is what a later call names, and the ``window_id`` inside it is what the
+        backend uses to reach the bound driver.  Sessions are not released: pyjab has no
+        non-destructive detach (``backend.REQUIREMENTS``, key ``detach``), so a bound driver
+        stays bound for the life of the process.  One driver per attached window -- never
+        one per call -- is what keeps that bounded.
         """
         with self._lock:
             while True:
                 session_id = "s:" + secrets.token_hex(2)
                 if session_id not in self._sessions:
                     break
-            self._sessions[session_id] = window
+            self._sessions[session_id] = attached
             return session_id
 
+    def session(self, session_id: str) -> "AttachedWindow":
+        """The window behind *session_id*.
+
+        Raises:
+            KeyError: With the sessions that do exist, so the tool can say what to do rather
+                than reporting a bare miss -- a session id from a previous server run is the
+                usual reason.
+        """
+        with self._lock:
+            attached = self._sessions.get(session_id)
+            known = tuple(self._sessions)
+        if attached is None:
+            raise KeyError(
+                f"unknown session {session_id!r}."
+                + (f" Known sessions: {', '.join(known)}." if known
+                   else " No window is attached yet -- call java_attach_window first.")
+            )
+        return attached
+
     @property
-    def sessions(self) -> "dict[str, JavaWindow]":
+    def handles(self) -> HandleTable:
+        return self._handles
+
+    @property
+    def sessions(self) -> "dict[str, AttachedWindow]":
         with self._lock:
             return dict(self._sessions)
 
@@ -136,6 +164,8 @@ def _tool_error(exc: BaseException) -> ToolError:
     """Turn an anticipated failure into a message a model can act on."""
     if isinstance(exc, PyjabApiGap):
         return ToolError(str(exc))
+    if isinstance(exc, KeyError) and exc.args:
+        return ToolError(str(exc.args[0]))
     if isinstance(exc, PyjabUnavailable):
         return ToolError(
             f"{exc}\nRun java_diagnostics for the full picture."
@@ -221,10 +251,10 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
             a measurement and is reported as such, not as an empty string.
 
         Errors:
-            ``is_error`` with an actionable message when pyjab cannot answer -- including
-            the case where the installed pyjab does not yet expose a public way to list
-            windows, in which case the message names what is missing and why it cannot be
-            worked around.
+            ``is_error`` with an actionable message when pyjab cannot answer. On pyjab 1.9.0
+            the listing runs through the documented ``pyjab-inspect windows --json``,
+            because the function behind it is not public API yet; the message says so when
+            even that is unavailable.
         """
         try:
             bridge = await state.started_bridge()
@@ -241,9 +271,13 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
         """Bind to one Java window and return a session id for later calls.
 
         Use this after java_list_windows, once you know which window to drive. Give either
-        an exact ``hwnd`` or a ``title``, which may be an fnmatch pattern (``"*Report*"``)
-        exactly as pyjab matches titles. Pass ``hwnd`` when several windows share a title
-        pattern.
+        an exact ``hwnd`` or a ``title``; a title may be an fnmatch pattern
+        (``"*Report*"``) exactly as pyjab matches it. Pass ``hwnd`` when several windows
+        share a title pattern.
+
+        Binding is also what arms Java Access Bridge for this server: pyjab loads the DLL,
+        hooks the events and registers the JAB prototypes on the thread doing the binding,
+        so the first attach is slower than the later ones.
 
         This never modifies, restarts or injects into the application, and it does not own
         the process: the application keeps running whatever happens to this session.
@@ -253,27 +287,128 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
             hwnd: Window handle from java_list_windows. Takes precedence over ``title``.
 
         Returns:
-            The session id, the window it is bound to, and the hwnd, as text.
+            A session id, and the window it is bound to. Pass the session id to
+            java_snapshot.
 
         Errors:
-            ``is_error`` when nothing matched, when a title pattern matched more than one
-            window (the message lists them -- acting on the first of several is how a tool
-            clicks the wrong thing), or when the bridge or pyjab cannot answer.
+            ``is_error`` when the window cannot be bound, naming what was tried. A window
+            that is not a Java window, or a title that never appears, is the usual reason;
+            java_list_windows shows what JAB can see.
         """
         try:
             bridge = await state.started_bridge()
-            windows = list(await bridge.call_backend("java_windows"))
-            window = resolve_window(windows, hwnd=hwnd, title=title)
+            attached = await bridge.call_backend(
+                "attach", title=title, hwnd=hwnd, timeout=30.0
+            )
         except Exception as exc:  # noqa: BLE001
             raise _tool_error(exc) from exc
 
-        session_id = state.attach(window)
+        session_id = state.new_session(attached)
         return (
-            f"{session_id} -> hwnd={window.hwnd} title={window.title!r}"
-            + (f" pid={window.pid}" if window.pid else "")
-            + "\nThe session binds this window for later calls. Releasing a session needs a "
-            "non-destructive detach that pyjab does not have yet, so this build deliberately "
-            "holds no reference it cannot give back -- see java_diagnostics."
+            f"{session_id} -> hwnd={attached.hwnd} title={attached.title!r}"
+            + (f" pid={attached.pid}" if attached.pid else "")
+            + f"\nBound for later calls. Start with java_snapshot(session_id={session_id!r})."
+        )
+
+    @server.tool(
+        name="java_snapshot",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
+    )
+    async def java_snapshot(
+        session_id: str,
+        depth: int = 2,
+        max_nodes: int = 120,
+        only_interactive: bool = True,
+        fields: Optional[list[str]] = None,
+    ) -> str:
+        """The bounded tree view of an attached window, one line per element, with handles.
+
+        This is the tool to reach for first after attaching: it shows what is in the window,
+        what each element is called, and a handle (``[e:1a2b]``) for every element a later
+        call can name. Pass a handle to a tool that acts on elements; pass a session id
+        here.
+
+        The view is deliberately bounded, and it says so when it was cut short. A Java
+        window can hold thousands of nodes, and returning one puts hundreds of thousands of
+        tokens into the conversation, so read in rings: snapshot at depth 2, then snapshot
+        again if you need to see inside something.
+
+        Handles are positions, not references: nothing is held between calls. Each handle
+        records the element's role, name, position among siblings and bounds, and a later
+        call re-finds the element and checks those before doing anything. If the window
+        moved on -- a list reloaded, a dialog replaced a panel -- the handle fails with the
+        difference rather than acting on whatever is there now.
+
+        Args:
+            session_id: From java_attach_window.
+            depth: How many levels below the window to read. 2 is a good default; raise it
+                only when the elements you want are not visible at 2.
+            max_nodes: Hard cap on rendered elements. When it is reached the reply says so
+                and names the way to narrow the next read.
+            only_interactive: Drop pure layout scaffolding (panes, panels, viewports). Set
+                it to false when you need the structure rather than the controls, or when
+                an element you expect is missing -- filtering is the usual reason.
+            fields: Extra per-element fields to print: any of states (the default), bounds,
+                description, children, index, depth. Role and name are always printed,
+                because they are what a handle checks itself against.
+
+        Returns:
+            One line per element, indented by depth, plus a truncation notice when the view
+            was cut short and a count of elements that have no handle.
+
+        Errors:
+            ``is_error`` for an unknown session id (the message lists the live ones), or
+            when the window can no longer be read -- which usually means the application
+            closed it.
+        """
+        try:
+            bridge = await state.started_bridge()
+            attached = state.session(session_id)
+            requested = tuple(fields) if fields else DEFAULT_FIELDS
+            unknown = [name for name in requested if name not in KNOWN_FIELDS]
+            if unknown:
+                raise PyjabUnavailable(
+                    f"unknown field(s) {unknown}; known fields are {list(KNOWN_FIELDS)}"
+                )
+            # The raw walk cap is the node budget times four: the filter drops containers
+            # and the cap counts what is kept, so a walk bounded at max_nodes exactly would
+            # return fewer kept nodes than asked for on a scaffolding-heavy window.
+            walk = await bridge.call_backend(
+                "walk", attached.window_id,
+                max_depth=max(0, depth), limit=max(1, max_nodes) * 4,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise _tool_error(exc) from exc
+
+        # Two passes, because a handle only exists for a node that will be rendered and a
+        # node's line needs its handle. Both passes are pure and cheap; the bridge is not
+        # touched again.
+        first = walk.to_text(max_nodes=max_nodes, only_interactive=only_interactive,
+                             fields=requested)
+        handles: "dict[int, str]" = {}
+        unaddressable: "list[int]" = []
+        for index in first.rendered_indices:
+            locator = locator_for(walk, index)
+            if locator is None:
+                unaddressable.append(index)
+                continue
+            handles[index] = state.handles.add(
+                session_id=session_id,
+                window_id=attached.window_id,
+                locator=locator,
+                expected=walk.nodes[index].record,
+            )
+        rendered = walk.to_text(
+            max_nodes=max_nodes, only_interactive=only_interactive, fields=requested,
+            handles=handles, unaddressable=unaddressable,
+            root_note=f"hwnd={attached.hwnd}"
+            + (f" pid={attached.pid}" if attached.pid else ""),
+        )
+        return (
+            rendered.text
+            + f"\n{rendered.shown} element(s) shown, about {rendered.estimated_tokens} "
+            "tokens. Handles are positions, not references: re-snapshot after the window "
+            "changes."
         )
 
     return server

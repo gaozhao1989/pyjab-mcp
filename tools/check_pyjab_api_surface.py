@@ -89,42 +89,29 @@ class Entry:
 
 
 #: ``(path, symbol) -> Entry``.
+#:
+#: ``released_in`` was verified rather than remembered, because that distinction is the
+#: whole reason this file exists. The 1.9.0 entries were checked against the installed
+#: wheel, and the 1.8.0 entries against the 1.8.0 sdist (``pip download pyjab==1.8.0
+#: --no-binary :all:``), after the precheck found the sibling checkout 62 commits ahead of
+#: every release and this project quoting APIs from it.
+#:
+#: A symbol with ``()`` in it is the *result* of a method call:
+#: ``JABDriver.find_element_by_xpath().as_record`` is the record of the element that method
+#: returned. Constructors are not marked, because an instance has the class's attributes.
 SURFACE: Dict[Touchpoint, Entry] = {
     ("pyjab", "*"): Entry(
         PUBLIC, "1.8.0",
         "The package itself, imported inside functions only (it is Windows-only at import "
-        "time). Used for __version__ and for capability probes; see "
-        "tests/test_packaging.py for the module-scope rule.",
+        "time). Used for capability probes; see tests/test_packaging.py for the "
+        "module-scope rule.",
     ),
     ("pyjab", "list_java_windows"): Entry(
         UNRELEASED, "",
-        "Probed with getattr/hasattr, never imported: the public window listing we asked "
-        "pyjab for (backend.REQUIREMENTS key 'list_java_windows', AGENTS.md 6.2 R1). The "
-        "day it appears, backend.PyjabBackend starts using it with no change here.",
-    ),
-    ("pyjab.inspector", "*"): Entry(
-        UNRELEASED, "",
-        "Probed with importlib.util.find_spec, which does not execute the module. "
-        "pyjab-inspect is a released console script in the checkout only; it is evidence "
-        "that the walk work is in flight, not an API we use.",
-    ),
-    ("pyjab.jabelement", "JABElement"): Entry(
-        PUBLIC, "1.8.0",
-        "Imported inside a probe, inside a try/except ImportError: the module is "
-        "Windows-only, and whether it has walk is genuinely unknown off Windows.",
-    ),
-    ("pyjab.jabelement", "JABElement.walk"): Entry(
-        UNRELEASED, "",
-        "Probed with hasattr. The tree-walk API D1 asked for (PR #156): yields plain dicts, "
-        "releases every JAB reference as it goes, and returns a JABTree carrying "
-        ".truncated. M2 needs it, so M2's pin must be >= the release that carries it.",
-    ),
-    ("pyjab.jabdriver", "JABDriver"): Entry(
-        PUBLIC, "1.8.0",
-        "Imported inside _probe_detach only, to ask whether it has grown a non-destructive "
-        "close/quit/detach. The class is never constructed and never used as a context "
-        "manager: __exit__ terminates the bound process by pid, which would kill the "
-        "application being observed (AGENTS.md 6.2 R2).",
+        "Probed with getattr/hasattr, never imported: the public window listing this "
+        "project asked for (backend.REQUIREMENTS key 'list_java_windows', AGENTS.md 6.2 "
+        "R1). 1.9.0 did not add it. The day it appears, PyjabBackend starts using it with "
+        "no change here.",
     ),
     ("pyjab.common.win32utils", "*"): Entry(
         PUBLIC, "1.8.0",
@@ -133,7 +120,7 @@ SURFACE: Dict[Touchpoint, Entry] = {
     ),
     ("pyjab.common.win32utils", "Win32Utils"): Entry(
         PUBLIC, "1.8.0",
-        "The class whose pump we drive on the bridge thread.",
+        "The class whose pump is driven on the bridge thread.",
     ),
     ("pyjab.common.win32utils", "Win32Utils.pump_messages"): Entry(
         PUBLIC, "1.8.0",
@@ -169,6 +156,104 @@ SURFACE: Dict[Touchpoint, Entry] = {
         "Probed with getattr, then called: the human-readable list of where the DLL search "
         "looked, which is what makes a missing DLL actionable.",
     ),
+    ("pyjab.inspector", "*"): Entry(
+        PUBLIC, "1.9.0",
+        "Probed with importlib.util.find_spec only -- this module is never imported. It is "
+        "reached as a *command*, `python -m pyjab.inspector windows --json`, which is what "
+        "docs/3-pyjab.md documents and what the wheel installs. Using the published CLI is "
+        "the point: its bridge_without_window() helper is what R1 needs and is not in the "
+        "module's __all__.",
+    ),
+    ("pyjab.jabdriver", "JABDriver"): Entry(
+        PUBLIC, "1.8.0",
+        "Constructed to bind a window, and that construction is also what arms the bridge: "
+        "it loads the DLL, calls Windows_run() on the calling thread and registers the JAB "
+        "prototypes. Imported inside two functions; never used as a context manager, "
+        "because __exit__ terminates the bound process by pid (AGENTS.md 6.2 R2).",
+    ),
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath"): Entry(
+        PUBLIC, "1.8.0",
+        "How a handle is re-resolved (D2). The returned JABElement is owned by this layer "
+        "and is released in a finally -- see the next entry.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath().as_record"): Entry(
+        PUBLIC, "1.9.0",
+        "The record of the re-resolved element, compared against the identity stored with "
+        "the handle. as_record() is new in 1.9.0 and pyjab documents it as exactly this: "
+        "the fields a locator matches on and a later check verifies.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.hwnd"): Entry(
+        PUBLIC, "1.8.0",
+        "Documented property; reported to the agent so a session can be matched against "
+        "java_list_windows.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.pid"): Entry(
+        PUBLIC, "1.8.0",
+        "Documented property; reported, and never used to signal anything -- __exit__ is "
+        "the only thing in pyjab that acts on the pid, and this project does not call it.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.release_jabelement"): Entry(
+        PUBLIC, "1.8.0",
+        "Public and documented as the ownership rule: release every object JAB hands out, "
+        "exactly once. Called on the element find_element_by_xpath returned, in a finally.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.root_element"): Entry(
+        PUBLIC, "1.8.0",
+        "The window's own element, and the root a snapshot walks from. Owned by the driver; "
+        "not released by this project.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.root_element.as_record"): Entry(
+        PUBLIC, "1.9.0",
+        "The window's own record, rendered as the first line of a snapshot.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.root_element.walk"): Entry(
+        PUBLIC, "1.9.0",
+        "The bounded walk (D1): yields (depth, record) and releases every JAB reference as "
+        "it advances, which is why a snapshot holds none. 1.9.0 is the first release with "
+        "it -- the sibling checkout had it for 62 commits first, which is the trap this "
+        "file's released_in field exists for.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.root_element.walk().limit_hit"): Entry(
+        PUBLIC, "1.9.0",
+        "Probed with getattr on the JABTree, because the attribute is read defensively. It "
+        "is the walk's own record of having hit its limit; this project also tracks its own "
+        "early stop, since stopping the iteration is not the same as pyjab stopping it.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.title"): Entry(
+        PUBLIC, "1.8.0",
+        "Documented property; reported with the session.",
+    ),
+    ("pyjab.jabelement", "JABElement"): Entry(
+        PUBLIC, "1.8.0",
+        "Imported inside a probe, inside a try/except ImportError: the module is "
+        "Windows-only, and whether it has walk/as_record is genuinely unknown off Windows.",
+    ),
+    ("pyjab.jabelement", "JABElement.walk"): Entry(
+        PUBLIC, "1.9.0",
+        "Probed with hasattr. The tree-walk API D1 asked for: plain dicts, released "
+        "references, and a JABTree that can say whether it was cut short.",
+    ),
+    ("pyjab.jabelement", "JABElement.as_record"): Entry(
+        PUBLIC, "1.9.0",
+        "Probed with hasattr, alongside walk: a walk without as_record would give records "
+        "but no way to re-verify a handle, so both are required together.",
+    ),
+}
+
+#: Parameters that hold a pyjab object, by ``(relative file, function)``.
+#:
+#: The derivation follows local names, and an object that arrives as an *argument* has no
+#: local origin to follow.  These are the functions where that matters -- they take a driver
+#: rather than reaching for one so that the ownership rule inside them can be tested against
+#: a reference-counting fake -- and without this table their touchpoints would either vanish
+#: from the derivation or, worse, be picked up by accident from a same-named local in
+#: another function.  Stating it makes the derivation independent of the order functions
+#: happen to appear in.
+DRIVER_PARAMETERS: Dict[str, Dict[str, Dict[str, Touchpoint]]] = {
+    "src/pyjab_mcp/backend.py": {
+        "walk_driver": {"driver": ("pyjab.jabdriver", "JABDriver")},
+        "resolve_driver": {"driver": ("pyjab.jabdriver", "JABDriver")},
+    },
 }
 
 #: Prefixes that mean "somebody is reaching into pyjab".  A registry entry may not carry
@@ -193,7 +278,19 @@ def _resolve_call_target(node: ast.AST, owners: Mapping[str, Touchpoint]) -> Opt
         module, symbol = base
         return (module, f"{symbol}.{node.attr}" if symbol != "*" else node.attr)
     if isinstance(node, ast.Call):
-        return _resolve_call_target(node.func, owners)
+        base = _resolve_call_target(node.func, owners)
+        if base is None:
+            return None
+        module, symbol = base
+        if "." not in symbol:
+            # Calling a class gives an instance of that class, so the attributes that follow
+            # are the same set the class documents: ``JABDriver()`` is a JABDriver, and
+            # ``Win32Utils().pump_messages`` is ``Win32Utils.pump_messages``.
+            return (module, symbol)
+        # Calling a *method* gives a different object -- ``find_element_by_xpath(...)``
+        # returns a JABElement -- so that boundary is marked rather than pretending the
+        # driver has an ``as_record``.
+        return (module, f"{symbol}()")
     return None
 
 
@@ -239,6 +336,17 @@ class _FileScan(ast.NodeVisitor):
                 self._record((module, alias.name), "import", node.lineno)
         self.generic_visit(node)
 
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        seeded = DRIVER_PARAMETERS.get(self.relative, {}).get(node.name, {})
+        saved = {name: self.owners.get(name) for name in seeded}
+        self.owners.update(seeded)
+        self.generic_visit(node)
+        for name, previous in saved.items():
+            if previous is None:
+                self.owners.pop(name, None)
+            else:
+                self.owners[name] = previous
+
     def visit_Assign(self, node: ast.Assign) -> None:
         # `backend = PyjabBackend()` and `config = config_module` both hand a local name a
         # pyjab origin, and the attribute accesses and probes below resolve through it.
@@ -250,6 +358,14 @@ class _FileScan(ast.NodeVisitor):
         self.generic_visit(node)
 
     # -- touchpoints ---------------------------------------------------------------
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        target = _resolve_call_target(node.value, self.owners)
+        if target is not None and is_pyjab(target[0]):
+            module, symbol = target
+            point = (module, f"{symbol}.{node.attr}" if symbol != "*" else node.attr)
+            self._record(point, "attribute", node.lineno)
+        self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
         func = node.func

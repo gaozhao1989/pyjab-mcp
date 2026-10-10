@@ -37,17 +37,78 @@ def test_pyjab_is_installed_and_probed():
 
 
 def test_the_probe_and_the_backend_agree_about_the_window_listing():
-    """One source of truth: no gap exactly when the public name is there."""
+    """One source of truth: the public name is used when it exists, the CLI when it does not.
+
+    Off Windows the fallback cannot answer either -- pyjab is Windows only -- so the
+    assertion is that the failure names the *fallback* rather than pretending no listing
+    path exists.
+    """
     api = probe_public_api()
     backend = PyjabBackend()
 
     if api.has("public java-window listing"):
-        windows = backend.java_windows()
-        assert isinstance(windows, tuple)
-    else:
-        with pytest.raises(PyjabApiGap) as caught:
-            backend.java_windows()
-        assert caught.value.requirement.key == "list_java_windows"
+        assert isinstance(backend.java_windows(), tuple)
+        return
+
+    if sys.platform == "win32":  # pragma: no cover - needs a Windows box with a JVM
+        assert isinstance(backend.java_windows(), tuple)
+        return
+
+    with pytest.raises(PyjabUnavailable) as caught:
+        backend.java_windows()
+    assert "pyjab-inspect" in str(caught.value)
+
+
+def test_the_window_listing_falls_back_to_the_documented_cli():
+    """The fallback is a public interface: `pyjab-inspect windows --json`."""
+    import json
+    from types import SimpleNamespace
+
+    calls = []
+
+    def runner(command):
+        calls.append(command)
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps([{"hwnd": 65537, "title": "App", "pid": 42}]),
+            stderr="",
+        )
+
+    windows = PyjabBackend(cli_runner=runner).java_windows()
+
+    assert calls == [[sys.executable, "-m", "pyjab.inspector", "windows", "--json"]]
+    assert [(w.hwnd, w.title, w.pid) for w in windows] == [(65537, "App", 42)]
+
+
+def test_an_empty_cli_answer_is_a_measurement_not_a_failure():
+    from types import SimpleNamespace
+
+    runner = lambda command: SimpleNamespace(returncode=0, stdout="[]", stderr="")
+    assert PyjabBackend(cli_runner=runner).java_windows() == ()
+
+
+def test_a_cli_that_fails_is_reported_with_its_own_message():
+    from types import SimpleNamespace
+
+    runner = lambda command: SimpleNamespace(
+        returncode=1, stdout="", stderr="No Java windows found.\nCheck the JVM."
+    )
+
+    with pytest.raises(PyjabUnavailable) as caught:
+        PyjabBackend(cli_runner=runner).java_windows()
+
+    assert "No Java windows found." in str(caught.value)
+
+
+def test_a_cli_that_does_not_return_json_is_reported_not_guessed():
+    from types import SimpleNamespace
+
+    runner = lambda command: SimpleNamespace(returncode=0, stdout="not json", stderr="")
+
+    with pytest.raises(PyjabUnavailable) as caught:
+        PyjabBackend(cli_runner=runner).java_windows()
+
+    assert "did not return JSON" in str(caught.value)
 
 
 def test_the_gap_message_names_what_is_missing_and_where_to_read_about_it():

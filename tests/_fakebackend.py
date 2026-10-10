@@ -17,9 +17,12 @@ an injected pump failure is how "a failing pump must not kill the loop" is teste
 from __future__ import annotations
 
 import threading
-from typing import Any, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
 
+from pyjab_mcp.backend import AttachedWindow
+from pyjab_mcp.tree import Record, Walk, walked_nodes
 from pyjab_mcp.windows import JavaWindow
+from tests._fakedriver import record
 
 
 class WrongThread(AssertionError):
@@ -38,15 +41,24 @@ class FakeBackend:
         *,
         windows: Sequence[JavaWindow] = (),
         pump_errors: int = 0,
+        items: Sequence = (),
+        attach_error: Optional[BaseException] = None,
+        listing_error: Optional[BaseException] = None,
     ) -> None:
         self.owner = threading.get_ident()
         self.windows = list(windows)
         self.pump_errors_remaining = pump_errors
         self.pump_calls = 0
         self.window_calls = 0
+        self.attach_calls = 0
+        self.walk_calls = 0
         self.close_calls = 0
         self.closed = False
         self.threads_seen: "set[int]" = set()
+        self.items = list(items)
+        self.attach_error = attach_error
+        self.listing_error = listing_error
+        self.attached: "Dict[str, AttachedWindow]" = {}
 
     def bind(self, owner: int) -> "FakeBackend":
         """Declare which thread owns this backend.
@@ -80,7 +92,41 @@ class FakeBackend:
     def java_windows(self) -> "list[JavaWindow]":
         self._check("java_windows")
         self.window_calls += 1
+        if self.listing_error is not None:
+            raise self.listing_error
         return list(self.windows)
+
+    def attach(self, *, title: str = "", hwnd: Optional[int] = None,
+               timeout: float = 30.0) -> AttachedWindow:
+        self._check("attach")
+        self.attach_calls += 1
+        if self.attach_error is not None:
+            raise self.attach_error
+        window_id = f"w{self.attach_calls}"
+        attached = AttachedWindow(
+            window_id=window_id,
+            hwnd=int(hwnd or 0x10001),
+            title=title or "Test Application",
+            pid=4242,
+        )
+        self.attached[window_id] = attached
+        return attached
+
+    def walk(self, window_id: str, *, max_depth: Optional[int] = None,
+             limit: Optional[int] = None) -> Walk:
+        self._check("walk")
+        self.walk_calls += 1
+        if window_id not in self.attached:
+            raise RuntimeError(f"window {window_id!r} is not attached")
+        nodes = walked_nodes(self.items)
+        return Walk(
+            root=Record.from_pyjab(record("root pane", "Test Application")),
+            nodes=nodes, walked=len(nodes),
+        )
+
+    def resolve(self, window_id: str, locator: str) -> "Record":
+        self._check("resolve")
+        raise AssertionError("this fake does not resolve locators yet")
 
     def close(self) -> None:
         self._check("close")

@@ -14,11 +14,17 @@ from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from pyjab_mcp.backend import PyjabApiGap, PyjabUnavailable, requirement
 from pyjab_mcp.server import ServerState, create_server
 from tests._fakebackend import FakeBackend, FakeFactory, window
+from tests._fakedriver import record
 
 # Every test here drives the async server surface.
 pytestmark = pytest.mark.asyncio
 
-TOOL_ORDER = ["java_diagnostics", "java_list_windows", "java_attach_window"]
+TOOL_ORDER = [
+    "java_diagnostics",
+    "java_list_windows",
+    "java_attach_window",
+    "java_snapshot",
+]
 
 
 def make_server(backend=None, *, error=None):
@@ -124,8 +130,8 @@ async def test_the_missing_pyjab_api_reaches_the_model_as_its_requirement_text()
     assert "AGENTS.md" in message
 
 
-async def test_attach_window_binds_one_window_and_returns_a_session_id():
-    backend = FakeBackend(windows=[window(0x10001, "Alpha"), window(0x10002, "Beta")])
+async def test_attach_window_binds_through_the_backend_and_returns_a_session_id():
+    backend = FakeBackend()
     server, state = make_server(backend)
 
     result = await server.call_tool("java_attach_window", {"title": "Alpha"})
@@ -133,42 +139,103 @@ async def test_attach_window_binds_one_window_and_returns_a_session_id():
     assert result.is_error is False
     text = await text_of(result)
     assert "s:" in text and "Alpha" in text
-    sessions = state.sessions
-    assert len(sessions) == 1
-    assert next(iter(sessions.values())).hwnd == 0x10001
+    assert "java_snapshot" in text, "the reply should say what to do next"
+    assert backend.attach_calls == 1
+    assert len(state.sessions) == 1
 
 
-async def test_attach_window_by_hwnd_ignores_the_title():
-    backend = FakeBackend(windows=[window(0x10001, "Alpha"), window(0x10002, "Beta")])
+async def test_attach_window_passes_the_hwnd_through():
+    backend = FakeBackend()
     server, state = make_server(backend)
 
-    result = await server.call_tool(
-        "java_attach_window", {"hwnd": 0x10002, "title": "Alpha"}
-    )
+    await server.call_tool("java_attach_window", {"hwnd": 0x10002, "title": "Alpha"})
 
-    assert result.is_error is False
-    assert next(iter(state.sessions.values())).title == "Beta"
+    assert next(iter(state.sessions.values())).hwnd == 0x10002
 
 
-async def test_attach_window_refuses_an_ambiguous_title_and_lists_the_candidates():
-    backend = FakeBackend(windows=[window(0x1, "Report A"), window(0x2, "Report B")])
-    server, state = make_server(backend)
-
-    with pytest.raises(ToolError) as caught:
-        await server.call_tool("java_attach_window", {"title": "Report*"})
-
-    message = str(caught.value)
-    assert "2 Java windows match" in message
-    assert "hwnd" in message
-    assert state.sessions == {}, "an ambiguous request must not bind anything"
-
-
-async def test_attach_window_reports_what_was_visible_when_nothing_matched():
-    backend = FakeBackend(windows=[window(0x1, "Alpha")])
+async def test_attach_window_reports_a_window_that_cannot_be_bound():
+    backend = FakeBackend(attach_error=PyjabUnavailable("no window titled 'Nope' appeared"))
     server, _state = make_server(backend)
 
     with pytest.raises(ToolError) as caught:
         await server.call_tool("java_attach_window", {"title": "Nope"})
 
-    assert "no Java window title matches" in str(caught.value)
-    assert "Alpha" in str(caught.value)
+    assert "no window titled 'Nope' appeared" in str(caught.value)
+    assert "java_diagnostics" in str(caught.value)
+
+
+async def test_snapshot_renders_the_tree_with_handles_and_a_token_count():
+    backend = FakeBackend(items=[
+        (0, record("panel", "Form", index_in_parent=0, children_count=1)),
+        (1, record("push button", "OK", index_in_parent=0)),
+    ])
+    server, state = make_server(backend)
+    attached = await server.call_tool("java_attach_window", {"title": "Alpha"})
+    session_id = (await text_of(attached)).split(" ", 1)[0]
+
+    result = await server.call_tool("java_snapshot", {"session_id": session_id})
+
+    assert result.is_error is False
+    text = await text_of(result)
+    assert "push button" in text
+    assert "[e:" in text
+    assert "tokens" in text
+    assert len(state.handles) >= 2, "rendered elements should have handles"
+
+
+async def test_snapshot_offers_handles_a_later_call_can_use():
+    backend = FakeBackend(items=[(0, record("push button", "OK", index_in_parent=3))])
+    server, state = make_server(backend)
+    attached = await server.call_tool("java_attach_window", {"title": "Alpha"})
+    session_id = (await text_of(attached)).split(" ", 1)[0]
+    await server.call_tool("java_snapshot", {"session_id": session_id})
+
+    entry = next(
+        state.handles.get(handle) for handle in state.handles.handles_for(session_id)
+    )
+
+    assert entry.locator == "//push button[@indexinparent=3]"
+    assert entry.expected.name == "OK"
+
+
+async def test_snapshot_says_when_it_truncated():
+    backend = FakeBackend(items=[
+        (0, record("push button", f"B{index}", index_in_parent=index))
+        for index in range(10)
+    ])
+    server, _state = make_server(backend)
+    attached = await server.call_tool("java_attach_window", {"title": "Alpha"})
+    session_id = (await text_of(attached)).split(" ", 1)[0]
+
+    result = await server.call_tool(
+        "java_snapshot", {"session_id": session_id, "max_nodes": 2}
+    )
+
+    text = await text_of(result)
+    assert "truncated" in text
+    assert "node budget" in text
+
+
+async def test_snapshot_rejects_an_unknown_session_and_lists_the_live_ones():
+    server, _state = make_server(FakeBackend())
+
+    with pytest.raises(ToolError) as caught:
+        await server.call_tool("java_snapshot", {"session_id": "s:beef"})
+
+    message = str(caught.value)
+    assert "s:beef" in message
+    assert "java_attach_window" in message
+
+
+async def test_snapshot_rejects_an_unknown_field():
+    backend = FakeBackend(items=[(0, record("push button", "OK"))])
+    server, _state = make_server(backend)
+    attached = await server.call_tool("java_attach_window", {"title": "Alpha"})
+    session_id = (await text_of(attached)).split(" ", 1)[0]
+
+    with pytest.raises(ToolError) as caught:
+        await server.call_tool(
+            "java_snapshot", {"session_id": session_id, "fields": ["colour"]}
+        )
+
+    assert "unknown field" in str(caught.value)
