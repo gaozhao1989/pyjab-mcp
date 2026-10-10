@@ -20,6 +20,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 import tools.check_dist_contents as dist_guard
 import tools.check_pyjab_changelog as changelog_guard
@@ -29,6 +30,7 @@ import tools.check_pyjab_api_surface as surface_guard
 import tools.check_published_references as references_guard
 import tools.check_pyjab_readiness as readiness_guard
 import tools.check_changelog_immutable as immutable_guard
+import tools.check_release_l3 as l3_guard
 import tools.check_release_version as release_guard
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -552,6 +554,358 @@ def test_the_release_notes_come_from_the_changelog_section(tmp_path, monkeypatch
     assert "the new thing" in notes
     assert "the old thing" not in notes, "a section ends at the next heading"
     assert "in flight" not in notes, "Unreleased is not a release's notes"
+
+
+# ---------------------------------------------------------------------------------
+# tools/check_release_l3.py -- the release gate's verdict, and the invariant it trusts
+# ---------------------------------------------------------------------------------
+#
+# The verdict used to be fifteen cases of Python inside release.yml's `run:` block, where
+# nothing could exercise it: a regression would have been noticed by a failed release. These
+# cases are the ones that block a tag, each pinned by its exit status **and** the text that
+# tells its refusal apart from the others -- "no green run" and "could not read the answer"
+# both refuse, and must never swap.
+
+#: The commit the gate is asked about, so the expected text is readable.
+L3_SHA = "5f2a1c9d4e6b8a0c"
+
+
+def l3_body(tmp_path, payload, name="body.json"):
+    """An Actions API answer, or a deliberately wrong stand-in, as the file curl wrote."""
+    path = tmp_path / name
+    path.write_text(
+        payload if isinstance(payload, str) else json.dumps(payload), encoding="utf-8"
+    )
+    return path
+
+
+def l3_verdict(tmp_path, payload, http_code="200", dry_run=False):
+    """The exit status and the lines the step would print, for one answer."""
+    decision = l3_guard.decide(
+        l3_body(tmp_path, payload), http_code, L3_SHA, dry_run=dry_run
+    )
+    return decision.exit_code, "\n".join(decision.lines)
+
+
+def l3_answer(*runs, total=None):
+    """The shape the Actions API returns; *total* models a truncated page."""
+    return {
+        "total_count": len(runs) if total is None else total,
+        "workflow_runs": list(runs),
+    }
+
+
+def a_run(run_id, conclusion, status="completed"):
+    return {
+        "id": run_id,
+        "event": "schedule",
+        "status": status,
+        "conclusion": conclusion,
+        "html_url": f"https://example.test/runs/{run_id}",
+    }
+
+
+def test_the_l3_gate_proceeds_on_a_successful_run_and_names_it(tmp_path):
+    exit_code, text = l3_verdict(tmp_path, l3_answer(a_run(7, "success")))
+
+    assert exit_code == 0
+    assert f"windows-gui.yml at {L3_SHA}: 1 run(s) match, 1 read" in text
+    assert "  run 7: event=schedule status=completed conclusion=success" in text
+    assert f"PASSED: run 7 of windows-gui.yml succeeded at {L3_SHA}" in text
+    assert "https://example.test/runs/7" in text, "the run the release rode on has to be named"
+
+
+def test_the_l3_gate_finds_a_green_run_that_is_not_the_first(tmp_path):
+    """Every candidate is scanned: a later run can be the green one."""
+    exit_code, text = l3_verdict(tmp_path, l3_answer(a_run(1, "failure"), a_run(2, "success")))
+
+    assert exit_code == 0
+    assert "PASSED: run 2" in text
+
+
+def test_the_l3_gate_refuses_candidates_where_none_succeeded(tmp_path):
+    exit_code, text = l3_verdict(
+        tmp_path,
+        l3_answer(a_run(1, "failure"), a_run(2, None, status="in_progress")),
+    )
+
+    assert exit_code == 1
+    assert "::error::" in text
+    assert f"no run of windows-gui.yml at {L3_SHA} succeeded; rejected:" in text
+    assert "1 (completed/failure)" in text
+    assert "2 (in_progress/None)" in text, "a run still going is not a run that passed"
+
+
+def test_the_l3_gate_refuses_a_truncated_page_as_truncated_not_as_no_green_run(tmp_path):
+    """Candidates that were never read are not 'no green run' either."""
+    exit_code, text = l3_verdict(tmp_path, l3_answer(a_run(1, "failure"), total=150))
+
+    assert exit_code == 1
+    assert "150 runs match" in text
+    assert "but only 1 were read, so a green one cannot be ruled out" in text
+    assert "succeeded; rejected" not in text, (
+        "a truncated page must not be reported as 'none of the runs I read was green'"
+    )
+
+
+def test_the_l3_gate_refuses_a_commit_that_was_never_driven_end_to_end(tmp_path):
+    exit_code, text = l3_verdict(tmp_path, l3_answer())
+
+    assert exit_code == 1
+    assert "0 run(s) match, 0 read" in text
+    assert f"no windows-gui.yml run exists at {L3_SHA}: this commit was never driven" in text
+    assert "succeeded; rejected" not in text, "no runs at all is not 'no green run'"
+
+
+@pytest.mark.parametrize("code", ["500", "000"])
+def test_the_l3_gate_refuses_an_unreadable_answer_as_unread(tmp_path, code):
+    """`000` is curl's 'no HTTP response at all'; neither is a verdict about L3."""
+    exit_code, text = l3_verdict(tmp_path, '{"message":"boom"}', http_code=code)
+
+    assert exit_code == 1
+    assert "the Actions API could not be read" in text
+    assert f"(HTTP {code})" in text
+    assert "no run of windows-gui.yml" not in text, (
+        "an answer that could not be read is not evidence that no green run exists"
+    )
+    assert "never driven" not in text
+
+
+@pytest.mark.parametrize("code", ["401", "403"])
+def test_the_l3_gate_keeps_the_actions_read_hint(tmp_path, code):
+    exit_code, text = l3_verdict(tmp_path, '{"message":"nope"}', http_code=code)
+
+    assert exit_code == 1
+    assert f"HTTP {code} from the Actions API usually means this workflow is missing" in text
+    assert "actions: read" in text
+    assert "a green dry run does not prove the permission" in text
+    assert "a malformed body warns the same way" in text, (
+        "a dry run is green however the gate refuses, and the hint has to say so"
+    )
+
+
+def test_the_l3_gate_shows_the_head_of_an_answer_it_could_not_use(tmp_path):
+    """For an API error the body is the only evidence a maintainer gets, so it is printed.
+
+    The step used `head -c 2000` before the verdict moved here. `return []` or a shorter slice
+    would leave every verdict above green, and a maintainer staring at an HTTP 403 with no body
+    has nothing to read.
+    """
+    exit_code, text = l3_verdict(tmp_path, "x" * 2000 + "TAIL-MUST-NOT-APPEAR", http_code="500")
+
+    assert l3_guard.BODY_PREVIEW == 2000, "the previous step printed 2000 bytes of the answer"
+    assert exit_code == 1
+    assert "x" * 2000 in text
+    assert "TAIL-MUST-NOT-APPEAR" not in text, "the preview is capped, not the whole body"
+
+
+def test_the_l3_gate_refuses_a_body_it_cannot_parse(tmp_path):
+    exit_code, text = l3_verdict(tmp_path, "{not json")
+
+    assert exit_code == 1
+    assert "the Actions API answer could not be read" in text
+    assert "unverified, which is not the same as satisfied" in text
+    assert "never driven" not in text
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        [1, 2, 3],
+        {"total_count": 1, "workflow_runs": "nope"},
+        {"total_count": 1, "workflow_runs": ["nope"]},
+    ],
+    ids=["a-json-list", "runs-not-a-list", "a-run-that-is-not-an-object"],
+)
+def test_the_l3_gate_refuses_a_wrongly_shaped_body_as_unread(tmp_path, payload):
+    exit_code, text = l3_verdict(tmp_path, payload)
+
+    assert exit_code == 1
+    assert "the Actions API answer could not be read" in text
+    assert "no run of windows-gui.yml" not in text
+
+
+DRY_RUN_REFUSALS = [
+    pytest.param(l3_answer(a_run(1, "failure")), "200", id="none-succeeded"),
+    pytest.param(l3_answer(a_run(1, "failure"), total=150), "200", id="truncated"),
+    pytest.param(l3_answer(), "200", id="no-runs"),
+    pytest.param('{"message":"boom"}', "500", id="http-500"),
+    pytest.param("{not json", "200", id="unparsable"),
+    pytest.param({"total_count": 1, "workflow_runs": "nope"}, "200", id="wrong-shape"),
+]
+
+
+@pytest.mark.parametrize("payload, code", DRY_RUN_REFUSALS)
+def test_a_dry_run_warns_where_a_tag_push_refuses(tmp_path, payload, code):
+    """`workflow_dispatch` runs on main's HEAD, where no L3 run normally exists yet.
+
+    The version guard in the same job already warns instead of failing there, and a green dry
+    run is what makes the `actions: read` permission unprovable from a dispatch -- hence the
+    hint the previous case pins.
+    """
+    tag_exit, _ = l3_verdict(tmp_path, payload, http_code=code)
+    dry_exit, dry_text = l3_verdict(tmp_path, payload, http_code=code, dry_run=True)
+
+    assert tag_exit == 1
+    assert dry_exit == 0
+    assert "::warning::" in dry_text
+    assert "::error::" not in dry_text
+
+
+def test_the_l3_gate_script_is_what_the_workflow_runs(tmp_path):
+    """The function above can pass while the command line -- or the workflow -- is broken."""
+    body = l3_body(tmp_path, l3_answer(a_run(1, "failure")))
+    script = str(REPO_ROOT / "tools" / "check_release_l3.py")
+    argv = [sys.executable, script, "--body", str(body), "--http-code", "200",
+            "--sha", L3_SHA]
+
+    refused = subprocess.run(argv, cwd=REPO_ROOT, capture_output=True, text=True, timeout=180)
+    warned = subprocess.run(argv + ["--dry-run"], cwd=REPO_ROOT, capture_output=True,
+                            text=True, timeout=180)
+
+    assert refused.returncode == 1
+    assert "no run of windows-gui.yml" in refused.stdout
+    assert warned.returncode == 0
+    assert "::warning::" in warned.stdout
+
+
+def test_the_release_workflow_wires_the_gate_so_that_it_can_still_refuse():
+    """A tool the workflow does not call -- or cannot fail through -- is not a gate.
+
+    Every one of these mutations left the tool's own tests green: appending `|| true`, dropping
+    the `000` fallback, deleting the `--dry-run` branch, inverting the event test, swapping
+    `--body` for `--http-code`, or making the step conditional. The tool is only worth what its
+    wiring is, so for a release gate the brittle assertion is the point: change the wiring
+    deliberately, and change this test in the same commit.
+    """
+    path = REPO_ROOT / ".github" / "workflows" / "release.yml"
+    workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["verify"]["steps"]
+    step = next(
+        (step for step in steps if step.get("name") == "L3 was green on this commit (windows-gui.yml)"),
+        None,
+    )
+
+    assert step is not None, "the L3 gate step was renamed or removed"
+    script = step["run"]
+
+    required = (
+        # the event decides it: a push must refuse, a dispatch must warn and pass
+        '[ "${{ github.event_name }}" != "push" ]',
+        "DRY_RUN=(--dry-run)",
+        '"${DRY_RUN[@]}"',
+        # curl's exit status is not the HTTP status; 000 is "no response at all"
+        '|| CODE="000"',
+        # the arguments, in the form the tool reads them
+        '--body "$BODY"',
+        '--http-code "$CODE"',
+        '--sha "$GITHUB_SHA"',
+        "tools/check_release_l3.py",
+    )
+    for fragment in required:
+        assert fragment in script, (
+            f"the L3 step no longer contains {fragment!r}, so the gate can stop refusing a "
+            "release -- or start deciding on the wrong input -- while every test of the tool "
+            "stays green."
+        )
+
+    for fragment in ("|| true", "2>/dev/null"):
+        assert fragment not in script, (
+            f"the L3 step contains {fragment!r}. A gate that cannot fail is decoration, and "
+            "this step's non-zero exit is the only thing that stops a tag."
+        )
+
+    assert "if" not in step, (
+        "the L3 gate step is conditional, so `verify` can go green with the gate never run"
+    )
+    assert not step.get("continue-on-error"), (
+        "the L3 gate step ignores its own failure, so the release proceeds however it decides"
+    )
+    assert "<<'PY'" not in script, (
+        "the verdict logic is back in the YAML, where tests/test_guards.py cannot reach it"
+    )
+
+
+def windows_gui_jobs():
+    """The workflow whose run conclusion the release gate reads, parsed into jobs."""
+    path = REPO_ROOT / ".github" / "workflows" / "windows-gui.yml"
+    workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+    jobs = workflow.get("jobs") or {}
+    assert jobs, "windows-gui.yml declares no jobs, so these pins checked nothing"
+    return jobs
+
+
+def test_nothing_in_windows_gui_can_leave_the_run_green_without_running():
+    """GitHub's own syntax reference, which is why this rule is not just about jobs:
+
+    * ``jobs.<job_id>.steps[*].if`` -- "prevent a step from running";
+    * ``jobs.<job_id>.steps[*].continue-on-error`` -- "prevents a job from failing when a step
+      fails";
+    * ``jobs.<job_id>.continue-on-error`` -- "prevents a workflow run from failing when a job
+      fails";
+    * ``jobs.<job_id>.if`` -- skips the job entirely.
+
+    None of those turns the *run* red. ``tools/check_release_l3.py`` reads the run's
+    ``conclusion``, so a release gate that trusts it would accept a green run in which nothing
+    was driven -- which is the risk #30 is about. The only exemption is the log upload, whose
+    ``if: always()`` exists so the evidence survives a failure.
+
+    If a legitimate ``if:`` or ``continue-on-error`` is ever wanted elsewhere here, the answer is
+    to revisit the gate -- check the job and step conclusions it is given -- not this pin.
+    """
+    jobs = windows_gui_jobs()
+
+    skipped_jobs = sorted(name for name, job in jobs.items() if "if" in (job or {}))
+    ignored_jobs = sorted(
+        name for name, job in jobs.items() if (job or {}).get("continue-on-error")
+    )
+    assert skipped_jobs == [], (
+        f"windows-gui.yml declares a job-level `if:` on {skipped_jobs}. A skipped job leaves the "
+        "run's conclusion at success, so the release gate would accept a green run in which that "
+        "job never ran."
+    )
+    assert ignored_jobs == [], (
+        f"windows-gui.yml declares a job-level `continue-on-error` on {ignored_jobs}. A failing "
+        "job that is ignored leaves the run green, and the release gate reads the run."
+    )
+
+    offenders = []
+    for job_name, job in jobs.items():
+        for step in (job or {}).get("steps") or []:
+            where = f"{job_name}/{step.get('name') or step.get('uses')}"
+            if step.get("continue-on-error"):
+                offenders.append(f"{where} sets continue-on-error")
+            if "if" in step and not str(step.get("uses", "")).startswith(
+                "actions/upload-artifact"
+            ):
+                offenders.append(f"{where} is conditional: {step['if']}")
+    assert offenders == [], (
+        "nothing in windows-gui.yml may be skippable or non-fatal except the log upload, whose "
+        "`if: always()` is how the evidence survives a failure -- and this is a release gate, so "
+        f"the constraint is deliberate: {offenders}"
+    )
+
+
+def test_the_windows_gui_suite_step_exists_and_would_really_drive_a_window():
+    """The step the whole run exists for: present by name, and unable to be skipped or neutered."""
+    e2e = windows_gui_jobs().get("e2e") or {}
+    suite = [step for step in e2e.get("steps") or [] if step.get("name") == "Run the L3 suite"]
+
+    assert len(suite) == 1, (
+        "windows-gui.yml no longer has exactly one step named 'Run the L3 suite'. If it was "
+        "renamed, retarget this pin; if it was deleted, the release gate can accept a green run "
+        "that never drove a window."
+    )
+    step = suite[0]
+    assert "tests/e2e" in step.get("run", ""), (
+        f"the L3 suite step no longer runs tests/e2e: {step.get('run')!r}"
+    )
+    assert str(step.get("env", {}).get("PYJAB_MCP_E2E")) == "1", (
+        "without PYJAB_MCP_E2E=1 every test in tests/e2e is skipped and pytest still exits 0, "
+        "so the run would be green with no window driven -- see tests/e2e/test_live_window.py"
+    )
+    assert "if" not in step, "the step that drives the window is conditional"
+    assert not step.get("continue-on-error"), "the step that drives the window cannot fail the job"
 
 
 # ---------------------------------------------------------------------------------

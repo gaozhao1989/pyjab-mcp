@@ -16,7 +16,10 @@ under **Unreleased** until it is tagged.
   `verify` job now asks the Actions API and fails when no run at the tagged commit succeeded,
   printing the run it accepted or every candidate it rejected. "No green run" and "could not read
   the answer" are different verdicts and **both refuse**, because a check that cannot tell them
-  apart passes exactly when it is blind. A dry run warns instead of failing.
+  apart passes exactly when it is blind. A dry run warns instead of failing — including on an
+  answer the gate could not understand: a body that was not the documented shape used to raise an
+  uncaught traceback and fail the job, and it now refuses as **unread** and warns on a dry run
+  like every other refusal.
 
 * **`docs/RELEASING.md` says who confirms what.** The pipeline owns everything checkable — the
   four places the version lives, the six refusing guards, the artifact, the changelog freeze, and
