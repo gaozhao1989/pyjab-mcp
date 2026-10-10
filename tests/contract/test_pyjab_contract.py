@@ -187,6 +187,30 @@ def test_releasing_a_reference_is_something_the_element_does():
 
 
 @windows_only
+def test_the_table_property_still_reports_the_counts():
+    """M4 pages on these two keys, and pyjab documents them as `info = table.table`."""
+    from pyjab.jabelement import JABElement
+
+    source = inspect.getsource(JABElement.table.fget)
+    for key in ("row_count", "column_count"):
+        assert f'"{key}"' in source, (
+            f"JABElement.table no longer reports {key!r}, which table_driver reads to size a "
+            "page and to say how much of the table it did not show"
+        )
+
+
+@windows_only
+def test_reading_a_cell_is_public_and_returns_it_to_the_owner():
+    from pyjab.jabelement import JABElement
+
+    assert hasattr(JABElement, "get_cell"), "java_get_table is built on get_cell()"
+    signature = inspect.signature(JABElement.get_cell)
+    assert list(signature.parameters) == ["self", "row", "column", "visible"], (
+        f"get_cell's signature is now {signature}"
+    )
+
+
+@windows_only
 def test_the_walk_result_still_reports_its_own_truncation():
     """``truncated`` is a property; ``limit_hit`` is set per instance in ``__init__``.
 

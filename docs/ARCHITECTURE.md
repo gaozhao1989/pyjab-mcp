@@ -133,7 +133,8 @@ is not, or registered without being documented.
 | session | `java_list_windows`, `java_attach_window` | M1 |
 | observe | `java_snapshot` | M2 |
 | observe | `java_find`, `java_get_element`, `java_get_text` | M3 |
-| observe | `java_get_table`, `java_screenshot` | M4, M6 |
+| observe | `java_get_table` | M4 |
+| observe | `java_screenshot` | M6 |
 | act | `java_click`, `java_set_text`, `java_select`, `java_send_keys`, `java_fill_form` | M5 |
 | wait | `java_wait_for` | M6 |
 
@@ -141,8 +142,9 @@ is not, or registered without being documented.
 through the JVM's own `AccessibleTable` interface, with paging, rather than through a
 platform bridge that does not carry that information.
 
-**Status.** M1, M2 and M3 have shipped: `java_diagnostics`, `java_list_windows`,
-`java_attach_window`, `java_snapshot`, `java_find`, `java_get_element`, `java_get_text`. Two of pyjab's own gaps are still recorded rather
+**Status.** M1 to M4 have shipped: `java_diagnostics`, `java_list_windows`,
+`java_attach_window`, `java_snapshot`, `java_find`, `java_get_element`, `java_get_text`,
+`java_get_table`. Two of pyjab's own gaps are still recorded rather
 than worked around (`AGENTS.md` §6.2): there is no public API that lists Java windows, so
 the listing runs through pyjab's documented `pyjab-inspect windows --json`; and there is no
 non-destructive detach, so a bound window stays bound for the life of the process. Neither

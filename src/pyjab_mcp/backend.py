@@ -290,6 +290,10 @@ class Backend(Protocol):
     def text(self, window_id: str, locator: str) -> Optional[str]:
         """The text of the element a locator resolves to, or None when it has none."""
 
+    def table(self, window_id: str, locator: str, *, row_start: int = 0,
+              row_count: int = 20, max_cells: int = 400) -> TableReading:
+        """One page of a table, with its row and column counts."""
+
     def close(self) -> None:
         """Release what this backend holds, without touching the applications it observes."""
 
@@ -302,6 +306,27 @@ class AttachedWindow:
     hwnd: int
     title: str
     pid: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class TableReading:
+    """One page of a Java table, with the counts that make the page's size meaningful.
+
+    ``rows`` holds ``None`` for a cell with no Accessible Text interface and ``""`` for a cell
+    that is text and empty -- two different answers, and pyjab's own ``text`` property keeps
+    them apart. A cell that could not be *read* is neither: it is listed by position in
+    ``unreadable``, because "I could not read it" is a third state and not a value, and
+    collapsing it into either of the others would invent an empty table (AGENTS.md §2.4).
+    """
+
+    row_count: int
+    column_count: int
+    row_start: int
+    rows: "Tuple[Tuple[Optional[str], ...], ...]"
+    #: ``(row, column)`` of cells whose read raised, in row-major order.
+    unreadable: "Tuple[Tuple[int, int], ...]" = ()
+    truncated: bool = False
+    reason: str = ""
 
 
 class PyjabBackend:
@@ -410,6 +435,14 @@ class PyjabBackend:
     def text(self, window_id: str, locator: str) -> Optional[str]:
         """Read text through the attached window.  See :func:`text_driver`."""
         return text_driver(self._driver(window_id), locator)
+
+    def table(self, window_id: str, locator: str, *, row_start: int = 0,
+              row_count: int = 20, max_cells: int = 400) -> TableReading:
+        """Read a page of a table.  See :func:`table_driver`."""
+        return table_driver(
+            self._driver(window_id), locator,
+            row_start=row_start, row_count=row_count, max_cells=max_cells,
+        )
 
     def close(self) -> None:
         """Drop the bound drivers **without ending the applications they observe**.
@@ -532,6 +565,104 @@ def text_driver(driver: Any, locator: str) -> Optional[str]:
     """
     with element_for(driver, locator) as element:
         return element.text
+
+
+def table_driver(driver: Any, locator: str, *, row_start: int = 0,
+                 row_count: int = 20, max_cells: int = 400) -> TableReading:
+    """Read one page of the table *locator* resolves to.
+
+    Paged from the start because a Java table is exactly the thing that must never be
+    returned whole: pyjab's own test application has a 200-row table, and this project's
+    first constraint is that a read is bounded. ``max_cells`` is the hard stop even when the
+    requested rows would exceed it, and the result says when it stopped.
+
+    Cells are taken and given back one at a time inside the element's own lifetime; the
+    element itself is released by :func:`element_for`. A cell whose read raises is counted
+    rather than skipped, so a table with one broken cell cannot look like a table with a hole
+    in it.
+
+    Raises:
+        PyjabUnavailable: When the locator does not resolve, or the element is not a table --
+            the message says what it is instead, which is the difference between "your handle
+            is stale" and "that handle is a panel".
+    """
+    with element_for(driver, locator) as element:
+        info = element.table
+        if not info:
+            raise PyjabUnavailable(
+                f"the element at {locator!r} is not a table, so it has no cells. "
+                "java_snapshot or java_get_element will show what it is."
+            )
+        # Subscript rather than `.get`: the keys are part of the shape this project depends
+        # on (pyjab documents `info = table.table`), and a missing key should say so instead
+        # of quietly becoming a table with no rows.
+        try:
+            total_rows = int(info["row_count"])
+            total_columns = int(info["column_count"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise PyjabUnavailable(
+                f"the table did not report its shape as row_count/column_count: {exc}"
+            ) from exc
+
+        # `total_rows` and the caller's `row_count` are different numbers, and an earlier
+        # version of this function shadowed one with the other: the page size became the
+        # table's height, so asking for one row returned the whole table. The names are the
+        # fix, and the paging tests are what caught it.
+        start = max(0, min(row_start, total_rows))
+        # The budget is in cells, so it decides a row count: floor(max_cells / columns). An
+        # earlier version also carried a per-cell break that could never fire, because the row
+        # count had already been reduced to fit -- dead code that read as a safety net.
+        rows_that_fit = max(1, max_cells // max(1, total_columns))
+        limited_by_cells = rows_that_fit < row_count
+        wanted = max(1, min(row_count, rows_that_fit))
+        last = min(total_rows, start + wanted)
+
+        rows: "List[Tuple[Optional[str], ...]]" = []
+        unreadable: "List[Tuple[int, int]]" = []
+        cells = 0
+        stopped_early = False
+        for row in range(start, last):
+            if cells >= max_cells:
+                # Reachable only if the table reports more columns than it did a moment ago;
+                # a table whose shape changes mid-read must not be able to blow the budget.
+                stopped_early = True
+                break
+            values: "List[Optional[str]]" = []
+            for column in range(total_columns):
+                try:
+                    cell = element.get_cell(row=row, column=column)
+                except Exception:  # noqa: BLE001 - one cell failing is not the table failing
+                    unreadable.append((row, column))
+                    values.append(None)
+                    continue
+                try:
+                    values.append(cell.text)
+                except Exception:  # noqa: BLE001
+                    unreadable.append((row, column))
+                    values.append(None)
+                finally:
+                    cell.release_jabelement()
+                cells += 1
+            rows.append(tuple(values))
+            if stopped_early:
+                break
+
+        truncated = stopped_early or last < total_rows
+        reason = ""
+        if stopped_early:
+            reason = f"cell budget reached ({max_cells} cells)"
+        elif limited_by_cells:
+            reason = (
+                f"the cell budget ({max_cells} cells) allowed {len(rows)} row(s) of "
+                f"{total_columns} column(s)"
+            )
+        elif last < total_rows:
+            reason = f"{total_rows - last} more row(s) after this page"
+        return TableReading(
+            row_count=total_rows, column_count=total_columns, row_start=start,
+            rows=tuple(rows), unreadable=tuple(unreadable), truncated=truncated,
+            reason=reason,
+        )
 
 
 def find_driver(driver: Any, *, by: str, value: Any, visible: bool = False,

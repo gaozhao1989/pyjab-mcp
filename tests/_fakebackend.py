@@ -47,6 +47,7 @@ class FakeBackend:
         matches: Optional[Dict[Any, Any]] = None,
         locators: Optional[Dict[str, Any]] = None,
         texts: Optional[Dict[str, Any]] = None,
+        table_readings: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.owner = threading.get_ident()
         self.windows = list(windows)
@@ -58,6 +59,7 @@ class FakeBackend:
         self.find_calls = 0
         self.resolve_calls = 0
         self.text_calls = 0
+        self.table_calls = 0
         self.close_calls = 0
         self.closed = False
         self.threads_seen: "set[int]" = set()
@@ -71,6 +73,8 @@ class FakeBackend:
         self.locators = dict(locators or {})
         #: ``locator -> text``.
         self.texts = dict(texts or {})
+        #: ``locator -> TableReading``.
+        self.table_readings = dict(table_readings or {})
 
     def bind(self, owner: int) -> "FakeBackend":
         """Declare which thread owns this backend.
@@ -159,6 +163,20 @@ class FakeBackend:
 
             raise PyjabUnavailable(f"the locator {locator!r} no longer resolves")
         return self.texts[locator]
+
+    def table(self, window_id: str, locator: str, *, row_start: int = 0,
+              row_count: int = 20, max_cells: int = 400):
+        self._check("table")
+        self.table_calls += 1
+        reading = self.table_readings.get(locator)
+        if reading is None:
+            from pyjab_mcp.backend import PyjabUnavailable
+
+            raise PyjabUnavailable(
+                f"the element at {locator!r} is not a table, so it has no cells. "
+                "java_snapshot or java_get_element will show what it is."
+            )
+        return reading
 
     def close(self) -> None:
         self._check("close")

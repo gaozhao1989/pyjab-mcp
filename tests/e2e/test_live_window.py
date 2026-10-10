@@ -313,3 +313,38 @@ def test_a_window_that_opens_later_is_seen(live, main_window, compiled_app: Path
         )
     finally:
         stop_app(process)
+
+
+def test_a_real_table_reads_its_cells_a_page_at_a_time(live, main_window):
+    """Step 4: the capability a platform bridge does not carry.
+
+    ``find`` locates the table by role, then the table is read through its own
+    accessibility interface. The values are pyjab's test application's own row data, so this
+    asserts that JAB handed over the *table* rather than that our renderer can print strings.
+    """
+    bridge, backend = live
+
+    matches = call(bridge, backend.find, main_window.window_id, by="role", value="table")
+    located = [(record, locator) for record, locator in matches if locator]
+    assert located, f"no addressable table in the window; matches were {matches}"
+
+    table_record, locator = located[0]
+    assert table_record.role == "table"
+
+    reading = call(bridge, backend.table, main_window.window_id, locator,
+                   row_start=0, row_count=3)
+    assert reading.row_count >= 5, f"the table reports {reading.row_count} rows"
+    assert reading.column_count == 4, f"the table has {reading.column_count} columns"
+
+    first_row = reading.rows[0]
+    assert first_row[0] == "Kathy", f"first cell read as {first_row[0]!r}"
+    assert first_row[1] == "Snowboarding", f"second cell read as {first_row[1]!r}"
+
+    later_page = call(bridge, backend.table, main_window.window_id, locator,
+                      row_start=1, row_count=1)
+    assert len(later_page.rows) == 1, "a one-row page is one row, not the whole table"
+    assert later_page.rows[0][0] == "John"
+    print(
+        f"\n[L3] table {table_record.name!r}: {reading.row_count} rows x "
+        f"{reading.column_count} columns; page 1 row 0 = {first_row}"
+    )

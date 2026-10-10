@@ -42,6 +42,7 @@ async def test_the_console_script_answers_a_real_mcp_handshake():
                 "java_find",
                 "java_get_element",
                 "java_get_text",
+                "java_get_table",
             ]
 
             # A tool call over the wire, not just tools/list: this is the end of the

@@ -652,4 +652,106 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
             + ("\n[cut: ask again with start=" f"{start + len(chunk)}]" if cut else "")
         )
 
+    @server.tool(
+        name="java_get_table",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
+    )
+    async def java_get_table(
+        session_id: str,
+        handle: str,
+        row_start: int = 0,
+        row_count: int = 20,
+        max_cells: int = 400,
+    ) -> str:
+        """Read a Java table, a page of rows at a time.
+
+        Use this on a handle for a `table` element -- from java_snapshot or java_find. This is
+        the tool a platform-level automation cannot replace: it reads the table's own
+        accessibility interface, so cell text, row and column counts come from the JVM rather
+        than from pixels or from a bridge that does not carry them.
+
+        It never returns the whole table. A large table is 200 rows in pyjab's own test
+        application and thousands in a real one, so the read is paged by `row_start` and
+        bounded by `row_count` and `max_cells`, and the reply says what it left out and how to
+        ask for it.
+
+        Cells are not just text. A cell with no text interface is shown as `-`, and a cell
+        that could not be read is shown as `?` with a count: "this cell has no text" and "I
+        could not read this cell" are different answers, and reporting the second as the
+        first would invent an empty table.
+
+        Args:
+            session_id: From java_attach_window.
+            handle: A handle for the table element.
+            row_start: First row to read, 0-based.
+            row_count: How many rows to read.
+            max_cells: Hard cap on cells read in one call, whatever the rows ask for.
+
+        Returns:
+            The table's row and column counts, then one line per row, then what was left out.
+
+        Errors:
+            ``is_error`` for an unknown handle, an element that changed since the snapshot, or
+            an element that is not a table -- which is reported with what it is instead, so a
+            wrong handle and a stale handle do not look the same.
+        """
+        try:
+            bridge = await state.started_bridge()
+            attached = state.session(session_id)
+            entry = state.handles.get(handle)
+            if entry is None:
+                live = state.handles.handles_for(session_id)
+                raise PyjabUnavailable(
+                    f"unknown handle {handle!r}."
+                    + (f" This session has {len(live)} live handle(s); "
+                       "java_snapshot lists them." if live else
+                       " No handles are live for this session -- take a java_snapshot first.")
+                )
+            if entry.session_id != session_id:
+                raise PyjabUnavailable(
+                    f"handle {handle!r} belongs to session {entry.session_id!r}, not "
+                    f"{session_id!r}."
+                )
+            resolved = await bridge.call_backend("resolve", entry.window_id, entry.locator)
+            result = verify(entry.expected, resolved)
+            if not result.ok:
+                raise ToolError(
+                    result.message() + f" (handle {handle}, locator {entry.locator})"
+                )
+            reading = await bridge.call_backend(
+                "table", entry.window_id, entry.locator,
+                row_start=max(0, row_start), row_count=max(1, row_count),
+                max_cells=max(1, max_cells),
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise _tool_error(exc) from exc
+
+        lines = [
+            f"{resolved.label}: {reading.row_count} row(s) x {reading.column_count} column(s)",
+            f"  showing rows {reading.row_start}..{reading.row_start + len(reading.rows) - 1}"
+            if reading.rows else "  no rows in this page",
+        ]
+        unreadable = set(reading.unreadable)
+        for offset, row in enumerate(reading.rows):
+            row_number = reading.row_start + offset
+            cells = " | ".join(
+                "?" if (row_number, column) in unreadable
+                else "-" if value is None
+                else value
+                for column, value in enumerate(row)
+            )
+            lines.append(f"  row {row_number}: {cells}")
+        if reading.unreadable:
+            lines.append(
+                f"{len(reading.unreadable)} cell(s) could not be read and are shown as `?`. "
+                "`-` means the cell has no text interface, which is a different answer."
+            )
+        if reading.truncated:
+            nxt = reading.row_start + len(reading.rows)
+            lines.append(
+                f"truncated: {len(reading.rows)} of {reading.row_count} row(s) shown -- "
+                f"{reading.reason}. Ask again with row_start={nxt}."
+            )
+        return "\n".join(lines)
+
     return server

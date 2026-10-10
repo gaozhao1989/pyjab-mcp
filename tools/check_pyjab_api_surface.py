@@ -232,6 +232,33 @@ SURFACE: Dict[Touchpoint, Entry] = {
         "value and slices what it returns rather than reaching for the private helpers in "
         "common/textreader.py.",
     ),
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> table"): Entry(
+        PUBLIC, "1.8.0",
+        "The table's own counts: row_count and column_count, plus header and selection "
+        "counts. Documented in pyjab's Tables section ('info = table.table'), and it is where "
+        "a page's size comes from -- M4 pages because a Java table is exactly the thing that "
+        "must never be returned whole. Header *text* is not exposed by any public property, "
+        "so this tool reports counts and cell values only.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> get_cell"): Entry(
+        PUBLIC, "1.8.0",
+        "Reads one cell from the table's cell list -- good for text, and the docs are "
+        "explicit that many tables report those cells with bounds of -1, which is why "
+        "selecting goes through the accessible selection API instead (M5). The cell it "
+        "returns is owned by the caller, so table_driver releases every one.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> get_cell() -> text"): Entry(
+        PUBLIC, "1.8.0",
+        "The cell's text. None means the cell has no Accessible Text interface and \"\" means "
+        "it is text and empty; table_driver keeps the two apart all the way to the reply, "
+        "because collapsing them would report a missing interface as an empty cell.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> get_cell() -> release_jabelement"): Entry(
+        PUBLIC, "1.8.0",
+        "Every cell the table hands out is released, one at a time, in a finally. A 200-row "
+        "table read without that is 200 Java objects left behind, which is issue #43's shape "
+        "at exactly the scale that makes it hurt.",
+    ),
     ("pyjab.jabdriver", "JABDriver.find_elements_by_name"): Entry(
         PUBLIC, "1.8.0",
         "Search by exact accessible name. Returns elements the caller owns, so find_driver "
@@ -326,8 +353,7 @@ def _resolve_call_target(node: ast.AST, owners: Mapping[str, Touchpoint]) -> Opt
         base = _resolve_call_target(node.value, owners)
         if base is None:
             return None
-        module, symbol = base
-        return (module, f"{symbol}.{node.attr}" if symbol != "*" else node.attr)
+        return _attribute_point(*base, node.attr)
     if isinstance(node, ast.Call):
         base = _resolve_call_target(node.func, owners)
         if base is None:

@@ -87,9 +87,23 @@ class FakeElement:
         return self._driver.make_tree(max_depth, limit)
 
     @property
+    def table(self) -> "Optional[Dict[str, int]]":
+        """pyjab's ``JABElement.table``: the counts, or None when this is not a table."""
+        self._read()
+        return self._driver.table_info(self.path)
+
+    def get_cell(self, row: int, column: int, visible: bool = False) -> "FakeElement":
+        """pyjab's ``JABElement.get_cell``: one cell, owned by the caller."""
+        self._read()
+        return self._driver.cell(self.path, row, column)
+
+    @property
     def text(self) -> "Optional[str]":
         """pyjab's ``JABElement.text``: the whole string, None when there is no text interface."""
         self._read()
+        cell_text = getattr(self, "_cell_text", "unset")
+        if cell_text != "unset":
+            return cell_text
         return self._driver.element_text(self.path)
 
     def release_jabelement(self) -> None:
@@ -181,6 +195,9 @@ class FakeDriver:
         explode: Sequence[str] = (),
         search: Optional[Mapping[Any, Sequence[Mapping[str, Any]]]] = None,
         text: Optional[Mapping[str, Optional[str]]] = None,
+        tables: Optional[Mapping[str, Sequence[Sequence[Any]]]] = None,
+        cells_that_raise: Sequence[Any] = (),
+        cells_that_are_empty: Sequence[Any] = (),
     ) -> None:
         self._root = FakeElement(
             root or record("root pane", "", children_count=len(items)), self, "root"
@@ -191,6 +208,10 @@ class FakeDriver:
         self.explode = set(explode)
         self._search_records = {key: list(value) for key, value in (search or {}).items()}
         self._text = dict(text or {})
+        self._tables = {key: [list(row) for row in value] for key, value in (tables or {}).items()}
+        self.cells_that_raise = set(cells_that_raise)
+        self.cells_that_are_empty = set(cells_that_are_empty)
+        self.cells_handed_out = 0
         self.searches: List[Dict[str, Any]] = []
         self.outstanding = 0
         self.handed_out = 0
@@ -244,6 +265,31 @@ class FakeDriver:
 
     def element_text(self, path: str) -> "Optional[str]":
         return self._text.get(path)
+
+    def table_info(self, path: str) -> "Optional[Dict[str, int]]":
+        grid = self._tables.get(path)
+        if grid is None:
+            return None
+        return {
+            "row_count": len(grid),
+            "column_count": len(grid[0]) if grid else 0,
+        }
+
+    def cell(self, path: str, row: int, column: int) -> FakeElement:
+        grid = self._tables.get(path)
+        if grid is None or row >= len(grid) or column >= len(grid[row]):
+            raise IndexError(f"no cell at ({row}, {column}) in {path}")
+        marker = (path, row, column)
+        if marker in self.cells_that_raise:
+            raise RuntimeError(f"the bridge refused to read the cell at ({row}, {column})")
+        value = None if marker in self.cells_that_are_empty else grid[row][column]
+        self.outstanding += 1
+        self.handed_out += 1
+        self.cells_handed_out += 1
+        element = FakeElement(record("label", f"cell {row},{column}"), self,
+                              f"{path}#cell({row},{column})")
+        element._cell_text = value
+        return element
 
     # -- convenience -----------------------------------------------------------------
 

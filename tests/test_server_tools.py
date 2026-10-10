@@ -13,6 +13,7 @@ from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 
 from pyjab_mcp.backend import PyjabApiGap, PyjabUnavailable, requirement
 from pyjab_mcp.server import ServerState, create_server
+from pyjab_mcp.backend import TableReading
 from pyjab_mcp.tree import Record
 from tests._fakebackend import FakeBackend, FakeFactory, window
 from tests._fakedriver import record
@@ -28,6 +29,7 @@ TOOL_ORDER = [
     "java_find",
     "java_get_element",
     "java_get_text",
+    "java_get_table",
 ]
 
 
@@ -436,3 +438,96 @@ async def test_get_text_distinguishes_no_text_interface_from_empty_text():
     text = await text_of(result)
     assert "no text interface" in text
     assert "not the same as being empty" in text
+
+
+# ---------------------------------------------------------------------------------
+# M4: the table tool
+# ---------------------------------------------------------------------------------
+
+TABLE = Record.from_pyjab(record("table", "Sports table", index_in_parent=2))
+TABLE_LOCATOR = "//table[@name='Sports table']"
+
+
+async def table_server(reading: TableReading, *, locator_record=None):
+    server, state, backend, session_id = await attached_server(
+        matches={("role", "table"): [(TABLE, TABLE_LOCATOR)]},
+        locators={TABLE_LOCATOR: locator_record or record("table", "Sports table",
+                                                          index_in_parent=2)},
+        table_readings={TABLE_LOCATOR: reading},
+    )
+    found = await server.call_tool("java_find", {"session_id": session_id, "role": "table"})
+    handle = (await text_of(found)).split("[", 1)[1].split("]", 1)[0]
+    return server, state, backend, session_id, handle
+
+
+async def test_get_table_renders_the_counts_and_the_rows():
+    reading = TableReading(
+        row_count=200, column_count=3, row_start=0,
+        rows=(("Alice", "Tennis", "5"), ("Bob", "Golf", "3")),
+        truncated=True, reason="198 more row(s) after this page",
+    )
+    server, _state, backend, session_id, handle = await table_server(reading)
+
+    result = await server.call_tool(
+        "java_get_table", {"session_id": session_id, "handle": handle}
+    )
+
+    assert result.is_error is False
+    text = await text_of(result)
+    assert "200 row(s) x 3 column(s)" in text
+    assert "Alice | Tennis | 5" in text
+    assert "row 0" in text and "row 1" in text
+    assert "truncated" in text and "row_start=2" in text
+    assert backend.table_calls == 1
+
+
+async def test_get_table_keeps_no_text_and_unreadable_cells_apart():
+    reading = TableReading(
+        row_count=2, column_count=2, row_start=0,
+        rows=(("Alice", None), (None, "Golf")),
+        unreadable=((1, 0),),
+    )
+    server, _state, _backend, session_id, handle = await table_server(reading)
+
+    result = await server.call_tool(
+        "java_get_table", {"session_id": session_id, "handle": handle}
+    )
+
+    text = await text_of(result)
+    assert "row 0: Alice | -" in text, "a cell with no text interface is '-'"
+    assert "row 1: ? | Golf" in text, "a cell that could not be read is '?'"
+    assert "1 cell(s) could not be read" in text
+    assert "different answer" in text
+
+
+async def test_get_table_on_something_that_is_not_a_table_says_what_to_do():
+    server, _state, _backend, session_id = await attached_server(
+        matches={}, locators={"//panel": record("panel", "Main panel")},
+    )
+    state_handle = _state.handles.add(
+        session_id=session_id, window_id="w1", locator="//panel",
+        expected=Record.from_pyjab(record("panel", "Main panel")),
+    )
+
+    with pytest.raises(ToolError) as caught:
+        await server.call_tool(
+            "java_get_table", {"session_id": session_id, "handle": state_handle}
+        )
+
+    assert "not a table" in str(caught.value)
+    assert "java_snapshot" in str(caught.value)
+
+
+async def test_get_table_pages_through_the_tool():
+    reading = TableReading(row_count=5, column_count=1, row_start=3,
+                           rows=(("d",), ("e",)))
+    server, _state, backend, session_id, handle = await table_server(reading)
+
+    result = await server.call_tool(
+        "java_get_table",
+        {"session_id": session_id, "handle": handle, "row_start": 3, "row_count": 2},
+    )
+
+    assert result.is_error is False
+    assert "showing rows 3..4" in await text_of(result)
+    assert backend.table_calls == 1

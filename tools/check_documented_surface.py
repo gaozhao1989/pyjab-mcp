@@ -55,9 +55,20 @@ TOOL_HEADING = "## Tool surface"
 #:
 #: This list moves as milestones land, and moving it is the deliberate act: it is what makes
 #: a tool's presence in the code a claim the page has to agree with.
-SHIPPED_MILESTONES = ("M1", "M2", "M3")
+SHIPPED_MILESTONES = ("M1", "M2", "M3", "M4")
 
 _BACKTICKED = re.compile(r"`([^`]+)`")
+
+#: A milestone token, e.g. ``M4`` out of ``M4,``.  The cell is written by hand, so trailing
+#: punctuation is stripped rather than trusted -- the first version of this compared the raw
+#: cell and a documented "M4, M6" silently counted as *not* shipping.
+_MILESTONE = re.compile(r"\bM\d+\b")
+
+
+def _milestone(cell: str) -> str:
+    """The milestone named in a ``ships`` cell, or ``""`` when it names none."""
+    match = _MILESTONE.search(cell)
+    return match.group(0) if match else ""
 
 
 def _table_rows(text: str, heading: str) -> List[List[str]]:
@@ -102,7 +113,7 @@ def documented_tools(architecture: Path = ARCHITECTURE) -> "Mapping[str, str]":
         if len(row) < 3:
             continue
         tools = [name for name in _BACKTICKED.findall(row[1]) if name.startswith("java_")]
-        ships = row[2].split()[0] if row[2].split() else ""
+        ships = _milestone(row[2])
         for name in tools:
             found[name] = ships
     return found
@@ -164,9 +175,9 @@ def check(
     for name in sorted(set(registered) - shipped):
         if name in planned:
             problems.append(
-                f"NOT YET: {name} is registered but documented as {documented[name]}, so "
-                "the page describes the future in the present tense. Either mark it as "
-                "shipping now or do not register it."
+                f"NOT YET: {name} is registered but documented as {documented[name]}, and "
+                "the page should describe what ships rather than what is planned. Either "
+                "mark it as shipping now or do not register it."
             )
         else:
             problems.append(

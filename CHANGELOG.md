@@ -181,6 +181,25 @@ under **Unreleased** until it is tagged.
   text interface says so, which is a different answer from an empty string and is reported as
   one.
 
+### Added
+
+* **M4: `java_get_table`.** A Java table read through the JVM's own `AccessibleTable`
+  interface — row and column counts, then cell text — which is the capability a platform
+  bridge does not carry at all.
+
+  It never returns the whole table: a page is bounded by `row_start`, `row_count` and a
+  `max_cells` budget, and the reply says what it left out and how to ask for it. Three cell
+  states are kept apart all the way to the reply, because collapsing them would invent data:
+  text, `-` for a cell with no Accessible Text interface, and `?` for a cell whose read
+  raised, with a count — "this cell has no text" and "I could not read this cell" are
+  different answers (AGENTS.md §2.4). Every cell is released as it is read, one at a time; a
+  200-row table read without that is 200 Java objects left behind.
+
+  Writing it turned up two bugs in itself, both caught by the tests it came with: the page
+  size and the table's height shared a name, so asking for one row returned the whole table,
+  and the per-cell budget check was dead code because the row count had already been reduced
+  to fit it.
+
 ### Fixed
 
 * **The handle path called a method ``JABDriver`` does not have.** `resolve_driver` released

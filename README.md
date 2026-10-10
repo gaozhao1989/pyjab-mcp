@@ -10,9 +10,13 @@ which is what makes this usable against a production Java client that you cannot
 
 ## Status
 
-**M1, M2 and M3 are implemented.** `java_diagnostics`, `java_list_windows`,
-`java_attach_window`, `java_snapshot`, `java_find`, `java_get_element` and `java_get_text`.
-It needs `pyjab>=1.9.0`, which is the first release with the tree walk a snapshot is built on.
+**M1 to M4 are implemented.** `java_diagnostics`, `java_list_windows`, `java_attach_window`,
+`java_snapshot`, `java_find`, `java_get_element`, `java_get_text` and `java_get_table`. It
+needs `pyjab>=1.9.0`, which is the first release with the tree walk a snapshot is built on.
+
+`java_get_table` is where this substrate earns its place: it reads a `JTable` through the
+JVM's own `AccessibleTable` interface — row and column counts, then cell text, a page of rows
+at a time — rather than through a platform bridge that does not carry that information at all.
 
 Live behaviour is verified on a hosted Windows runner by `windows-gui.yml`: the end-to-end
 suite attaches to a real Swing application, snapshots it, resolves a handle against the real
