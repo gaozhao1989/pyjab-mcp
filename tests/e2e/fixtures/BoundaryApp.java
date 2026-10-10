@@ -6,11 +6,14 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 
 import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
+import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 
 /**
@@ -107,9 +110,25 @@ public final class BoundaryApp {
         JButton ordinary = new JButton("Ordinary button");
         ordinary.setName("Ordinary button");
 
+        // A button whose action is also reachable as a chord, so an end-to-end test can say
+        // whether a key really arrived. This is the observable end of the `send_keys` API:
+        // an accelerator only fires while the window has the keyboard focus, which is exactly
+        // what the tool's own documentation warns about.
+        JButton accelerated = new JButton("Accelerated button");
+        accelerated.setName("Accelerated button");
+        accelerated.setAccelerator(
+                KeyStroke.getKeyStroke(KeyEvent.VK_Y, InputEvent.ALT_DOWN_MASK));
+        accelerated.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                status.setText("the accelerator fired");
+            }
+        });
+
         controls.add(first);
         controls.add(second);
         controls.add(ordinary);
+        controls.add(accelerated);
         controls.add(status);
         frame.add(controls, BorderLayout.SOUTH);
 

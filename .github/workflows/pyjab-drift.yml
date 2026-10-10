@@ -13,6 +13,12 @@ name: pyjab drift
 #
 # Scheduled rather than per-push, because what it watches lives in another repository: a push
 # here cannot make pyjab@master change, and a run that cannot fail is not worth paying for.
+#
+# The **live** layer runs here too, not only the shapes. `windows-latest` has a desktop session
+# and a JDK, so the end-to-end suite can drive a real application against pyjab@master -- which
+# is the only place a capability can be exercised *before* it is released. java_send_keys is
+# the first case: the pinned release has no `send_keys`, so `windows-gui` takes the gap path and
+# this job is where the chord actually reaches a window (issue #19).
 
 on:
   schedule:
@@ -54,6 +60,15 @@ jobs:
       # three contract areas -- and a failure here is a finding either way.
       - name: The whole suite against pyjab@master
         run: python -m pytest tests/ -q
+
+      # The live layer, against the code being released rather than the shape it promises.
+      # Skipped under `windows-gui`, which installs the pin; enabled here, which installs
+      # master. The first end-to-end test compiles its own Java, so a compile error is a
+      # finding about this project rather than about pyjab.
+      - name: The live layer against pyjab@master
+        env:
+          PYJAB_MCP_E2E: "1"
+        run: python -m pytest tests/e2e -v -s
 
       # And the announced half: a marker nobody has answered here.
       - name: Every marked pyjab change has an answer here
