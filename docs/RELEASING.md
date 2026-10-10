@@ -114,14 +114,24 @@ shipped. That is why it is a separate commit *after* the release: the tag has to
 Commit the changed `tools/released_changelog_sections.json`.
 
 **Then confirm what was actually published**, by installing it — the release workflow says the
-upload succeeded, and this says the thing on PyPI is the thing that was built:
+upload succeeded, and this says the thing on PyPI is the thing that was built, tool surface and
+all:
 
 ```console
 python -m venv /tmp/check
 /tmp/check/bin/python -m pip install "pyjab-mcp==0.1.0"
-/tmp/check/bin/python -c "import pyjab_mcp; print(pyjab_mcp.__version__)"
-/tmp/check/bin/pyjab-mcp --help
+/tmp/check/bin/python -c "
+import asyncio, pyjab_mcp
+from pyjab_mcp.server import create_server
+print('version:', pyjab_mcp.__version__)
+print('tools:', [t.name for t in asyncio.run(create_server().list_tools())])
+"
 ```
+
+Do not use `pyjab-mcp --help` for this. The console script takes no arguments and starts the
+stdio server whatever it is given, so `--help` prints nothing and exits 0 when stdin closes —
+a command that looks like a check and is not one. (`--help`/`--version` are worth adding; it is
+not a release rule, and 0.1.0 is published.)
 
 ## If the tag is wrong
 

@@ -1,0 +1,80 @@
+name: publish registry metadata
+
+# The MCP Registry holds *metadata* that points at the PyPI package, and publishing it is a
+# separate act from publishing the package -- which matters because of what happened at 0.1.0:
+#
+#   * the `registry` job in release.yml failed on its first step, because it ran
+#     `python -m pytest` in a job that never installed Python ("No module named pytest");
+#   * PyPI had already published by then, and the `registry` job runs after `pypi` because the
+#     registry points at a package that should exist first.
+#
+# So the package was live and the metadata was not, and there was no way to publish just the
+# metadata: re-running the tag's workflow replays the *tag's* file, and a new tag would mean a
+# new PyPI release. Hence this workflow, which is callable from release.yml (the normal path)
+# and dispatchable by hand (the repair path, and the one the registry's own preview status
+# makes likely -- it warns that data may be reset).
+#
+#   gh workflow run publish-registry.yml -f version=0.1.0
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Version to check server.json against; defaults to what server.json says"
+        type: string
+        required: false
+        default: ""
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to check server.json against; defaults to what server.json says"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  # What the registry authenticates against: the OIDC token identifies the repository, and the
+  # namespace follows from it (io.github.gaozhao1989/* for this one).
+  id-token: write
+
+jobs:
+  publish:
+    name: the registry has to accept server.json, then publish it
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # python3 is on the runner; this job does not need the project installed, and pretending
+      # otherwise is exactly the mistake that broke 0.1.0's registry publish.
+      - name: The version in server.json is the one being published
+        run: |
+          python3 - "${{ inputs.version }}" <<'PY'
+          import json, sys
+          wanted = sys.argv[1]
+          server = json.load(open("server.json", encoding="utf-8"))
+          if not wanted:
+              print(f"no version given; server.json says {server['version']}")
+              raise SystemExit(0)
+          if server["version"] != wanted:
+              raise SystemExit(
+                  f"server.json says {server['version']} and this run is for {wanted}: "
+                  "the metadata would point at a version that is not the one being registered"
+              )
+          print(f"server.json names {wanted}")
+          PY
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      # The registry's own validator, before anything is sent: a rejection here is free, and
+      # the same rejection during `publish` is not.
+      - name: The registry has to accept it
+        run: ./mcp-publisher validate
+
+      - name: Authenticate with GitHub OIDC
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish
+        run: ./mcp-publisher publish

@@ -8,7 +8,30 @@ under **Unreleased** until it is tagged.
 
 ## Unreleased
 
-Nothing yet. This repository has not shipped anything since 0.1.0.
+### Fixed
+
+* **The registry publish failed at 0.1.0, after PyPI had already published.** The `registry`
+  job ran `python -m pytest` in a job that never installed Python — `No module named pytest`,
+  exit 1, and the registry validator never even ran. The package went live and its metadata did
+  not, and there was no way to publish the metadata alone: re-running the tag's workflow replays
+  the *tag's* workflow file, and a new tag would mean a new PyPI release.
+
+  The metadata publish now lives in its own workflow, callable from `release.yml` and
+  dispatchable by hand (`gh workflow run publish-registry.yml -f version=0.1.0`), which is the
+  repair path — and the likely one, given the registry's own warning that its data may be reset.
+  The Python check moved to where Python is installed; the registry's validator stays where the
+  registry is.
+
+  Two things this says about the release path, and both are now written down rather than
+  remembered: a job that publishes should run only the checks it can actually run, and the
+  registry runs *after* PyPI because it points at a package that has to exist — so its
+  failures arrive when they can no longer be fixed by re-releasing.
+
+* **`pyjab-mcp --help` prints nothing and exits 0.** The console script takes no arguments, so
+  `--help` starts the stdio server, reads EOF and stops. It had been written into the after-tag
+  confirmation step in `docs/RELEASING.md`, where it looked like a check and was not one; the
+  step now installs the published wheel and lists its tool surface, which is a check. The
+  missing `--help`/`--version` is worth adding and is not a release rule.
 
 ## [0.1.0] - 2026-10-10
 
