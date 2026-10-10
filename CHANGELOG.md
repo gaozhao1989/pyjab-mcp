@@ -8,6 +8,23 @@ under **Unreleased** until it is tagged.
 
 ## Unreleased
 
+### Changed
+
+* **The release pipeline refuses a tag whose commit has no successful `windows-gui.yml` run.**
+  "L3 before the tag" was a step a person remembered, and the GUI job is not a gate on a pull
+  request, so nothing noticed when it was skipped — and PyPI cannot take a release back. The
+  `verify` job now asks the Actions API and fails when no run at the tagged commit succeeded,
+  printing the run it accepted or every candidate it rejected. "No green run" and "could not read
+  the answer" are different verdicts and **both refuse**, because a check that cannot tell them
+  apart passes exactly when it is blind. A dry run warns instead of failing.
+
+* **`docs/RELEASING.md` says who confirms what.** The pipeline owns everything checkable — the
+  four places the version lives, the six refusing guards, the artifact, the changelog freeze, and
+  a green L3 run on the tagged commit — and the human decides once whether this version ships; the
+  `pypi` environment's required review enforces that decision rather than re-checking it. One step
+  is deliberately **not** in the pipeline and is now written as such: the pre-flight that nothing
+  is already published, because the tag is what starts the run.
+
 ### Added
 
 * **The foreground gap is tracked as data rather than as a note (R5).** `java_send_keys` sends a

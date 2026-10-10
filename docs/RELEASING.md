@@ -23,7 +23,6 @@ the pipeline's, and it refuses the release on any of them.
 * **the artifact, not the rules** — `python -m build`, `tools/check_dist_contents.py --dist dist`
   and `twine check`;
 * **the changelog-immutability record**, so a released section cannot be edited afterwards;
-* **the pre-flight that nothing is published** under this version: PyPI, the GitHub release, the tag;
 * **a green L3 run on the tagged commit** — the pipeline requires it: `verify` fails when no
   successful `windows-gui.yml` run exists for the commit the tag points at. A green L3 run is
   checked by the pipeline, not by memory.
@@ -33,9 +32,19 @@ published.** The approval click on the `pypi` environment is the *enforcement* o
 not a second review — everything checkable has already been checked, so the click answers only
 "ship it".
 
-**The maintainer's agent prepares the release**: the bump, the changelog section, the artifact,
-the pre-flight, the L3 dispatch, the evidence. It never needs a person for a checkable step, and
-it cannot approve the publish.
+**The maintainer's agent prepares the release** — and one of those steps is *not* in the pipeline,
+which is worth knowing before trusting the list above:
+
+* the bump, the changelog section, the artifact, the L3 dispatch, the evidence;
+* **the pre-flight that nothing is already published** under this version (PyPI, the GitHub
+  release, the tag) — **the pipeline does not check this**, so it is the one checkable thing that
+  has to be done *before* the tag exists. Do it first, from the pre-flight section below. If a
+  version is already on PyPI, the run still reaches `github-release` (it needs only `verify`),
+  so the outcome is a GitHub release with no matching package: the half-published state this
+  check exists to prevent. *(Making it a pipeline check is filed as an issue; it cannot check the
+  tag, because the tag is what starts the run.)*
+
+It never needs a person for a checkable step, and it cannot approve the publish.
 
 ### The click, and why nothing can stand in for it
 
@@ -139,8 +148,9 @@ python tools/check_changelog_immutable.py
 ```
 
 The other guards need Windows, a JDK or the network, so CI is the authority for them; the L3 job
-is the only one that can say a live window still works. It is dispatched by hand, and the pipeline
-requires its result: no green `windows-gui.yml` run on the tagged commit, no release — see
+is the only one that can say a live window still works. It is dispatched by hand or runs weekly on
+its own schedule, and the pipeline requires its result: no green `windows-gui.yml` run on the
+tagged commit, no release — see
 "What is deliberately not automated" below.
 
 ## Then

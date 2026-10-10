@@ -63,7 +63,8 @@ jobs:
           }
 
       # L3 is the only layer that can say a tool call worked against a live window, and
-      # `windows-gui.yml` is dispatch-only, so a green default CI run says nothing about it.
+      # `windows-gui.yml` runs weekly on a schedule (and on dispatch) rather than as part of the
+      # default CI, so a green default CI run says nothing about it.
       # "A green L3 run on the tagged commit" is a step in the release procedure
       # (docs/RELEASING.md) that a human had to remember; this is that rule expressed where the
       # other "is the tag true" checks live. A tag whose commit was never driven end to end
@@ -99,6 +100,13 @@ jobs:
           if [ "${CODE}" != "200" ]; then
             # Not a verdict about L3: the gate could not be read.
             echo "::${VERDICT}::the Actions API could not be read for windows-gui.yml at ${GITHUB_SHA} (HTTP ${CODE}) -- this gate is unverified, which is not the same as satisfied"
+            if [ "${CODE}" = "401" ] || [ "${CODE}" = "403" ]; then
+              # Name the likely cause, because the message above is all a maintainer would see.
+              # And say what a dry run can and cannot prove: on `workflow_dispatch` this branch
+              # exits 0 with a warning, so a green dry run does NOT prove the permission -- the
+              # proof is `PASSED: run <id>` in the log of a run whose commit has an L3 run.
+              echo "::notice::HTTP ${CODE} from the Actions API usually means this workflow is missing 'actions: read'. Note that a dry run downgrades this to a warning, so a green dry run does not prove the permission -- look for 'PASSED: run <id>' instead."
+            fi
             head -c 2000 "${BODY}" || true
             echo
             if [ "${VERDICT}" = "error" ]; then exit 1; fi
