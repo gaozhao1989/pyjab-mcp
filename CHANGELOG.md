@@ -8,7 +8,18 @@ under **Unreleased** until it is tagged.
 
 ## Unreleased
 
-Nothing yet.
+### Added
+
+* **The foreground gap is tracked as data rather than as a note (R5).** `java_send_keys` sends a
+  chord to whatever has the keyboard focus, and the only supported way to give a window focus
+  today is an interactive call — a click, which activates whatever it lands on. That is the side
+  effect a shortcut exists to avoid, so "click something harmless first" is a workaround, and
+  `java_diagnostics` now reports the gap itself: a probe for a public foreground API, the
+  requirement behind it, and the upstream issue
+  ([pyjab#180](https://github.com/gaozhao1989/pyjab/issues/180)) it is waiting on. The day pyjab
+  ships one, `tools/check_pyjab_readiness.py` says READY and a `java_focus_window` tool is an
+  hour of work.
+
 
 ## [0.1.2] - 2026-10-10
 

@@ -61,6 +61,8 @@ WAITING = (
     ("detach", "non-destructive detach", None, "1.10.0"),
     ("walk", "tree walk (JABElement.walk)", None, "1.9.0"),
     ("send_keys", "public key/shortcut sending", "send_keys", None),
+    ("bring_to_foreground", "public way to bring a window to the foreground",
+     "bring_to_foreground", None),
 )
 
 WALK_NOTE = (

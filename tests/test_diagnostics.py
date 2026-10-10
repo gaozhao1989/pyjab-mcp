@@ -7,6 +7,8 @@ the other two, because collapsing them is how a report starts flattering whoever
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from pyjab_mcp.backend import PyjabApiReport, PyjabUnavailable, Fact, AVAILABLE, UNKNOWN
@@ -233,7 +235,13 @@ def test_the_diagnostics_report_carries_no_marketing():
 
     text = collect().render()
 
-    for advertisement in ("gaozhao89@qq.com", "commercial", "support"):
-        assert advertisement not in text.lower(), (
+    # Word boundaries, because 'supported' is not an advertisement and appears in a fact's
+    # detail ("the supported way to give a window focus"). The first version of this test
+    # matched the substring and failed on Windows only, where that fact is the one reported.
+    assert "gaozhao89@qq.com" not in text.lower(), (
+        "the support address belongs in --help and the README, not in a findings report"
+    )
+    for advertisement in ("commercial", "support", "licence key"):
+        assert not re.search(rf"\b{advertisement}\b", text.lower()), (
             f"{advertisement!r} belongs in --help and the README, not in a findings report"
         )
