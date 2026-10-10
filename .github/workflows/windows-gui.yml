@@ -18,6 +18,12 @@ name: windows GUI (L3)
 # `explorer.exe` running -- an interactive session, not a service in session 0.
 
 on:
+  # TEMPORARY, and it must not be merged: GitHub only accepts `workflow_dispatch` for a
+  # workflow that exists on the default branch, so a workflow being verified on a feature
+  # branch cannot be dispatched at all. pyjab hit the same wall with its own GUI job and left
+  # this note; the trigger is removed before the branch is merged.
+  push:
+    branches: [feat/m1-bridge-and-diagnostics]
   workflow_dispatch:
     inputs:
       java:
