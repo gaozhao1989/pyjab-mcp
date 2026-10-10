@@ -265,3 +265,53 @@ def test_verification_ignores_bounds_when_either_side_has_none():
 
     assert verify(with_bounds, without).ok is True
     assert verify(without, with_bounds).ok is True
+
+
+def test_a_name_change_on_a_content_role_is_reported_but_does_not_block():
+    """A text field's accessible name *is* its text, so an edit renames it.
+
+    Found by the first real run: L3 set a field to "hello" and could no longer read it back,
+    because the edit had renamed the element and a strict name check refused. The structural
+    identity -- role, position, bounds -- is what catches a different element arriving, and it
+    is what blocks.
+    """
+    before = Record.from_pyjab(record("text", "1122233455", index_in_parent=3))
+    after = Record.from_pyjab(record("text", "hello from l3", index_in_parent=3))
+
+    result = verify(before, after)
+
+    assert result.ok is True, "an edit is not a different element"
+    assert result.problems == ()
+    assert result.warnings and "reports its content as its name" in result.warnings[0]
+    assert "same element with different content" in result.message()
+
+
+@pytest.mark.parametrize("role", ["text", "password text", "label", "table cell"])
+def test_every_content_role_is_treated_as_content(role):
+    before = Record.from_pyjab(record(role, "before", index_in_parent=1))
+    after = Record.from_pyjab(record(role, "after", index_in_parent=1))
+
+    assert verify(before, after).ok is True
+
+
+@pytest.mark.parametrize("role", ["push button", "menu item", "check box", "tab"])
+def test_a_label_role_that_renames_is_a_different_element(role):
+    """The case D2 exists for: a renamed button at the same position is a different button."""
+    before = Record.from_pyjab(record(role, "Save", index_in_parent=1))
+    after = Record.from_pyjab(record(role, "Cancel", index_in_parent=1))
+
+    result = verify(before, after)
+
+    assert result.ok is False
+    assert "name was 'Save', now 'Cancel'" in result.problems[0]
+
+
+def test_a_content_role_that_also_moved_still_blocks():
+    """The name is content; where the element *is* is not."""
+    before = Record.from_pyjab(record("text", "before", index_in_parent=1))
+    after = Record.from_pyjab(record("text", "after", index_in_parent=2))
+
+    result = verify(before, after)
+
+    assert result.ok is False
+    assert "index among siblings" in result.problems[0]

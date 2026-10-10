@@ -69,14 +69,17 @@ class ServerState:
         open_backend: Callable[[], object] = open_backend,
         pump_interval: float = 0.05,
         start_timeout: float = 30.0,
+        bridge: Optional[BridgeThread] = None,
     ) -> None:
+        # An existing bridge can be adopted, and the end-to-end suite does: JAB must have
+        # exactly one owning thread, so a test that already has one must not start a second.
+        self._bridge = bridge
         self._open_backend = open_backend
         self._pump_interval = pump_interval
         # A backend that never comes up must not leave a tool call waiting for ever. pyjab's
         # own window timeout is 30s, so this matches the substrate's idea of "too long".
         self._start_timeout = start_timeout
         self._lock = threading.Lock()
-        self._bridge: Optional[BridgeThread] = None
         self._sessions: "dict[str, AttachedWindow]" = {}
         #: Element handles, bounded and holding no JAB references -- see handles.py.
         self._handles = HandleTable()

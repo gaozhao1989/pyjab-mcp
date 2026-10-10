@@ -226,6 +226,29 @@ under **Unreleased** until it is tagged.
   requirement **and** the way round it: `java_set_text` for text, or the menu item that
   exposes the same action, found with `java_find(role="menu item")` and clicked.
 
+### Changed
+
+* **D2's verification is split into what blocks and what is reported, because a real run showed
+  why it has to be.** The first end-to-end run through the tools set a text field to `"hello"`,
+  then could not read it back: the edit had *renamed* the element. `JTextField("1122233455")`
+  with no `setName` reports the text as its accessible name — Swing's
+  `AccessibleJTextComponent.getName()` falls back to the content — and D2 as written compared
+  the name, so an edit invalidated the handle that made it.
+
+  Blocking now: role, position among siblings, and bounds when both sides report them.
+  Reported: the name, **for the four roles whose name is their content** (`text`,
+  `password text`, `label`, `table cell`). For every other role a name change still blocks,
+  because a renamed button at the same position is a different button — which is the case the
+  check exists for. The reply says which of the two happened.
+
+* **A handle from `java_find` is now built from a walk path rather than from a name.**
+  Same evidence, other half: a locator containing `[@name='1122233455']` stops resolving the
+  moment the field's content changes, so the handle could not read back what it had written.
+  Search results are placed against one bounded walk of the window and given the same
+  position-based locators a snapshot produces; only when the walk cannot place an element does
+  it fall back to a name locator, which resolves now but may not survive the next edit. One
+  walk serves every result in the call.
+
 ### Fixed
 
 * **A real table's cells report no text, and M4 was reading `None` for all of them.** L3

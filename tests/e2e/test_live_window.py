@@ -35,6 +35,7 @@ What it is looking for, in order of how much it would hurt to get wrong:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import subprocess
@@ -354,4 +355,122 @@ def test_a_real_table_reads_its_cells_a_page_at_a_time(live, main_window):
     print(
         f"\n[L3] table {table_record.name!r}: {reading.row_count} rows x "
         f"{reading.column_count} columns; page 1 row 0 = {first_row}"
+    )
+
+
+# ---------------------------------------------------------------------------------
+# The flow PLAN §10 asks for, through the MCP tools rather than the backend
+# ---------------------------------------------------------------------------------
+
+async def tool(server, name: str, arguments: dict) -> str:
+    """Call one tool and fail loudly if it reports an error.
+
+    The point of this test is the flow, so an error is a failure here rather than something to
+    inspect: each tool's own error paths are covered by L1, and what cannot be covered there
+    is whether the six steps work in sequence on a real window.
+    """
+    result = await server.call_tool(name, arguments)
+    text = "".join(
+        part.text for part in result.content if getattr(part, "text", None)
+    )
+    assert result.is_error is False, f"{name} failed: {text}"
+    return text
+
+
+def handle_in(text: str) -> str:
+    """The first ``e:...`` handle in a tool's reply."""
+    import re
+
+    match = re.search(r"\[(e:[0-9a-f]+)\]", text)
+    assert match, f"no handle in the reply: {text}"
+    return match.group(1)
+
+
+async def wait_for_tool_window(server, title: str, timeout: float = STARTUP_TIMEOUT) -> str:
+    """Poll java_list_windows through the tools until *title* appears."""
+    deadline = time.monotonic() + timeout
+    seen = ""
+    while time.monotonic() < deadline:
+        seen = await tool(server, "java_list_windows", {})
+        if title in seen:
+            return seen
+        await asyncio.sleep(POLL_INTERVAL)
+    pytest.fail(f"{title!r} never appeared through java_list_windows. Last reply:\n{seen}")
+
+
+@pytest.mark.asyncio
+async def test_the_whole_flow_through_the_mcp_tools(live, main_window):
+    """The six steps PLAN §10 names, as an agent would take them.
+
+    list windows → attach → snapshot → find an element → set text → read it back → read the
+    table → click a button and see a new window appear. Everything below goes through the tool
+    surface, so what is verified is the thing the user actually talks to, not the layer under
+    it.
+    """
+    from pyjab_mcp.server import ServerState, create_server
+
+    bridge, _backend = live
+    state = ServerState(bridge=bridge)
+    server = create_server(state=state)
+
+    # 1. Which windows are there?  (The CLI fallback, over the tool surface.)
+    listing = await tool(server, "java_list_windows", {})
+    assert MAIN_TITLE in listing, listing
+
+    # 2. Bind to it.
+    attached = await tool(server, "java_attach_window", {"title": MAIN_TITLE})
+    session_id = attached.split(" ", 1)[0]
+    assert session_id.startswith("s:"), attached
+
+    # 3. A bounded view, deep enough to hold the controls.
+    snapshot = await tool(
+        server, "java_snapshot",
+        {"session_id": session_id, "depth": 12, "max_nodes": 400},
+    )
+    assert "push button" in snapshot and "[e:" in snapshot, snapshot[:400]
+
+    # 4. The text field, found by the text it currently holds.
+    field = await tool(server, "java_find", {"session_id": session_id, "name": "1122233455"})
+    field_handle = handle_in(field)
+
+    # 5. Type into it, then read back what was typed.  This is the pair that a real run broke:
+    #    the edit renames the field (its name *is* its text) and invalidates a name locator.
+    await tool(
+        server, "java_set_text",
+        {"session_id": session_id, "handle": field_handle, "value": "hello from l3"},
+    )
+    read_back = await tool(
+        server, "java_get_text", {"session_id": session_id, "handle": field_handle}
+    )
+    assert "hello from l3" in read_back, read_back
+
+    # 6. The table, read as data rather than as pixels.
+    table = await tool(server, "java_find", {"session_id": session_id, "role": "table"})
+    table_handle = handle_in(table)
+    cells = await tool(
+        server, "java_get_table",
+        {"session_id": session_id, "handle": table_handle, "row_start": 0, "row_count": 2},
+    )
+    assert "Kathy" in cells and "Snowboarding" in cells, cells
+
+    # 7. Click a button and watch a new window arrive -- the flow's last step, and the one
+    #    that would catch a stale handle: the button is verified before it is clicked.
+    dialog_button = await tool(
+        server, "java_find", {"session_id": session_id, "name": "Show dialog"}
+    )
+    await tool(
+        server, "java_click",
+        {"session_id": session_id, "handle": handle_in(dialog_button)},
+    )
+    await wait_for_tool_window(server, "A Dialog")
+    print("\n[L3] the six-step flow completed through the MCP tools")
+
+    # 8. And the form-filling shortcut reports each field it was given.
+    filled = await tool(server, "java_fill_form", {
+        "session_id": session_id,
+        "fields": [{"handle": field_handle, "value": "second pass"}],
+    })
+    assert "1 of 1 field(s) set" in filled, filled
+    assert "second pass" in await tool(
+        server, "java_get_text", {"session_id": session_id, "handle": field_handle}
     )

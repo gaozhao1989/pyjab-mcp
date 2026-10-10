@@ -58,21 +58,55 @@ class HandleEntry:
     expected: Record
 
 
+#: Roles whose accessible name **is their content**, so it changes when the content does.
+#:
+#: ``JTextField("1122233455")`` with no ``setName`` reports "1122233455" as its name, because
+#: Swing's ``AccessibleJTextComponent.getName()`` falls back to the text. A strict name check
+#: therefore makes an edit invalidate the very handle that made it: set the field to "hello"
+#: and the handle can no longer verify, so nothing can read back what it just wrote.
+#:
+#: The list is deliberately short and evidence-based: the roles where a name change is
+#: explained by a content change. For everything else the name is a label, and a label that
+#: changed at the same position is a different control -- which is the case D2 exists for.
+NAME_IS_CONTENT_ROLES = frozenset({
+    "text",
+    "password text",
+    "label",
+    "table cell",
+})
+
+
 @dataclass(frozen=True)
 class Verification:
-    """The outcome of comparing a re-resolved element against what was recorded."""
+    """The outcome of comparing a re-resolved element against what was recorded.
+
+    ``problems`` block; ``warnings`` do not. The split exists because D2 asked for the
+    accessible name to be compared, and a real application showed why that cannot be the
+    whole rule for every role: for a text field the name *is* the value, so a name change is
+    evidence of the edit rather than of a different element. Structural identity -- role,
+    position among siblings, bounds -- is what blocks, and it is what catches the case the
+    check is for: something else having moved into the position.
+    """
 
     ok: bool
     problems: Tuple[str, ...] = ()
+    warnings: Tuple[str, ...] = ()
 
     def message(self) -> str:
-        if self.ok:
-            return "the element matches what the snapshot recorded"
-        return (
-            "the element has changed since the snapshot, so this handle was not used: "
-            + "; ".join(self.problems)
-            + ". Take a fresh snapshot."
-        )
+        if not self.ok:
+            return (
+                "the element has changed since the snapshot, so this handle was not used: "
+                + "; ".join(self.problems)
+                + ". Take a fresh snapshot."
+            )
+        if self.warnings:
+            return (
+                "the element's identity matches, with a note: "
+                + "; ".join(self.warnings)
+                + ". The structural identity (role, position, bounds) is unchanged, so this "
+                "is the same element with different content."
+            )
+        return "the element matches what the snapshot recorded"
 
 
 def locator_for(walk: Walk, index: int) -> Optional[str]:
@@ -176,15 +210,25 @@ def _quote(value: str) -> str:
 def verify(expected: Record, actual: Record) -> Verification:
     """Compare a re-resolved element against the record the snapshot stored.
 
-    Any disagreement fails, including the name: D2 says so, and the alternative -- letting a
-    renamed element through because labels often change -- is how a click lands on the wrong
-    control after a dialog reuses a position.
+    Blocking: role, position among siblings, and bounds when both sides report them.
+    Reported but not blocking: the accessible name, for the roles whose name *is* their
+    content (see :data:`NAME_IS_CONTENT_ROLES`) -- and for every other role a name change
+    still blocks, because a renamed button at the same position is a different button.
+
+    This is D2 with one amendment, and the amendment came from a real run: L3 set a text
+    field and could no longer read it back, because the edit had renamed it.
     """
     problems: List[str] = []
+    warnings: List[str] = []
+
     if expected.role != actual.role:
         problems.append(f"role was {expected.role!r}, now {actual.role!r}")
     if expected.name != actual.name:
-        problems.append(f"name was {expected.name!r}, now {actual.name!r}")
+        change = f"name was {expected.name!r}, now {actual.name!r}"
+        if expected.role.strip().lower() in NAME_IS_CONTENT_ROLES:
+            warnings.append(change + f" (a {expected.role!r} reports its content as its name)")
+        else:
+            problems.append(change)
     if expected.index_in_parent != actual.index_in_parent:
         problems.append(
             f"index among siblings was {expected.index_in_parent}, "
@@ -195,7 +239,7 @@ def verify(expected: Record, actual: Record) -> Verification:
         now = tuple(actual.bounds.get(key) for key in ("x", "y", "width", "height"))
         if before != now:
             problems.append(f"bounds were {before}, now {now}")
-    return Verification(ok=not problems, problems=tuple(problems))
+    return Verification(ok=not problems, problems=tuple(problems), warnings=tuple(warnings))
 
 
 class HandleTable:

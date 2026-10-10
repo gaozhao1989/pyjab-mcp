@@ -188,3 +188,46 @@ def test_a_name_holding_both_quote_characters_cannot_be_a_literal():
     assert candidates == ("//push button[@indexinparent=0]",), (
         "the name candidates are skipped when they cannot be quoted, and the index remains"
     )
+
+
+def test_a_position_locator_is_preferred_over_one_that_embeds_the_name():
+    """A name locator stops resolving when the content changes -- which for a text field is
+    exactly what java_set_text does, so the handle could not read back what it wrote."""
+    field = record("text", "1122233455", index_in_parent=0)
+    driver = FakeDriver(
+        items=[(0, field)],
+        search={("name", "1122233455"): [field]},
+        locators={"//text[@name='1122233455']": field},
+    )
+
+    found = find_driver(driver, by="name", value="1122233455")
+
+    assert found[0][1] == "//text[@indexinparent=0]", (
+        "the walk knows where the element sits; the name is content and will change"
+    )
+
+
+def test_a_walk_that_cannot_place_the_element_falls_back_to_a_name_locator():
+    button = record("push button", "OK", index_in_parent=1)
+    driver = FakeDriver(
+        items=[],                                    # the walk sees nothing
+        search={("name", "OK"): [button]},
+        locators={"//push button[@name='OK']": button},
+    )
+
+    found = find_driver(driver, by="name", value="OK")
+
+    assert found[0][1] == "//push button[@name='OK']"
+
+
+def test_a_search_result_that_neither_walk_nor_candidate_can_find_gets_no_handle():
+    driver = FakeDriver(
+        items=[],
+        search={("name", "OK"): [record("push button", "OK", index_in_parent=1)]},
+        locators={},
+    )
+
+    found = find_driver(driver, by="name", value="OK")
+
+    assert found[0][1] is None
+    assert driver.outstanding == 0

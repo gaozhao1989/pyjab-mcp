@@ -40,7 +40,7 @@ from typing import (
     Tuple,
 )
 
-from .handles import locator_candidates, verify
+from .handles import locator_candidates, locator_for, verify
 from .tree import Record, Walk, walked_nodes
 from .windows import JavaWindow
 
@@ -844,14 +844,62 @@ def find_driver(driver: Any, *, by: str, value: Any, visible: bool = False,
     elements = method(value, visible) or []
     found: "List[Tuple[Record, Optional[str]]]" = []
     try:
-        for element in elements[:limit]:
-            record = Record.from_pyjab(element.as_record())
-            found.append((record, _first_matching_locator(driver, record)))
+        records = [
+            Record.from_pyjab(element.as_record()) for element in elements[:limit]
+        ]
+        positioned = _position_locators(driver, records)
+        for position, record in enumerate(records):
+            locator = positioned.get(position)
+            if locator is None:
+                # No walk path: fall back to a name or index locator, which resolves now but
+                # may not survive the element's content changing.
+                locator = _first_matching_locator(driver, record)
+            found.append((record, locator))
     finally:
         # Every element the search handed over is ours, including the ones past the limit.
         for element in elements:
             element.release_jabelement()
     return found
+
+
+#: How far the position walk goes. Deep on purpose: a locator is only as good as the path to
+#: it, and the default snapshot depth is a budget for an agent rather than for identity.
+POSITION_WALK_DEPTH = 12
+POSITION_WALK_LIMIT = 4000
+
+
+def _position_locators(driver: Any,
+                       records: "Sequence[Record]") -> "Dict[int, Optional[str]]":
+    """Locators built from a walk path, for the records a walk can find.
+
+    Why this rather than a name: a locator built from a name stops resolving the moment the
+    name changes -- and for a text field the name changes when *we* change it, because Swing
+    reports the content as the name. A search result given a name locator could therefore not
+    read back what it had just written. A walk records where an element *sits*, and a path does
+    not move when the content does.
+
+    One walk serves every result in the call. ``None`` values are results the walk could not
+    place -- past its depth or limit, or not present in it -- and the caller falls back to a
+    name locator for those.
+    """
+    if not records:
+        return {}
+    walk = walk_driver(driver, max_depth=POSITION_WALK_DEPTH, limit=POSITION_WALK_LIMIT)
+    by_identity: "Dict[Tuple[Any, ...], List[int]]" = {}
+    for index, node in enumerate(walk.nodes):
+        by_identity.setdefault(node.record.identity(), []).append(index)
+
+    located: "Dict[int, Optional[str]]" = {}
+    for position, record in enumerate(records):
+        matches = by_identity.get(record.identity(), [])
+        if len(matches) > 1 and record.bounds:
+            narrowed = [
+                index for index in matches if walk.nodes[index].record.bounds == record.bounds
+            ]
+            matches = narrowed or matches
+        if len(matches) == 1:
+            located[position] = locator_for(walk, matches[0])
+    return located
 
 
 def _first_matching_locator(driver: Any, record: Record) -> Optional[str]:
