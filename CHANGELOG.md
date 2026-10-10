@@ -140,6 +140,27 @@ under **Unreleased** until it is tagged.
   from the working tree without being versioned; `.gitignore` keeps them out of git and
   `MANIFEST.in` prunes them from the sdist.
 
+### Added
+
+* **L3 in CI: a real window, on a real desktop, on a schedule.** `tests/e2e/` is skipped
+  unless `PYJAB_MCP_E2E=1`; `.github/workflows/windows-gui.yml` sets it on a hosted
+  `windows-latest` runner, which has an interactive desktop rather than being a service in
+  session 0. The application is pyjab's own test app, compiled from the sdist of the
+  *installed* pyjab — one version, both sides — and fetched by `tools/fetch_test_app.py`,
+  which is a script rather than shell in a workflow for the usual reason.
+
+  Three things it says, in order of how much it would hurt to get wrong: a snapshot of a real
+  accessibility tree contains the controls the application builds; a handle resolves and
+  verifies against the real element it was taken from; and **a window that opens after the
+  executor has been idle is still seen** — the D3 trap, which no L1 test can catch because
+  the fake would have to be wrong in the same way the real thing is.
+
+* **`java_diagnostics` checked on JDK 8, 17 and 21.** The same workflow runs a matrix of the
+  three, with `tools/verify_diagnostics_jdk.py` asserting not just that a bridge DLL was found
+  but that it is the one **paired with that JDK** (JDK 8 keeps it under `jre\bin`, 11+ under
+  `bin`). A mismatched pair fails as "pyjab cannot see my window", which is the hardest
+  failure in this project to tell apart from a bridge that is simply not enabled.
+
 ### Changed
 
 * **R3 is retired, R1 and R2 are restated against 1.9.0** (`AGENTS.md` §6, and the

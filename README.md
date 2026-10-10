@@ -84,6 +84,22 @@ Start with `java_diagnostics`. It reports which part of the environment is missi
 Java Access Bridge not enabled, no bridge DLL, a 32-bit interpreter against a 64-bit JVM —
 instead of leaving a tool call to fail with a locator error.
 
+## Verifying it
+
+The suite that runs on every push cannot drive an application: it needs Windows, a JDK, a
+desktop session and a running Swing app. That layer is `tests/e2e/`, skipped unless
+`PYJAB_MCP_E2E=1`, and `windows-gui.yml` runs it on a hosted `windows-latest` runner — by
+hand, or on a weekly schedule. It starts a second JVM *after* the bridge has been idling,
+because a message pump on the wrong thread passes everything else and fails exactly that.
+
+```console
+gh workflow run windows-gui.yml -f java=17     # the end-to-end run and the JDK matrix
+gh run watch
+```
+
+It is not a status check: nobody runs it unless somebody asks (or the week comes round), so a
+green default CI run still says nothing about a live window.
+
 ## Working on it
 
 ```console

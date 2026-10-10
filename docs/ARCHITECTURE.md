@@ -160,7 +160,17 @@ before doing anything.
 |---|---|---|
 | L1 pure logic | any platform | no — renders from a fake tree |
 | L2 integration | `windows-latest`, default CI | no — packaging, import, `tools/list` |
-| L3 end to end | `windows-latest` with a real desktop, dispatched by hand | **yes** |
+| L3 end to end | `windows-latest` with a real desktop: `windows-gui.yml`, dispatched by hand **or** weekly | **yes** |
+
+L3 is `tests/e2e/`, which is skipped unless `PYJAB_MCP_E2E=1`, and `windows-gui.yml` also
+checks `java_diagnostics` on JDK 8, 17 and 21 — the three JDKs put the bridge DLL in different
+places, which is exactly what a report that cannot tell "missing" from "unreadable" gets
+wrong. The application it drives is pyjab's own test app, compiled from the sdist of the
+installed pyjab, because that is the only Swing application a hosted runner has.
+
+The one test in that file worth knowing about is the last one: it starts a **second JVM after
+the executor has been idle** and requires its window to appear. A pump on the wrong thread
+passes every other test in the repository and fails that one.
 
 **L1 needs a fake built before the thing it fakes.** pyjab's reference-counting test
 bridge raises on a double release and on use after release, and it found two real leaks.

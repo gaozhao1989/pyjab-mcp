@@ -45,6 +45,7 @@ LOCAL_ONLY: Sequence[str] = (
     "AGENTS.md",
     "docs/PLAN.md",
     "docs/DESIGN.md",
+    "docs/RELEASE_READINESS.md",
     ".agents/",
 )
 

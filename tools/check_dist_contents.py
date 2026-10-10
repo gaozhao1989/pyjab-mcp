@@ -59,9 +59,12 @@ SDIST_REQUIRED = (
     "src/pyjab_mcp/__main__.py",
     "src/pyjab_mcp/bridge.py",
     "tests/contract/test_pyjab_contract.py",
+    "tests/e2e/test_live_window.py",
     "tests/test_packaging.py",
     "tools/check_pyjab_api_surface.py",
     "tools/check_pyjab_changelog.py",
+    "tools/fetch_test_app.py",
+    "tools/verify_diagnostics_jdk.py",
 )
 
 

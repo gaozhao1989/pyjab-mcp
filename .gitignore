@@ -28,6 +28,7 @@ htmlcov/
 AGENTS.md
 docs/PLAN.md
 docs/DESIGN.md
+docs/RELEASE_READINESS.md
 
 # --- local agent configuration, also deliberately not published ----------------------
 #
