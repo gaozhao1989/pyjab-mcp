@@ -699,3 +699,65 @@ async def test_two_elements_with_the_same_name_are_two_handles(live, boundary_wi
         f"status={second_text!r}. JAB reported:\n{dump}"
     )
     print("\n[L3] two same-named buttons stayed two different handles")
+
+
+@pytest.mark.asyncio
+async def test_a_chord_reaches_the_window_and_the_application_reacts(live, boundary_window):
+    """The live half of `java_send_keys`, and the reason #19 is a separate task from #15.
+
+    #15 made the tool feature-detect; this is the part that needs a pyjab which actually has
+    `send_keys`. The pinned release does not, so it **skips** under `windows-gui` and runs in
+    the drift job, which installs `pyjab@master`. That is deliberate: the chord path is
+    exercised against the code being released rather than only against the shape it promises.
+
+    The accelerator is the observable. `setAccelerator` only fires while the window has the
+    keyboard focus, and nothing here focuses anything — that is pyjab's design, and the tool's
+    reply says so. Attaching brings the window forward, so the chord is sent immediately after
+    a fresh attach; a runner's desktop can still steal focus between the two, which is why
+    there is one bounded retry rather than a sleep or a wider timeout.
+    """
+    from pyjab_mcp.backend import probe_public_api
+    from pyjab_mcp.handles import locator_for
+    from pyjab_mcp.server import ServerState, create_server
+
+    if not probe_public_api().has("public key/shortcut sending"):
+        pytest.skip(
+            "this pyjab has no public send_keys: the API is merged upstream and unreleased, "
+            "and the drift job (pyjab@master) is where this test is expected to run"
+        )
+
+    bridge, backend = live
+    state = ServerState(bridge=bridge)
+    server = create_server(state=state)
+
+    attached = await tool(server, "java_attach_window", {"title": BOUNDARY_TITLE})
+    session_id = attached.split(" ", 1)[0]
+    window_id = state.session(session_id).window_id
+
+    dump = boundary_tree(bridge, backend, window_id)
+    walk = call(bridge, backend.walk, window_id, max_depth=12)
+    text_nodes = [i for i, node in enumerate(walk.nodes) if node.record.role == "text"]
+    assert len(text_nodes) == 1, f"the fixture has one text component. JAB saw:\n{dump}"
+    status_locator = locator_for(walk, text_nodes[0])
+
+    before = call(bridge, backend.text, window_id, status_locator)
+    assert before != "the accelerator fired", (
+        f"the accelerator has already fired, so this test cannot tell whether the chord did "
+        f"anything: {before!r}"
+    )
+
+    for attempt in (1, 2):
+        await tool(server, "java_send_keys", {"session_id": session_id, "keys": "alt+y"})
+        after = call(bridge, backend.text, window_id, status_locator)
+        if after == "the accelerator fired":
+            print(f"\n[L3] alt+y reached the window and fired the accelerator (attempt {attempt})")
+            return
+        # The window may have lost focus between attaching and sending. Attach again, which
+        # brings it forward, and try once more.
+        await tool(server, "java_attach_window", {"title": BOUNDARY_TITLE})
+
+    pytest.fail(
+        f"the chord never reached the window: the status field still reads {after!r}. "
+        f"Either send_keys does nothing, or the window never had focus -- and the second is "
+        f"the failure mode the tool tells users about. JAB saw:\n{dump}"
+    )
