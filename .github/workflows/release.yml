@@ -66,6 +66,7 @@ jobs:
           python tools/check_pyjab_api_surface.py
           python tools/check_documented_surface.py
           python tools/check_local_only_files.py
+          python tools/check_changelog_immutable.py
           python tools/check_pyjab_changelog.py
           python tools/check_pyjab_readiness.py
 

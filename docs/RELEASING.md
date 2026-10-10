@@ -38,45 +38,103 @@ perform in advance, and no secret to store.
 The registry is in **preview**: its schema changes, and data may be reset. It has already
 changed once here — see "What went wrong" below.
 
-## Cutting a release
+## Pre-flight
+
+Releases are cut from `main`. **A version that has reached PyPI can never be withdrawn or
+overwritten**, so everything that can fail is checked *before* the tag is pushed. These are
+pyjab's pre-flight rules, copied deliberately: they were written after a release that shipped a
+changelog the repository did not agree with, and one that used a local date a day ahead of its
+tag.
+
+Do not tag until each of these is what it should be.
+
+**`main` is clean and pushed**, and `__version__` in `src/pyjab_mcp/__init__.py` is the new
+version **in double quotes** — the release workflow reads it, and a single quote would make it
+read something else.
+
+**`CHANGELOG.md` has an entry for it, dated in UTC.** A local date can be a day ahead of the tag
+for anyone east of UTC, and the date is part of what gets frozen below.
+
+**The released sections are untouched:**
 
 ```console
-# 1. The version, in one place (everything else reads it).
-$EDITOR src/pyjab_mcp/__init__.py        # __version__ = "0.1.0", not "0.1.0.dev0"
-
-# 2. Move what is under Unreleased into a section named after the release.
-$EDITOR CHANGELOG.md                     # ## [0.1.0] - 2026-10-10
-
-# 3. server.json, which the registry reads.
-$EDITOR server.json                      # "version": "0.1.0", in both places
-
-# 4. Check, before anything is tagged.
-python tools/check_release_version.py v0.1.0
-
-# 5. Commit on main, then tag the commit that has all of the above.
-git commit -am "release: 0.1.0"
-git tag v0.1.0
-git push origin main --tags
+python tools/check_changelog_immutable.py
 ```
 
-The tag starts the workflow:
-
-| job | what it does | fails when |
-|---|---|---|
-| `verify` | the version guard, the portable suite, every guard, `python -m build`, the dist-content guard, `twine check` | anything disagrees, or the artifact is wrong |
-| `pypi` | `pypa/gh-action-pypi-publish`, OIDC, environment `pypi` | the version already exists on PyPI (immutability), or the publisher is not configured |
-| `registry` | checks `server.json` with the registry's **own validator**, then `mcp-publisher login github-oidc` and `publish` | the registry rejects the metadata — after PyPI has the package, which is why the validator runs first |
-| `github-release` | creates the GitHub release, with the changelog section as its notes | there is no changelog section for the tag |
-
-To rehearse without publishing, dispatch the workflow by hand:
+**Nothing is already published under that number.** All three must come back empty or 404:
 
 ```console
-gh workflow run release.yml
+curl -s -o /dev/null -w '%{http_code}\n' https://pypi.org/pypi/pyjab-mcp/VERSION/json
+gh release view vVERSION
+git tag -l vVERSION
 ```
 
-A manual run has no tag, so `verify` checks whatever the tree claims to be and *warns* rather
-than fails on a `.devN` version — a dry run is allowed to find the release unprepared. The
-three publishing jobs are skipped unless the event is a tag.
+**And the checks that run anywhere pass:**
+
+```console
+python -m pytest tests/
+python tools/check_release_version.py vVERSION
+python tools/check_pyjab_api_surface.py
+python tools/check_documented_surface.py
+python tools/check_local_only_files.py
+python tools/check_changelog_immutable.py
+```
+
+The other guards need Windows, a JDK or the network, so CI is the authority for them; the L3 job
+is the only one that can say a live window still works, and it is dispatched by hand — see
+"What is deliberately not automated" below.
+
+## Then
+
+1. **Bump the version, write the changelog entry, and open a pull request.** The bump is
+   reviewed like anything else, and **CI has to be green before it merges**.
+2. **Tag the merged commit and push the tag.** Annotated, with the version in the message — the
+   tag is what the sdist was built from, and the message is what `git show` prints for it:
+
+   ```console
+   git tag -a v0.1.0 -m "pyjab-mcp 0.1.0"
+   git push origin v0.1.0
+   ```
+
+`release.yml` then verifies that the tag matches `__version__`, `server.json` and the changelog,
+runs the suite and the guards, builds and checks the artifact, publishes to PyPI through
+Trusted Publishing, publishes the metadata to the MCP Registry, and creates the GitHub release
+with the changelog section as its notes.
+
+## After the tag
+
+**Freeze the new section**, so that nothing can edit it later without CI saying so:
+
+```console
+python tools/check_changelog_immutable.py --record 0.1.0
+```
+
+It reads the section **out of the tag**, not the working copy, so what gets frozen is what
+shipped. That is why it is a separate commit *after* the release: the tag has to exist first.
+Commit the changed `tools/released_changelog_sections.json`.
+
+**Then confirm what was actually published**, by installing it — the release workflow says the
+upload succeeded, and this says the thing on PyPI is the thing that was built:
+
+```console
+python -m venv /tmp/check
+/tmp/check/bin/python -m pip install "pyjab-mcp==0.1.0"
+/tmp/check/bin/python -c "import pyjab_mcp; print(pyjab_mcp.__version__)"
+/tmp/check/bin/pyjab-mcp --help
+```
+
+## If the tag is wrong
+
+**A version that has reached PyPI is immutable.** Never move its tag: the tag is what the sdist
+was built from, and pointing it somewhere else makes this repository describe a release that
+never happened. The changelog guard exists for the same reason, and will fail if a released
+section is edited.
+
+If a tag was pushed but **nothing was published**, it can be moved — but `v*` tags are covered by
+a repository ruleset, so that takes a deliberate unlock and re-lock, and it is not written down
+here: a published how-to for disabling a protection is a how-to for disabling a protection.
+
+If anything reached PyPI, cut a **patch** release instead. That is what PATCH is for.
 
 ## The version guard
 
