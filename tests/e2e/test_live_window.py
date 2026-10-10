@@ -574,84 +574,119 @@ def test_detaching_releases_the_window_and_leaves_the_application_running(live, 
     print("\n[L3] detach() released the window and the application kept running")
 
 
-def test_a_canvas_is_an_element_with_nothing_under_it(live, boundary_window):
-    """The README's canvas row, tested rather than asserted from pyjab#73's conclusion.
+def boundary_tree(bridge, backend, window_id: str) -> str:
+    """Every element of the boundary window as ``role "name"``, for a failure worth reading.
 
-    The pair matters: the pixels exist and the structure does not. A screenshot of the canvas
-    returns bytes — it is a real, painted, visible control — and the accessible tree under it
-    has no children at all, so there is nothing to find, click or read. That is why the README
-    says a picture is not something you can act on.
+    The same walk ``java_snapshot`` renders, so a failing assertion carries what JAB actually
+    called the thing rather than only the fact that the name was not found.
     """
+    walk = call(bridge, backend.walk, window_id, max_depth=12)
+    return "\n".join(
+        f"  {node.record.role} {node.record.name!r} children={node.record.children_count}"
+        for node in walk.nodes
+    )
+
+
+def test_a_canvas_is_an_element_with_nothing_under_it(live, boundary_window):
+    """The README's canvas row, tested rather than taken from pyjab#73's conclusion.
+
+    The pair matters: the pixels exist and the structure does not. The canvas is a real, painted,
+    visible control that a screenshot returns bytes for, and the accessible tree under it has no
+    children at all -- so there is nothing to find, click or read. That is why the README says a
+    picture is not something you can act on.
+
+    The tree is read through the walk rather than through a search by name, because the claim is
+    about the *tree*: a JPanel is a container, and what matters is that this one is a leaf.
+    """
+    from pyjab_mcp.handles import locator_for
+
     bridge, backend = live
 
-    matches = call(bridge, backend.find, boundary_window.window_id, by="name",
-                   value="Canvas panel")
-    located = [(record, locator) for record, locator in matches if locator]
-    assert located, f"the canvas is not addressable at all; matches were {matches}"
-    canvas, locator = located[0]
+    walk = call(bridge, backend.walk, boundary_window.window_id, max_depth=12)
+    dump = boundary_tree(bridge, backend, boundary_window.window_id)
+    canvas_nodes = [
+        index for index, node in enumerate(walk.nodes)
+        if node.record.name == "Canvas panel"
+    ]
+    assert canvas_nodes, f"no element named 'Canvas panel' in the tree. JAB saw:\n{dump}"
 
+    canvas = walk.nodes[canvas_nodes[0]].record
     assert canvas.role in ("panel", "canvas"), f"the canvas reports role {canvas.role!r}"
     assert canvas.children_count == 0, (
         f"a canvas that paints itself must have no accessible children, and this one reports "
-        f"{canvas.children_count}"
+        f"{canvas.children_count}. JAB saw:\n{dump}"
     )
 
-    # The neighbour proves the window was readable: without this, "no children" and "could not
-    # read the window" would pass the same assertion.
+    # The neighbour proves the window was readable: without it, "no children" and "could not read
+    # the window" would satisfy the same assertion.
     neighbours = call(bridge, backend.find, boundary_window.window_id, by="name",
                       value="Ordinary button")
     assert [record for record, _ in neighbours], (
         "the ordinary button beside the canvas must be found, or the empty canvas above proves "
-        "nothing about the canvas"
+        f"nothing. JAB saw:\n{dump}"
     )
 
+    locator = locator_for(walk, canvas_nodes[0])
+    assert locator, "the canvas has no addressable path, so nothing can photograph it"
     png = call(bridge, backend.screenshot, boundary_window.window_id, locator, canvas)
     assert png[:8] == b"\x89PNG\r\n\x1a\n", "the canvas still has pixels"
     assert len(png) > 500, f"a {len(png)}-byte PNG of a painted canvas is suspiciously small"
     print(
-        f"\n[L3] canvas: role={canvas.role!r} children={canvas.children_count} "
-        f"children_count={canvas.children_count} and {len(png)} bytes of PNG"
+        f"\n[L3] canvas: role={canvas.role!r} children_count={canvas.children_count}, "
+        f"neighbour found, and {len(png)} bytes of PNG"
     )
 
 
 @pytest.mark.asyncio
 async def test_two_elements_with_the_same_name_are_two_handles(live, boundary_window):
-    """Why a handle carries a position as well as a name — through the tools, as an agent sees it.
+    """Why a handle carries a position as well as a name -- through the tools, as an agent sees it.
 
-    Both text fields are called "Duplicate field". A search has to return both, each handle has
-    to point at one of them, and typing into one must change that one and leave the other alone.
-    A name-only identity would make these two indistinguishable, which is how a tool ends up
-    reading back the wrong field.
+    Both buttons are called "Duplicate button" and each writes a different sentence into the
+    status field. A search has to return both, each handle has to point at one of them, and
+    clicking one has to produce *its* sentence -- which is the only way to tell "two handles" from
+    "the same handle twice". A name-only identity would make them indistinguishable, and a tool
+    would report the wrong button as clicked.
     """
     from pyjab_mcp.server import ServerState, create_server
 
-    bridge, _backend = live
+    bridge, backend = live
     state = ServerState(bridge=bridge)
     server = create_server(state=state)
 
     attached = await tool(server, "java_attach_window", {"title": BOUNDARY_TITLE})
     session_id = attached.split(" ", 1)[0]
-    found = await tool(server, "java_find", {"session_id": session_id, "name": "Duplicate field"})
 
-    handles = re.findall(r"\[(e:[0-9a-f]+)\]", found)
-    assert len(handles) == 2, f"two fields share this name; the reply listed {handles}:\n{found}"
-
-    before = [
-        await tool(server, "java_get_text", {"session_id": session_id, "handle": handle})
-        for handle in handles
-    ]
-    assert "first value" in before[0] and "second value" in before[1], before
-
-    await tool(server, "java_set_text", {
-        "session_id": session_id, "handle": handles[1], "value": "changed the second one",
-    })
-    after = [
-        await tool(server, "java_get_text", {"session_id": session_id, "handle": handle})
-        for handle in handles
-    ]
-
-    assert "changed the second one" in after[1], after
-    assert "first value" in after[0], (
-        f"the other field must be untouched, so two names alone cannot identify an element: {after}"
+    # One handle for the status field, found by what it says *now*. Its accessible name is its
+    # content, so the clicks below rename it -- and the handle still reads it, because the locator
+    # is a path and the name is content.
+    status_reply = await tool(
+        server, "java_find", {"session_id": session_id, "name": "nothing clicked yet"}
     )
-    print("\n[L3] two same-named fields stayed two different handles")
+    status_handle = handle_in(status_reply)
+
+    found = await tool(
+        server, "java_find", {"session_id": session_id, "name": "Duplicate button"}
+    )
+    handles = re.findall(r"\[(e:[0-9a-f]+)\]", found)
+    assert len(handles) == 2, (
+        f"two buttons share this name; the reply listed {handles}:\n{found}\n"
+        f"JAB saw:\n{boundary_tree(bridge, backend, state.session(session_id).window_id)}"
+    )
+
+    first = await tool(server, "java_click", {"session_id": session_id, "handle": handles[0]})
+    first_text = await tool(
+        server, "java_get_text", {"session_id": session_id, "handle": status_handle}
+    )
+    assert "clicked the first one" in first_text, (
+        f"the first handle must click the first button: {first!r} then {first_text!r}"
+    )
+
+    second = await tool(server, "java_click", {"session_id": session_id, "handle": handles[1]})
+    second_text = await tool(
+        server, "java_get_text", {"session_id": session_id, "handle": status_handle}
+    )
+    assert "clicked the second one" in second_text, (
+        f"the second handle must click the second button, not the first again: "
+        f"{second!r} then {second_text!r}"
+    )
+    print("\n[L3] two same-named buttons stayed two different handles")
