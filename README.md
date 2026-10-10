@@ -14,7 +14,7 @@ which is what makes this usable against a production Java client that you cannot
 
 ## Status
 
-**0.1.0 is released** — 15 tools: `java_diagnostics`, `java_list_windows`,
+**Released on PyPI** — 15 tools: `java_diagnostics`, `java_list_windows`,
 `java_attach_window`, `java_snapshot`, `java_find`, `java_get_element`, `java_get_text`,
 `java_get_table`, `java_click`, `java_set_text`, `java_select`, `java_fill_form`,
 `java_wait_for`, `java_screenshot`, and `java_send_keys`. It needs `pyjab>=1.10.0`: 1.9.0

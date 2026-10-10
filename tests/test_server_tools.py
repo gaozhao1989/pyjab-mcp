@@ -688,8 +688,9 @@ async def test_send_keys_sends_the_chord_when_pyjab_provides_the_api():
     assert result.is_error is False
     assert backend.keys_sent == ["alt+y"]
     text = await text_of(result)
-    assert "Nothing is focused for you" in text, (
-        "the focus semantics are the part a caller gets wrong, so the reply states them"
+    assert "click something harmless" in text, (
+        "the focus semantics are the part a caller gets wrong, so the reply says what to do "
+        "about them rather than only that nothing was focused"
     )
 
 

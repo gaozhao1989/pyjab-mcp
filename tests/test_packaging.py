@@ -15,7 +15,6 @@ import ast
 import json
 import os
 import re
-from importlib import metadata
 from pathlib import Path
 
 import pytest
@@ -168,10 +167,17 @@ def test_the_registry_accepts_server_json():
     assert "is valid" in result.stdout
 
 
-def test_server_json_names_the_release_the_package_builds():
-    """A registry entry pointing at a version that does not exist is worse than none."""
+def test_server_json_names_the_release_the_package_declares():
+    """A registry entry pointing at a version that does not exist is worse than none.
+
+    The version is read from the **source** rather than from the installed metadata, and that is
+    a correction rather than a preference: `importlib.metadata` reads the editable install's
+    `.egg-info`, which lags until something rebuilds it, so this test failed spuriously in the
+    minute between bumping `__version__` and running `python -m build`. `pyproject.toml` sets the
+    distribution version from that same attribute, so the source is also the authority.
+    """
     server = json.loads((REPO_ROOT / "server.json").read_text(encoding="utf-8"))
-    package_version = metadata.version("pyjab_mcp")
+    package_version = pyjab_mcp.__version__
 
     release = re.match(r"\d+\.\d+\.\d+", package_version)
     assert release, f"cannot read a release out of {package_version!r}"

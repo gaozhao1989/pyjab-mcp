@@ -8,6 +8,72 @@ under **Unreleased** until it is tagged.
 
 ## Unreleased
 
+Nothing yet.
+
+## [0.1.2] - 2026-10-10
+
+**A patch release with three things a user can feel**: `java_send_keys` now sends chords where the installed pyjab provides the API rather than refusing unconditionally (so the release that answers R4 makes it work with no change here), `java_snapshot` says why it can show fewer children than an element reports instead of printing an unexplained `children=3`, and the console script gained `--help` and `--version`. The sections below are the detail.
+
+### Added
+
+* **`--help` says where to get help, and what the free version includes.** The plan's F1 asked
+  for a commercial-support line inside `java_diagnostics`'s output; that output is structured
+  findings an agent reads to work out what is wrong with an environment, and a support address
+  in it is prose addressed to somebody who is not there. It goes where a person is looking
+  instead — `--help` and the README — with the sentence a user actually wonders about: no
+  licence key, no quota, nothing held back. Two tests pin that decision in both directions.
+
+* **The enterprise gaps are documented rather than implied.** The plan's F4 reserved five
+  capabilities architecturally and never wrote them down: remote transport, multi-tenancy, an
+  audit log, general batch execution, and CI integration. The README now lists each with what
+  adding it would take — a policy, an authentication story, a decision about user data — because
+  "we did not think about it" reads worse than "this is deliberately stdio-only, one session at
+  a time, and the audit trail is your client's transcript". The capability-boundaries section
+  above it is about what the *substrate* cannot reach; this one is about choices.
+
+### Changed
+
+* **Aggregator directories are no longer a release step.** They were a criterion in the plan; the
+  plan now records why they were dropped, because the reasons were measured rather than assumed.
+  Installation never depended on them — `pip install pyjab-mcp` (verified in a clean venv) and
+  `pip install "git+https://github.com/gaozhao1989/pyjab-mcp"` (verified, 15 tools) are the two
+  channels, and both are in the README. The directories are *downstream consumers* that scrape
+  the official Registry's API, and that entry is live — so the one channel that costs nothing is
+  already open. Of the four the plan named, one had **paused submissions**, one is **not a form
+  at all** (a Streamable HTTP endpoint this project deliberately does not have, or a local MCPB
+  bundle), and two ask for an account or a third-party issue. `docs/RELEASING.md` keeps the
+  measured state of each in a new *Discovery* section, so revisiting is a decision rather than a
+  rediscovery.
+
+
+* **The aggregator guidance was wrong in two places, measured rather than remembered.** The
+  Registry's own documentation says aggregators *scrape* its read-only API on an infrequent
+  schedule — so the listing follows from the registry entry rather than from a form. Checked
+  each of the four on 2026-10-10: **PulseMCP's submissions are paused** ("we will reopen as soon
+  as it is ready"), **Smithery is not a form at all** (a public Streamable HTTP URL, or a local
+  MCPB bundle — the first is blocked by this project's deliberate stdio-only decision), LobeHub
+  takes a GitHub issue whose template asks for the **official Registry name**, and mcp.so has a
+  `/submit` form. `docs/RELEASING.md` now says that instead of what it assumed.
+
+
+* **`java_send_keys` sends chords where pyjab provides the API.** pyjab closed
+  [pyjab#168](https://github.com/gaozhao1989/pyjab/issues/168) as completed and `master` has
+  `JABDriver.send_keys`, `JABElement.send_keys` and `Win32Utils.send_keys`, while the newest
+  release on PyPI was still 1.10.0. This tool would **not** have noticed: it raised the
+  requirement unconditionally, the one capability here that never probed, so the release that
+  answers R4 would have changed nothing. It now probes with `getattr` and calls what it finds —
+  the mechanism that made the window listing and `detach()` start working the day 1.10.0 landed
+  ([#15](https://github.com/gaozhao1989/pyjab-mcp/issues/15)).
+
+  The reply states the two things a caller gets wrong, both from pyjab's documentation: nothing
+  is focused and nothing is clicked (the chord goes to whatever has the keyboard focus, because
+  clicking to focus would activate the control), and an unrecognised key name is an error —
+  reported as an argument problem, naming the key, rather than with the environment hint.
+
+  *(This entry belongs to #15, whose pull request shipped without it: the changelog edit's anchor
+  did not match and nothing asserted that it had. It is recorded here rather than in the released
+  0.1.1 section, which is frozen and published.)*
+
 ### Fixed
 
 * **A snapshot could print `children=3` with nothing under it and give no reason.** pyjab reports
@@ -28,67 +94,6 @@ under **Unreleased** until it is tagged.
   application for our choice. Six tests cover the marker, the legend, the truncated variant, the
   filter case, and the ordinary case where nothing is added.
 
-### Changed
-
-* **Aggregator directories are no longer a release step.** They were a criterion in the plan; the
-  plan now records why they were dropped, because the reasons were measured rather than assumed.
-  Installation never depended on them — `pip install pyjab-mcp` (verified in a clean venv) and
-  `pip install "git+https://github.com/gaozhao1989/pyjab-mcp"` (verified, 15 tools) are the two
-  channels, and both are in the README. The directories are *downstream consumers* that scrape
-  the official Registry's API, and that entry is live — so the one channel that costs nothing is
-  already open. Of the four the plan named, one had **paused submissions**, one is **not a form
-  at all** (a Streamable HTTP endpoint this project deliberately does not have, or a local MCPB
-  bundle), and two ask for an account or a third-party issue. `docs/RELEASING.md` keeps the
-  measured state of each in a new *Discovery* section, so revisiting is a decision rather than a
-  rediscovery.
-
-### Changed
-
-* **The aggregator guidance was wrong in two places, measured rather than remembered.** The
-  Registry's own documentation says aggregators *scrape* its read-only API on an infrequent
-  schedule — so the listing follows from the registry entry rather than from a form. Checked
-  each of the four on 2026-10-10: **PulseMCP's submissions are paused** ("we will reopen as soon
-  as it is ready"), **Smithery is not a form at all** (a public Streamable HTTP URL, or a local
-  MCPB bundle — the first is blocked by this project's deliberate stdio-only decision), LobeHub
-  takes a GitHub issue whose template asks for the **official Registry name**, and mcp.so has a
-  `/submit` form. `docs/RELEASING.md` now says that instead of what it assumed.
-
-### Changed
-
-* **`java_send_keys` sends chords where pyjab provides the API.** pyjab closed
-  [pyjab#168](https://github.com/gaozhao1989/pyjab/issues/168) as completed and `master` has
-  `JABDriver.send_keys`, `JABElement.send_keys` and `Win32Utils.send_keys`, while the newest
-  release on PyPI was still 1.10.0. This tool would **not** have noticed: it raised the
-  requirement unconditionally, the one capability here that never probed, so the release that
-  answers R4 would have changed nothing. It now probes with `getattr` and calls what it finds —
-  the mechanism that made the window listing and `detach()` start working the day 1.10.0 landed
-  ([#15](https://github.com/gaozhao1989/pyjab-mcp/issues/15)).
-
-  The reply states the two things a caller gets wrong, both from pyjab's documentation: nothing
-  is focused and nothing is clicked (the chord goes to whatever has the keyboard focus, because
-  clicking to focus would activate the control), and an unrecognised key name is an error —
-  reported as an argument problem, naming the key, rather than with the environment hint.
-
-  *(This entry belongs to #15, whose pull request shipped without it: the changelog edit's anchor
-  did not match and nothing asserted that it had. It is recorded here rather than in the released
-  0.1.1 section, which is frozen and published.)*
-
-### Added
-
-* **`--help` says where to get help, and what the free version includes.** The plan's F1 asked
-  for a commercial-support line inside `java_diagnostics`'s output; that output is structured
-  findings an agent reads to work out what is wrong with an environment, and a support address
-  in it is prose addressed to somebody who is not there. It goes where a person is looking
-  instead — `--help` and the README — with the sentence a user actually wonders about: no
-  licence key, no quota, nothing held back. Two tests pin that decision in both directions.
-
-* **The enterprise gaps are documented rather than implied.** The plan's F4 reserved five
-  capabilities architecturally and never wrote them down: remote transport, multi-tenancy, an
-  audit log, general batch execution, and CI integration. The README now lists each with what
-  adding it would take — a policy, an authentication story, a decision about user data — because
-  "we did not think about it" reads worse than "this is deliberately stdio-only, one session at
-  a time, and the audit trail is your client's transcript". The capability-boundaries section
-  above it is about what the *substrate* cannot reach; this one is about choices.
 ## [0.1.1] - 2026-10-10
 
 **A patch release, because the MCP Registry registers a PyPI package by reading a line out of
