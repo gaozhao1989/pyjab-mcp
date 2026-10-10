@@ -23,6 +23,10 @@ the pipeline's, and it refuses the release on any of them.
 * **the artifact, not the rules** — `python -m build`, `tools/check_dist_contents.py --dist dist`
   and `twine check`;
 * **the changelog-immutability record**, so a released section cannot be edited afterwards;
+* **that nothing is already published under this version** — `verify` fails when PyPI reports the
+  version, and also when the index cannot be read at all, because during a release "I could not
+  check" is not "nothing is there". A separate GitHub-release answer is printed and never decides
+  (see "The pre-flight that is also in the pipeline" below);
 * **a green L3 run on the tagged commit** — the pipeline requires it: `verify` fails when no
   successful `windows-gui.yml` run exists for the commit the tag points at. A green L3 run is
   checked by the pipeline, not by memory.
@@ -32,19 +36,28 @@ published.** The approval click on the `pypi` environment is the *enforcement* o
 not a second review — everything checkable has already been checked, so the click answers only
 "ship it".
 
-**The maintainer's agent prepares the release** — and one of those steps is *not* in the pipeline,
-which is worth knowing before trusting the list above:
+**The maintainer's agent prepares the release** — the bump, the changelog section, the artifact,
+the L3 dispatch, the evidence, and the manual pre-flight, which has to run *before* the tag exists
+(see "Pre-flight" below). It never needs a person for a checkable step, and it cannot approve the
+publish.
 
-* the bump, the changelog section, the artifact, the L3 dispatch, the evidence;
-* **the pre-flight that nothing is already published** under this version (PyPI, the GitHub
-  release, the tag) — **the pipeline does not check this**, so it is the one checkable thing that
-  has to be done *before* the tag exists. Do it first, from the pre-flight section below. If a
-  version is already on PyPI, the run still reaches `github-release` (it needs only `verify`),
-  so the outcome is a GitHub release with no matching package: the half-published state this
-  check exists to prevent. *(Making it a pipeline check is filed as an issue; it cannot check the
-  tag, because the tag is what starts the run.)*
+### The pre-flight that is also in the pipeline
 
-It never needs a person for a checkable step, and it cannot approve the publish.
+The pre-flight that nothing is already published is deliberately in **two** places, and the
+reason is what the pipeline cannot see:
+
+* **manually, before the tag is even created** (the pre-flight section below) — a duplicate
+  caught there costs nothing, because no tag exists and no run has started;
+* **in the pipeline**, as a `verify` step, because a remembered step is skipped in a hurry and
+  this half-published hazard is why it cannot be: `github-release` needs only `verify`, while the
+  job that actually refuses a duplicate, `pypi`, is a separate job behind a human approval — so a
+  version already on PyPI reached the release job *first* and produced a GitHub release with no
+  matching package. The pipeline now refuses that tag before anything is published, and it
+  cannot be forgotten.
+
+The pipeline can only pre-check the **PyPI version** and the **GitHub release**. The **tag
+itself** stays manual for a reason that is structural rather than a gap: the tag is what starts
+the run, so a pipeline running on it cannot also be what refuses it.
 
 ### The click, and why nothing can stand in for it
 
@@ -135,6 +148,12 @@ curl -s -o /dev/null -w '%{http_code}\n' https://pypi.org/pypi/pyjab-mcp/VERSION
 gh release view vVERSION
 git tag -l vVERSION
 ```
+
+This is the manual half of a check that is now **also** a pipeline step (see "The pre-flight that
+is also in the pipeline" above), and both halves are deliberate: this one runs *before* the tag
+exists, so a duplicate found here costs nothing at all, while the pipeline's copy is the one that
+cannot be forgotten. The tag is the part only this manual check can do — the tag is what starts
+the run, so the pipeline cannot be what refuses it.
 
 **And the checks that run anywhere pass:**
 

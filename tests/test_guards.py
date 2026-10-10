@@ -31,6 +31,7 @@ import tools.check_published_references as references_guard
 import tools.check_pyjab_readiness as readiness_guard
 import tools.check_changelog_immutable as immutable_guard
 import tools.check_release_l3 as l3_guard
+import tools.check_release_unpublished as unpublished_guard
 import tools.check_release_version as release_guard
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -906,6 +907,285 @@ def test_the_windows_gui_suite_step_exists_and_would_really_drive_a_window():
     )
     assert "if" not in step, "the step that drives the window is conditional"
     assert not step.get("continue-on-error"), "the step that drives the window cannot fail the job"
+
+
+# ---------------------------------------------------------------------------------
+# tools/check_release_unpublished.py -- the pre-flight, before anything is published
+# ---------------------------------------------------------------------------------
+#
+# `github-release` needs only `verify`, while the job that actually refuses a duplicate
+# version (`pypi`) waits behind an approval, so a version that is already on PyPI used to
+# reach the release job first and produce a GitHub release with no matching package. Every
+# branch of that refusal is pinned below by its exit status **and** the text that tells it
+# apart from the others: "already published" and "the index could not be read" both refuse,
+# and a check that cannot tell them apart passes exactly when it is blind.
+
+#: The version the tag under test names, so the expected text is readable.
+UNPUBLISHED_VERSION = "0.2.0"
+
+
+def unpublished_body(tmp_path, payload, name="pypi.json"):
+    """A PyPI JSON answer, or a deliberately wrong stand-in, as the file curl wrote."""
+    path = tmp_path / name
+    path.write_text(
+        payload if isinstance(payload, str) else json.dumps(payload), encoding="utf-8"
+    )
+    return path
+
+
+def unpublished_verdict(
+    tmp_path, pypi_payload, pypi_code="404", release_code=None, dry_run=False
+):
+    """The exit status and the lines the step would print, for one pair of answers."""
+    decision = unpublished_guard.decide(
+        UNPUBLISHED_VERSION,
+        pypi_code,
+        unpublished_body(tmp_path, pypi_payload),
+        release_code=release_code,
+        dry_run=dry_run,
+    )
+    return decision.exit_code, "\n".join(decision.lines)
+
+
+def a_pypi_answer(version):
+    """The shape PyPI's JSON API returns; only ``info.version`` is read."""
+    return {"info": {"name": "pyjab-mcp", "version": version}}
+
+
+def test_the_unpublished_gate_proceeds_on_a_404_and_names_the_url_it_checked(tmp_path):
+    exit_code, text = unpublished_verdict(tmp_path, a_pypi_answer(UNPUBLISHED_VERSION))
+
+    assert exit_code == 0
+    assert f"PASSED: pyjab-mcp {UNPUBLISHED_VERSION} is not on PyPI" in text
+    assert (
+        f"https://pypi.org/pypi/pyjab-mcp/{UNPUBLISHED_VERSION}/json" in text
+    ), "the log has to say what 'unpublished' was measured against"
+
+
+def test_the_unpublished_gate_refuses_a_200_and_says_a_new_version_is_needed(tmp_path):
+    exit_code, text = unpublished_verdict(tmp_path, a_pypi_answer("0.1.2"), pypi_code="200")
+
+    assert exit_code == 1
+    assert "::error::" in text
+    assert "pyjab-mcp 0.2.0 is already published" in text
+    assert "https://pypi.org/pypi/pyjab-mcp/0.2.0/json" in text
+    assert "a published version cannot be replaced, so this release needs a new version" in text
+
+
+def test_the_unpublished_gate_prints_the_version_the_index_reports(tmp_path):
+    exit_code, text = unpublished_verdict(tmp_path, a_pypi_answer("0.2.0"), pypi_code="200")
+
+    assert exit_code == 1
+    assert "The index reports version 0.2.0" in text
+
+
+def test_the_unpublished_gate_says_so_when_the_index_disagrees_about_the_version(tmp_path):
+    """If the index answers for another version, the check read the wrong input."""
+    exit_code, text = unpublished_verdict(tmp_path, a_pypi_answer("0.3.0"), pypi_code="200")
+
+    assert exit_code == 1
+    assert "0.3.0" in text
+    assert "not '0.2.0'" in text
+    assert "confused about which version it asked for" in text
+
+
+@pytest.mark.parametrize("code", ["000", "500", "403"])
+def test_the_unpublished_gate_refuses_an_index_it_could_not_read(tmp_path, code):
+    """`000` is curl's 'no HTTP response at all'; a network failure is not permission."""
+    exit_code, text = unpublished_verdict(tmp_path, '{"message":"boom"}', pypi_code=code)
+
+    assert exit_code == 1
+    assert "the index could not be read" in text
+    assert f"(HTTP {code}" in text
+    assert "unverified, which is not the same as 'not published'" in text
+    assert "is already published" not in text, (
+        "an index that could not be read is not evidence that the version is there"
+    )
+
+
+def test_the_unpublished_gate_still_refuses_a_200_whose_body_it_cannot_parse(tmp_path):
+    """The status says the version is there, so an unreadable body is not 'unread'.
+
+    It is a *published* version the tool cannot double-check, and the line has to say which
+    of the two it is -- otherwise a 200 with a bad body would read as 'the index was down'.
+    """
+    exit_code, text = unpublished_verdict(tmp_path, "{not json", pypi_code="200")
+
+    assert exit_code == 1
+    assert "is already published" in text
+    assert "could not be parsed" in text
+    assert "the index could not be read" not in text, (
+        "a 200 is a verdict about the version, not a failure to read the index"
+    )
+
+
+@pytest.mark.parametrize(
+    "release_code, expected",
+    [
+        pytest.param("200", "already exists for this tag", id="already-there"),
+        pytest.param("404", "does not exist yet", id="absent"),
+        pytest.param("000", "could not be read", id="unread"),
+    ],
+)
+def test_the_release_code_is_informational_and_never_changes_the_verdict(
+    tmp_path, release_code, expected
+):
+    """A re-run of a tag whose release was already created is a legitimate state.
+
+    `github-release` needs only `verify`, so a 200 here is what a re-run after a pending
+    approval looks like. Refusing on it would block an otherwise correct release, and that is
+    why this must not be "fixed" into a failure later.
+    """
+    exit_code, text = unpublished_verdict(
+        tmp_path, a_pypi_answer(UNPUBLISHED_VERSION), release_code=release_code
+    )
+
+    assert exit_code == 0, "the release answer must never decide"
+    assert expected in text
+    assert "::error::" not in text
+
+
+def test_the_release_code_stays_informational_when_the_index_refuses(tmp_path):
+    """The two answers are independent: a release that exists does not soften a 200."""
+    exit_code, text = unpublished_verdict(
+        tmp_path, a_pypi_answer("0.2.0"), pypi_code="200", release_code="200"
+    )
+
+    assert exit_code == 1
+    assert "is already published" in text
+    assert "already exists for this tag" in text
+
+
+def test_the_unpublished_gate_says_nothing_about_a_release_it_was_not_asked_about(tmp_path):
+    """The release half is optional; passing no code must not invent an answer."""
+    _, text = unpublished_verdict(tmp_path, a_pypi_answer(UNPUBLISHED_VERSION))
+
+    assert "GitHub release" not in text
+
+
+UNPUBLISHED_REFUSALS = [
+    pytest.param(a_pypi_answer("0.2.0"), "200", id="already-published"),
+    pytest.param("{not json", "200", id="a-200-it-cannot-parse"),
+    pytest.param('{"message":"boom"}', "000", id="no-response"),
+    pytest.param('{"message":"boom"}', "500", id="http-500"),
+    pytest.param('{"message":"boom"}', "403", id="http-403"),
+]
+
+
+@pytest.mark.parametrize("payload, code", UNPUBLISHED_REFUSALS)
+def test_a_dry_run_warns_where_a_tag_push_refuses(tmp_path, payload, code):
+    """`workflow_dispatch` runs on main's HEAD, where the version is normally unpublished.
+
+    The version guard and the L3 gate in the same job already warn instead of failing there,
+    and -- like them -- this changes the annotation and the exit status, never the verdict.
+    """
+    tag_exit, _ = unpublished_verdict(tmp_path, payload, pypi_code=code)
+    dry_exit, dry_text = unpublished_verdict(tmp_path, payload, pypi_code=code, dry_run=True)
+
+    assert tag_exit == 1
+    assert dry_exit == 0
+    assert "::warning::" in dry_text
+    assert "::error::" not in dry_text
+
+
+def test_the_unpublished_gate_script_is_what_the_workflow_runs(tmp_path):
+    """The function above can pass while the command line -- or the workflow -- is broken."""
+    body = unpublished_body(tmp_path, a_pypi_answer("0.2.0"))
+    script = str(REPO_ROOT / "tools" / "check_release_unpublished.py")
+    argv = [
+        sys.executable, script,
+        "--version", UNPUBLISHED_VERSION,
+        "--pypi-code", "200",
+        "--pypi-body", str(body),
+        "--release-code", "200",
+    ]
+
+    refused = subprocess.run(argv, cwd=REPO_ROOT, capture_output=True, text=True, timeout=180)
+    warned = subprocess.run(argv + ["--dry-run"], cwd=REPO_ROOT, capture_output=True,
+                            text=True, timeout=180)
+
+    assert refused.returncode == 1
+    assert "is already published" in refused.stdout
+    assert "already exists for this tag" in refused.stdout
+    assert warned.returncode == 0
+    assert "::warning::" in warned.stdout
+    assert "::error::" not in warned.stdout
+
+
+def test_the_release_workflow_checks_this_before_the_l3_gate_and_before_publishing():
+    """A tool the workflow does not call -- or cannot fail through -- is not a gate.
+
+    Every one of these mutations left the tool's own tests green: appending `|| true`, dropping
+    the `000` fallback, removing the version output it reads, deleting the `--dry-run` branch,
+    or moving the step after the gate it is supposed to pre-empt. The tool is only worth what
+    its wiring is, so for a release gate the brittle assertion is the point: change the wiring
+    deliberately, and change this test in the same commit.
+    """
+    path = REPO_ROOT / ".github" / "workflows" / "release.yml"
+    workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["verify"]["steps"]
+
+    step = next(
+        (step for step in steps if step.get("name") == "The version is not already published"),
+        None,
+    )
+    assert step is not None, "the pre-flight step was renamed or removed"
+    script = step["run"]
+
+    required = (
+        # it reads the version the version guard wrote, not one of its own
+        'VERSION="${{ steps.version.outputs.version }}"',
+        # the two calls: PyPI's JSON API, and the release for this tag
+        "https://pypi.org/pypi/pyjab-mcp/${VERSION}/json",
+        "releases/tags/v${VERSION}",
+        # curl's exit status is not the HTTP status; 000 is "no response at all"
+        '|| PYPI_CODE="000"',
+        '|| RELEASE_CODE="000"',
+        # the event decides it: a push must refuse, a dispatch must warn and pass
+        '[ "${{ github.event_name }}" != "push" ]',
+        "DRY_RUN=(--dry-run)",
+        '"${DRY_RUN[@]}"',
+        # the arguments, in the form the tool reads them
+        '--version "$VERSION"',
+        '--pypi-code "$PYPI_CODE" --pypi-body "$PYPI_BODY"',
+        '--release-code "$RELEASE_CODE"',
+        "tools/check_release_unpublished.py",
+    )
+    for fragment in required:
+        assert fragment in script, (
+            f"the pre-flight step no longer contains {fragment!r}, so the gate can stop refusing "
+            "a release -- or start deciding on the wrong input -- while every test of the tool "
+            "stays green."
+        )
+
+    for fragment in ("|| true", "2>/dev/null"):
+        assert fragment not in script, (
+            f"the pre-flight step contains {fragment!r}. A gate that cannot fail is decoration, "
+            "and this step's non-zero exit is what stops a tag for a version already on PyPI."
+        )
+
+    assert "if" not in step, (
+        "the pre-flight step is conditional, so `verify` can go green with the gate never run"
+    )
+    assert not step.get("continue-on-error"), (
+        "the pre-flight step ignores its own failure, so a duplicate version is released anyway"
+    )
+    assert "<<'PY'" not in script, (
+        "the verdict logic is back in the YAML, where tests/test_guards.py cannot reach it"
+    )
+
+    # Position: after the version guard (whose output it reads) and before the L3 gate, whose
+    # job it is to pre-empt -- a check that runs after the fact is not a pre-flight.
+    names = [s.get("name") for s in steps]
+    guard = steps.index(next(s for s in steps if s.get("id") == "version"))
+    here = names.index("The version is not already published")
+    l3_gate = names.index("L3 was green on this commit (windows-gui.yml)")
+
+    assert guard < here, "the pre-flight no longer runs after the version guard it depends on"
+    assert here < l3_gate, (
+        "the pre-flight now runs after the L3 gate, so it no longer precedes the job that "
+        "would refuse this run"
+    )
 
 
 # ---------------------------------------------------------------------------------

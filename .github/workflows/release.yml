@@ -62,6 +62,46 @@ jobs:
             fi
           }
 
+      # The half-published hazard: `github-release` needs only `verify`, while `pypi` -- where a
+      # duplicate version is actually refused -- is a separate job behind a human approval. So a
+      # tag for a version that is already on PyPI reaches the release job *first* and creates a
+      # GitHub release with no matching package. This is the pre-flight from docs/RELEASING.md,
+      # moved where it cannot be forgotten: it needs the `version` output of the step above, and
+      # it must run before anything is published. The verdict is
+      # tools/check_release_unpublished.py, pinned by tests/test_guards.py -- what stays here is
+      # only what is not a verdict: the two curls and the arguments. A dry run
+      # (`workflow_dispatch`) runs on main's HEAD, where a version may legitimately be prepared
+      # but not yet published, so every refusal is a warning and the exit status is 0, exactly
+      # like the version guard and the L3 gate.
+      - name: The version is not already published
+        env:
+          # `contents: read` is already granted at the top of this workflow, and it covers
+          # reading a release, so no new permission is needed for either call.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          echo "checking whether pyjab-mcp ${VERSION} is already published"
+
+          PYPI_BODY="$(mktemp)"
+          PYPI_CODE="$(curl -sS -o "$PYPI_BODY" -w '%{http_code}' \
+            "https://pypi.org/pypi/pyjab-mcp/${VERSION}/json")" || PYPI_CODE="000"  # 000: no HTTP response at all
+
+          RELEASE_BODY="$(mktemp)"
+          RELEASE_CODE="$(curl -sS -o "$RELEASE_BODY" -w '%{http_code}' \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/v${VERSION}")" || RELEASE_CODE="000"
+
+          DRY_RUN=()
+          if [ "${{ github.event_name }}" != "push" ]; then
+            DRY_RUN=(--dry-run)
+          fi
+          python tools/check_release_unpublished.py \
+            --version "$VERSION" \
+            --pypi-code "$PYPI_CODE" --pypi-body "$PYPI_BODY" \
+            --release-code "$RELEASE_CODE" "${DRY_RUN[@]}"
+
       # L3 is the only layer that can say a tool call worked against a live window, and
       # `windows-gui.yml` runs weekly on a schedule (and on dispatch) rather than as part of the
       # default CI, so a green default CI run says nothing about it.
