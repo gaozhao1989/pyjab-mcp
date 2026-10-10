@@ -11,6 +11,9 @@ import java.awt.event.KeyEvent;
 
 import javax.swing.JButton;
 import javax.swing.JFrame;
+import javax.swing.JMenu;
+import javax.swing.JMenuBar;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.KeyStroke;
@@ -110,12 +113,18 @@ public final class BoundaryApp {
         JButton ordinary = new JButton("Ordinary button");
         ordinary.setName("Ordinary button");
 
-        // A button whose action is also reachable as a chord, so an end-to-end test can say
-        // whether a key really arrived. This is the observable end of the `send_keys` API:
-        // an accelerator only fires while the window has the keyboard focus, which is exactly
-        // what the tool's own documentation warns about.
-        JButton accelerated = new JButton("Accelerated button");
-        accelerated.setName("Accelerated button");
+        controls.add(first);
+        controls.add(second);
+        controls.add(ordinary);
+        controls.add(status);
+
+        // The accelerator lives on a *menu item*, which is where Swing has them: `JButton`
+        // has no `setAccelerator`, and the first version of this file failed to compile on a
+        // runner because it assumed otherwise -- the mistake this file's own comments now
+        // record. A menu item's accelerator fires while the window has focus, without the
+        // menu being opened, which is the observable end of the `send_keys` API.
+        JMenuItem accelerated = new JMenuItem("Fire the accelerator");
+        accelerated.setName("Fire the accelerator");
         accelerated.setAccelerator(
                 KeyStroke.getKeyStroke(KeyEvent.VK_Y, InputEvent.ALT_DOWN_MASK));
         accelerated.addActionListener(new ActionListener() {
@@ -125,11 +134,13 @@ public final class BoundaryApp {
             }
         });
 
-        controls.add(first);
-        controls.add(second);
-        controls.add(ordinary);
-        controls.add(accelerated);
-        controls.add(status);
+        JMenu actions = new JMenu("Actions");
+        actions.setName("Actions menu");
+        actions.add(accelerated);
+        JMenuBar menuBar = new JMenuBar();
+        menuBar.setName("Boundary menu bar");
+        menuBar.add(actions);
+        frame.setJMenuBar(menuBar);
         frame.add(controls, BorderLayout.SOUTH);
 
         frame.pack();

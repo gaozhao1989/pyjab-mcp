@@ -8,8 +8,62 @@ under **Unreleased** until it is tagged.
 
 ## Unreleased
 
-Nothing yet.
+### Fixed
 
+* **A snapshot could print `children=3` with nothing under it and give no reason.** pyjab reports
+  an element's **total** child count while a walk yields the children the tree *exposes*, so a
+  collapsed node or an unselected tab legitimately shows fewer children than it reports — pyjab's
+  own finding, [pyjab#173](https://github.com/gaozhao1989/pyjab/issues/173). Four situations then
+  looked identical: children that are not visible, a walk stopped by its limit, a bug in this
+  renderer, or a read that failed.
+
+  `java_snapshot` now marks the difference where it exists — `children=3 (+2)`, on the node and on
+  the window line — with one legend explaining that the first number is the element's own total.
+  When the walk was also cut short the legend says so, because the gap then has two possible
+  causes and the reply must not pick one for the reader. Both appear **only when the `children`
+  field is printed**, so a default snapshot does not grow a paragraph it cannot use.
+
+  This project's own `only_interactive` filter is deliberately outside the comparison: a container
+  dropped from the *rendering* was still walked, and counting it as a gap would blame the
+  application for our choice. Six tests cover the marker, the legend, the truncated variant, the
+  filter case, and the ordinary case where nothing is added.
+
+### Changed
+
+* **`java_send_keys` sends chords where pyjab provides the API.** pyjab closed
+  [pyjab#168](https://github.com/gaozhao1989/pyjab/issues/168) as completed and `master` has
+  `JABDriver.send_keys`, `JABElement.send_keys` and `Win32Utils.send_keys`, while the newest
+  release on PyPI was still 1.10.0. This tool would **not** have noticed: it raised the
+  requirement unconditionally, the one capability here that never probed, so the release that
+  answers R4 would have changed nothing. It now probes with `getattr` and calls what it finds —
+  the mechanism that made the window listing and `detach()` start working the day 1.10.0 landed
+  ([#15](https://github.com/gaozhao1989/pyjab-mcp/issues/15)).
+
+  The reply states the two things a caller gets wrong, both from pyjab's documentation: nothing
+  is focused and nothing is clicked (the chord goes to whatever has the keyboard focus, because
+  clicking to focus would activate the control), and an unrecognised key name is an error —
+  reported as an argument problem, naming the key, rather than with the environment hint.
+
+  *(This entry belongs to #15, whose pull request shipped without it: the changelog edit's anchor
+  did not match and nothing asserted that it had. It is recorded here rather than in the released
+  0.1.1 section, which is frozen and published.)*
+
+### Added
+
+* **`--help` says where to get help, and what the free version includes.** The plan's F1 asked
+  for a commercial-support line inside `java_diagnostics`'s output; that output is structured
+  findings an agent reads to work out what is wrong with an environment, and a support address
+  in it is prose addressed to somebody who is not there. It goes where a person is looking
+  instead — `--help` and the README — with the sentence a user actually wonders about: no
+  licence key, no quota, nothing held back. Two tests pin that decision in both directions.
+
+* **The enterprise gaps are documented rather than implied.** The plan's F4 reserved five
+  capabilities architecturally and never wrote them down: remote transport, multi-tenancy, an
+  audit log, general batch execution, and CI integration. The README now lists each with what
+  adding it would take — a policy, an authentication story, a decision about user data — because
+  "we did not think about it" reads worse than "this is deliberately stdio-only, one session at
+  a time, and the audit trail is your client's transcript". The capability-boundaries section
+  above it is about what the *substrate* cannot reach; this one is about choices.
 ## [0.1.1] - 2026-10-10
 
 **A patch release, because the MCP Registry registers a PyPI package by reading a line out of

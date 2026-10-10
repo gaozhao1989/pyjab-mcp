@@ -253,12 +253,26 @@ def render(
             f"unknown field(s) {unknown}; known fields are {list(KNOWN_FIELDS)}"
         )
 
+    #: index -> how many children the walk produced. Counted over the *walk* rather than over
+    #: the rendered lines: a child dropped by ``only_interactive`` is still a child the walk
+    #: saw, and marking its parent would blame pyjab for this project's own filtering.
+    walked_children: Dict[int, int] = {}
+    for node in walk.nodes:
+        if node.parent is not None:
+            walked_children[node.parent] = walked_children.get(node.parent, 0) + 1
+
     kept = _kept_flags(walk.nodes, only_interactive)
     lines: List[str] = []
     rendered_indices: List[int] = []
     stopped_because_of_budget = False
 
+    top_level = sum(1 for node in walk.nodes if node.parent is None)
     root_line = f"window {walk.root.label}"
+    if "children" in fields:
+        # pyjab's walk yields *descendants*, so the top-level nodes are the root's children.
+        root_line += f" children={walk.root.children_count}"
+        if top_level < walk.root.children_count:
+            root_line += f" (+{walk.root.children_count - top_level})"
     if root_note:
         root_line += f" ({root_note})"
     lines.append(root_line)
@@ -272,7 +286,8 @@ def render(
             break
         rendered_indices.append(index)
         lines.append(
-            f"{indent * (node.depth + 1)}{_line(node, fields, handles.get(index))}"
+            f"{indent * (node.depth + 1)}"
+            f"{_line(node, fields, handles.get(index), walked_children.get(index, 0))}"
         )
 
     truncated = walk.truncated or stopped_because_of_budget
@@ -282,6 +297,20 @@ def render(
     elif stopped_because_of_budget and reason:
         reason = f"{reason}; node budget reached ({max_nodes} shown)"
 
+    # Only when the field is printed at all: a legend for a marker nobody can see is noise.
+    reported_more = "children" in fields and any(
+        walked_children.get(index, 0) < walk.nodes[index].record.children_count
+        for index in rendered_indices
+    )
+    if reported_more:
+        lines.append(
+            "A `(+n)` after children= means the walk produced n fewer children than the "
+            "element reports. children= is the element's own total; a walk yields the "
+            "children the accessibility tree exposes, so a collapsed node or an unselected "
+            "tab reports children it does not show."
+            + (" The walk was also cut short, so some of that gap may be its limit."
+               if walk.truncated else "")
+        )
     unhandleable = len(unaddressable_set.intersection(rendered_indices))
     if unhandleable:
         lines.append(
@@ -308,8 +337,16 @@ def render(
     )
 
 
-def _line(node: Node, fields: Sequence[str], handle: Optional[str]) -> str:
-    """``[handle] role "name" (states)`` and whichever extras were asked for."""
+def _line(node: Node, fields: Sequence[str], handle: Optional[str],
+          walked_children: Optional[int] = None) -> str:
+    """``[handle] role "name" (states)`` and whichever extras were asked for.
+
+    ``walked_children`` is how many children the walk actually produced for this node. When it
+    is *fewer* than the record's ``children_count`` the line says so: pyjab reports the
+    element's **total** child count while a walk yields the **visible** ones, so the two can
+    disagree for a collapsed node or an unselected tab -- and a reader with no marker cannot
+    tell that from a walk that stopped early, a rendering bug, or a read that failed.
+    """
     record = node.record
     parts = [f"[{handle}]" if handle else "", record.label]
     parts = [part for part in parts if part]
@@ -324,7 +361,10 @@ def _line(node: Node, fields: Sequence[str], handle: Optional[str]) -> str:
     if "description" in fields and record.description:
         parts.append(f"desc={record.description!r}")
     if "children" in fields:
-        parts.append(f"children={record.children_count}")
+        marker = ""
+        if walked_children is not None and walked_children < record.children_count:
+            marker = f" (+{record.children_count - walked_children})"
+        parts.append(f"children={record.children_count}{marker}")
     if "index" in fields:
         parts.append(f"index={record.index_in_parent}")
     if "depth" in fields:

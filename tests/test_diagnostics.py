@@ -219,3 +219,21 @@ def test_a_pyjab_that_cannot_be_imported_is_reported_with_its_reason():
 
     assert row.status == Status.UNAVAILABLE
     assert "no module named pyjab" in row.value
+
+
+def test_the_diagnostics_report_carries_no_marketing():
+    """F1's decision, pinned: machine-read findings, not a place to advertise.
+
+    The plan proposed a commercial-support line in this tool's output. Its output is what an
+    agent reads to work out what is wrong with an environment, and a support address in it is
+    prose addressed to somebody who is not there. The address lives in `--help` and the README,
+    and this test is what stops it drifting in.
+    """
+    from pyjab_mcp.diagnostics import collect
+
+    text = collect().render()
+
+    for advertisement in ("gaozhao89@qq.com", "commercial", "support"):
+        assert advertisement not in text.lower(), (
+            f"{advertisement!r} belongs in --help and the README, not in a findings report"
+        )

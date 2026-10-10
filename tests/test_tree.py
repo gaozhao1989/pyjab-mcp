@@ -315,3 +315,109 @@ def test_a_content_role_that_also_moved_still_blocks():
 
     assert result.ok is False
     assert "index among siblings" in result.problems[0]
+
+# ---------------------------------------------------------------------------------
+# Two answers to "how many children": pyjab's total and the walk's visible ones
+# ---------------------------------------------------------------------------------
+
+#: A window whose root reports two children while the walk produced one -- the case pyjab
+#: describes in its own issue: `children_count` is the total, a walk yields the visible.
+HIDDEN_CHILD_WINDOW = (
+    (0, {"role": "panel", "name": "Container with a hidden child", "children_count": 2,
+         "index_in_parent": 0, "object_depth": 1, "states": "", "description": ""}),
+    (1, {"role": "push button", "name": "Only the visible one", "children_count": 0,
+         "index_in_parent": 0, "object_depth": 2, "states": "", "description": ""}),
+)
+
+
+def window_walk(root_children: int = 2) -> Walk:
+    records = list(HIDDEN_CHILD_WINDOW)
+    root = Record.from_pyjab({
+        "role": "frame", "name": "Window", "children_count": root_children,
+        "index_in_parent": 0, "object_depth": 0, "states": "", "description": "",
+    })
+    return Walk(root=root, nodes=walked_nodes(records), walked=len(records))
+
+
+def test_a_node_that_reports_more_children_than_the_walk_found_says_so():
+    """Left unsaid, a reader cannot tell an invisible child from a truncated walk or a bug."""
+    rendered = render(window_walk(), max_nodes=50, only_interactive=False,
+                      fields=("children",))
+
+    assert 'panel "Container with a hidden child" children=2 (+1)' in rendered.text
+    assert "A `(+n)` after children=" in rendered.text, "and the legend explains the marker"
+
+
+def test_the_root_line_carries_its_own_count_and_marker():
+    """The window's own number is the one `java_get_element` prints for it."""
+    rendered = render(window_walk(root_children=5), max_nodes=50, only_interactive=False,
+                      fields=("children",))
+
+    # One top-level node was walked against five the element reports.
+    assert 'window frame "Window" children=5 (+4)' in rendered.text.splitlines()[0]
+
+
+def test_nothing_is_added_when_the_two_counts_agree():
+    """The common case must not grow a paragraph."""
+    records = (
+        (0, {"role": "panel", "name": "Ordinary container", "children_count": 1,
+             "index_in_parent": 0, "object_depth": 1, "states": "", "description": ""}),
+        (1, {"role": "push button", "name": "Child", "children_count": 0,
+             "index_in_parent": 0, "object_depth": 2, "states": "", "description": ""}),
+    )
+    root = Record.from_pyjab({
+        "role": "frame", "name": "Window", "children_count": 1,
+        "index_in_parent": 0, "object_depth": 0, "states": "", "description": "",
+    })
+    rendered = render(Walk(root=root, nodes=walked_nodes(records), walked=2),
+                      max_nodes=50, only_interactive=False, fields=("children",))
+
+    assert "(+" not in rendered.text
+    assert "A `(+n)`" not in rendered.text
+
+
+def test_the_legend_stays_away_when_the_count_is_not_printed():
+    """A legend explaining a marker nobody can see is noise, and tokens are the budget."""
+    rendered = render(window_walk(), max_nodes=50, only_interactive=False)
+
+    assert "children=" not in rendered.text
+    assert "A `(+n)`" not in rendered.text
+
+
+def test_this_projects_own_filter_does_not_look_like_an_invisible_child():
+    """A node dropped by `only_interactive` was still *walked*: that is our rendering, not
+    pyjab's gap, and the reply must not blame the application for it."""
+    # Unnamed containers with nothing interactive inside them: what the filter exists to drop.
+    records = (
+        (0, {"role": "panel", "name": "", "children_count": 1,
+             "index_in_parent": 0, "object_depth": 1, "states": "", "description": ""}),
+        (1, {"role": "panel", "name": "", "children_count": 0,
+             "index_in_parent": 0, "object_depth": 2, "states": "", "description": ""}),
+    )
+    root = Record.from_pyjab({
+        "role": "frame", "name": "Window", "children_count": 1,
+        "index_in_parent": 0, "object_depth": 0, "states": "", "description": "",
+    })
+    walk = Walk(root=root, nodes=walked_nodes(records), walked=2)
+
+    filtered = render(walk, max_nodes=50, only_interactive=True, fields=("children",))
+    unfiltered = render(walk, max_nodes=50, only_interactive=False, fields=("children",))
+
+    assert "panel" not in filtered.text, "the unnamed containers really are dropped"
+    assert "(+" not in filtered.text, (
+        "the walk produced both of them, so nothing is missing: our filter is not a gap in "
+        "the accessibility tree and must not be reported as one"
+    )
+    assert "(+" not in unfiltered.text, "and the counts agree when everything is rendered"
+
+
+def test_a_truncated_walk_says_the_gap_may_be_its_limit():
+    """Two reasons for one marker, and the reply must not pick one of them for the reader."""
+    walk = window_walk()
+    truncated = Walk(root=walk.root, nodes=walk.nodes, walked=walk.walked,
+                     truncated=True, reason="raw walk cap reached (4 records)")
+
+    rendered = render(truncated, max_nodes=50, only_interactive=False, fields=("children",))
+
+    assert "may be its limit" in rendered.text
+    assert "truncated:" in rendered.text, "and the truncation notice is still there"
