@@ -10,7 +10,7 @@ version guard exists.
 
 ## One-time setup
 
-Two things have to exist before the first tag, and neither can be done from this repository.
+Two things have to exist before the first tag. Only the first needs a person.
 
 **1. A PyPI pending publisher (trusted publishing).** There is no API token in this repository
 and there should never be one. On PyPI, add a *pending* publisher for the project name
@@ -27,9 +27,13 @@ The environment name is part of what PyPI checks, which is why the publish job d
 `environment: pypi`. The same environment can be given required reviewers, which turns "someone
 tagged it" into "someone approved it" without changing anything here.
 
-**2. The MCP Registry's GitHub namespace verification.** The registry publishes *metadata*; the
-package itself lives on PyPI. Its `mcp-publisher login github-oidc` proves the GitHub account
-owns the `io.github.gaozhao1989/...` namespace. The first successful login establishes it.
+**2. The MCP Registry's GitHub namespace — nothing to do.** The registry derives the namespace
+from the authentication method: GitHub authentication means the name **must** be
+`io.github.<account>/...`, and this repository's `server.json` says
+`io.github.gaozhao1989/pyjab-mcp`, which is the account that owns the repository. The
+`registry` job's `mcp-publisher login github-oidc` establishes it on the first run, using the
+OIDC token GitHub gives the job (`id-token: write`). There is no separate verification step to
+perform in advance, and no secret to store.
 
 The registry is in **preview**: its schema changes, and data may be reset. It has already
 changed once here — see "What went wrong" below.
@@ -113,6 +117,18 @@ Two lessons, both now mechanical:
 
 Had this been discovered during a real release, PyPI would already have had the package — which
 cannot be undone.
+
+## The registry schema moves, and how that is noticed early
+
+A deprecated `$schema` is a **publish failure**, and the `registry` job runs after `pypi` — so
+finding out during a release means finding out after PyPI already has the package.
+`.github/workflows/registry-drift.yml` asks the registry's validator every Monday instead, on
+a runner, with no tag involved. When it goes red the fix is two lines: `$schema` in
+`server.json`, and the URL pinned in `tests/test_packaging.py`.
+
+That workflow deliberately does **not** pin the `mcp-publisher` version it downloads — the
+point is to ask what the registry currently accepts. The copy in `release.yml` is the same
+download for the same reason.
 
 ## What is deliberately not automated
 

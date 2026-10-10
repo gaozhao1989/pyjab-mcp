@@ -1,0 +1,51 @@
+name: registry drift
+
+# The MCP Registry rejected this project's first server.json, and it was right to: the file
+# followed the published schema at 2025-07-09, while the registry's validator wanted
+# 2025-12-11's field names, and it treats a deprecated `$schema` as a *publish failure*.
+#
+# That failure would have arrived in the release workflow's `registry` job -- which runs
+# **after** the `pypi` job, because the registry points at a package that has to exist first.
+# PyPI cannot be un-published, so a schema that has moved on is worth finding on a Monday
+# rather than during a release.
+#
+# Deliberately not pinned to a version, unlike the mcp-publisher download in release.yml: the
+# whole point is to ask the registry what it currently accepts. If this job goes red, the fix
+# is to move `$schema` in server.json to the version the message names, and the URL this
+# repository's test pins, in tests/test_packaging.py.
+
+on:
+  schedule:
+    # Mondays, 06:00 UTC: before the pyjab-drift job and the GUI job, so if the week has
+    # several things to say, this is not the one buried under the others.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  schema:
+    name: the registry still accepts server.json
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # The local half: the fields and the schema URL this repository expects. Cheap, offline,
+      # and it says which file to edit.
+      - name: The metadata matches what this repository pins
+        run: python -m pytest tests/test_packaging.py -q -k server_json
+
+      - name: The registry's own validator
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher validate
