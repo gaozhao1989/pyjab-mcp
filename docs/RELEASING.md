@@ -212,40 +212,48 @@ That workflow deliberately does **not** pin the `mcp-publisher` version it downl
 point is to ask what the registry currently accepts. The copy in `release.yml` is the same
 download for the same reason.
 
-## Aggregator listings
+## Discovery: what this relies on, and what it skips
 
-**Verified on 2026-10-10** against each site, because the mechanism is not what it looks like:
-the official Registry's own documentation says aggregators are *downstream consumers* that
-**scrape its read-only REST API on an infrequent schedule (about hourly)**. So the listing is
-driven by the registry entry, not by a form — a form is an accelerant for the sites that have
-one, and for others it is a different thing entirely.
+**Installation never depended on a directory.** Two channels, both verified on 2026-10-10:
 
-The order is therefore: **the registry entry first** (done: `io.github.gaozhao1989/pyjab-mcp`,
-`status: active`), then check each site, then submit only where there is something to submit.
-
-| site | mechanism, as measured | what to do |
+| channel | command | verified how |
 |---|---|---|
-| **LobeHub** | A GitHub issue in [`lobehub/lobehub`](https://github.com/lobehub/lobehub/issues), titled `[Server Submission]: <name>`. Its template asks for name, repository, publisher, licence, **transport**, and the **official Registry name** — which is the part worth having registered first. | Open the issue with the fields in the template. Nothing else is needed; the crawler may also find it on its own. |
-| **PulseMCP** | Crawls the registry, and its own site said on 2026-10-10: *"New server submissions and listing changes are still paused while we rework how we ingest and manage listings."* | **Nothing to submit right now.** Check `/servers?q=pyjab-mcp` after the crawler has run; re-check `/submit` when they reopen. |
-| **Smithery** | **Not a form.** Two publishing paths: a public **Streamable HTTP** URL (the gateway proxies to your server), or a local **MCPB bundle**. | The URL path is blocked by a deliberate decision here — this server is stdio-only (`README`, "Deliberately not in scope"). The MCPB path is real work: a bundle manifest plus the Windows/JDK requirement stated where a user will see it. Decide whether it is worth it; skipping it is a legitimate answer. |
-| **mcp.so** | A submission form at <https://mcp.so/submit>, plus its own crawl. | Submit with the registry name, repository and the `server.json` description. It asks for an account. |
+| **PyPI** | `pip install pyjab-mcp` — and `uvx pyjab-mcp` for a client that takes a command | a clean venv installed `0.1.1` and the console script answered `--version`. `uvx` itself was **not** exercised (no `uv` on the machine that checked); it is a wrapper over the same install. |
+| **GitHub** | `pip install "git+https://github.com/gaozhao1989/pyjab-mcp"` | a clean venv installed from `main` and reported `0.1.1` with all 15 tools registered. |
 
-Two things to say in every submission, because they are the questions a reviewer asks:
+Both are in `README.md`, which is also what PyPI renders as the project page, and `docs/CLIENTS.md`
+gives the per-client configuration.
 
-* it needs **Windows** and a JDK with Java Access Bridge enabled — it is not a cross-platform
-  server, and a listing that omits this produces issue reports that are really installation
-  questions;
-* it **attaches to an application that is already running** and never launches or restarts one.
+**Aggregator directories are deliberately not a release step.** They were a criterion in the plan
+and were removed on 2026-10-10, for reasons that were measured rather than assumed:
 
-**Copy the description from `server.json` verbatim.** It is already written to the registry's
-rules (one line, capabilities rather than implementation, under 100 characters), so paraphrasing
-it per site is how the listings end up disagreeing about what this is.
+* they are **downstream consumers**: the Registry's own documentation says they *scrape its
+  read-only REST API* "on a regular but infrequent basis (e.g., once per hour)". The registry
+  entry is live (`io.github.gaozhao1989/pyjab-mcp`, `status: active`), so the one channel that
+  costs nothing is already open — and a site that becomes useful later will pick the server up
+  **without any action here**;
+* of the four the plan named, one was **paused** ("New server submissions and listing changes are
+  still paused"), one is **not a form at all** (Smithery publishes a public Streamable HTTP URL —
+  blocked by this project's deliberate stdio-only decision — or a local MCPB bundle), and two ask
+  for an account or a third-party issue;
+* what they would add is *browsing discovery* for a Windows-only, JAB-dependent tool whose users
+  arrive knowing what they want to automate. The cost — an issue here, an account there, a bundle
+  to build — is real and the benefit is speculative.
 
-**The plan's list is a starting point, not a contract.** Two of the four are paused or
-inapplicable as measured above, so reaching three listings may mean a different three; the
-registry's own aggregator documentation is where to look for what consumes it today.
+If someone does want to revisit it, this is the state as measured on 2026-10-10:
 
-## What is deliberately not automated## What is deliberately not automated
+| site | what it asks for |
+|---|---|
+| LobeHub | an issue in [`lobehub/lobehub`](https://github.com/lobehub/lobehub/issues) titled `[Server Submission]: <name>`; its template asks for the **official Registry name**, transport and licence |
+| PulseMCP | nothing right now — submissions paused, reopening unannounced; it crawls the registry itself |
+| Smithery | a public **Streamable HTTP** endpoint, or an **MCPB bundle** for local use |
+| mcp.so | a `/submit` form and an account |
+
+Anything submitted should copy the description from `server.json` verbatim — it is already written
+to the registry's rules — and should state the two facts a reviewer asks for: Windows with Java
+Access Bridge enabled, and that the server attaches to an application that is already running.
+
+## What is deliberately not automated## What is deliberately not automated## What is deliberately not automated
 
 * **Choosing the version.** Semantic versioning is a judgement about what changed.
 * **Aggregator listings** (LobeHub, PulseMCP, Smithery, mcp.so). They pull from the official
