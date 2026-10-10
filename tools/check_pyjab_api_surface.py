@@ -253,11 +253,62 @@ SURFACE: Dict[Touchpoint, Entry] = {
         "it is text and empty; table_driver keeps the two apart all the way to the reply, "
         "because collapsing them would report a missing interface as an empty cell.",
     ),
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> get_cell() -> as_record"): Entry(
+        PUBLIC, "1.9.0",
+        "Read on a cell only when the cell reports no AccessibleText, because Swing's "
+        "AccessibleJTableCell puts the cell's *value* in its accessible name. The first L3 "
+        "run is why this exists: the table reported four columns and its cells, and every "
+        "cell's .text was None -- so a reader that trusted .text alone would have reported an "
+        "entire table of unknown values as empty. The reply names the cells whose value came "
+        "from the name rather than presenting it as text.",
+    ),
     ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> get_cell() -> release_jabelement"): Entry(
         PUBLIC, "1.8.0",
         "Every cell the table hands out is released, one at a time, in a finally. A 200-row "
         "table read without that is 200 Java objects left behind, which is issue #43's shape "
         "at exactly the scale that makes it hurt.",
+    ),
+    # -- the actions (M5).  All public since 1.8.0, all verified before they run: act_driver
+    # resolves, checks the record the handle stored, and only then acts -- on the element it
+    # checked, so there is no window between the two.
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> click"): Entry(
+        PUBLIC, "1.8.0",
+        "The accessibility action by default, and a simulated click when asked for. pyjab's "
+        "docs state the trade: simulate brings the window to the front, cannot work from a "
+        "non-interactive session, and needs real bounds -- cells often report -1.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> double_click"): Entry(
+        PUBLIC, "1.8.0",
+        "Mouse input only; there is no accessibility action for a double click.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> context_click"): Entry(
+        PUBLIC, "1.8.0",
+        "Right-click, for a context menu. Mouse input only, like double_click.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> send_text"): Entry(
+        PUBLIC, "1.8.0",
+        "Text entry: the JAB setTextContents action, or simulated keystrokes with "
+        "simulate=True. Note what it is not -- it types text, so it cannot express a modifier "
+        "chord, which is why java_send_keys is blocked on requirement 'send_keys'.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> clear"): Entry(
+        PUBLIC, "1.8.0",
+        "Empties a text field, with pyjab waiting for the text attribute to follow.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> select"): Entry(
+        PUBLIC, "1.8.0",
+        "Selects an option by its text: combo boxes, lists, tabs. pyjab waits for the "
+        "selection to take unless told not to.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> select_cell"): Entry(
+        PUBLIC, "1.8.0",
+        "Selects a table cell through the table's accessible selection -- pyjab's docs are "
+        "explicit that this is the path an application responds to, because the cells "
+        "get_cell() returns often report bounds of -1 and cannot be clicked.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> select_row"): Entry(
+        PUBLIC, "1.8.0",
+        "Selects a whole row, through the same accessible-selection path.",
     ),
     ("pyjab.jabdriver", "JABDriver.find_elements_by_name"): Entry(
         PUBLIC, "1.8.0",

@@ -91,6 +91,19 @@ REQUIREMENTS: "tuple[Requirement, ...]" = (
         expected_in="a pyjab minor after 1.9.0; 1.9.0 does not have it",
     ),
     Requirement(
+        key="send_keys",
+        blocks="java_send_keys, and therefore any shortcut that is not plain text",
+        wanted="a public way to send a key sequence or shortcut (e.g. alt+y) to a window",
+        why=(
+            "every key helper pyjab has is private -- Win32Utils._press_key, _send_keys, "
+            "_press_hold_release_key, _release_key -- and send_text() types *text*, so it "
+            "cannot express a modifier chord. Driving the private helpers would mean "
+            "depending on method names nobody promised, in the one area where a wrong key "
+            "does something irreversible to the application."
+        ),
+        expected_in="a pyjab minor after 1.9.0; 1.9.0 has no public key API",
+    ),
+    Requirement(
         key="detach",
         blocks="releasing a session without ending the application (M2 sessions)",
         wanted="a public, non-destructive way to detach from a window it did not launch",
@@ -123,6 +136,24 @@ class PyjabApiGap(RuntimeError):
     def __init__(self, missing: Requirement) -> None:
         super().__init__(missing.message())
         self.requirement = missing
+
+
+class ElementChanged(RuntimeError):
+    """The element at a handle's locator is not the element the handle was taken from.
+
+    Raised *instead of* acting. D2's whole point is that "the tree moved and we clicked the
+    wrong thing" becomes a message, so nothing that changes an application may proceed on an
+    element that failed verification.
+    """
+
+    def __init__(self, message: str, *, handle: str = "", locator: str = "") -> None:
+        super().__init__(
+            f"{message}. Nothing was done. Take a fresh snapshot"
+            + (f" (handle {handle}, locator {locator})" if handle else "")
+            + "."
+        )
+        self.handle = handle
+        self.locator = locator
 
 
 # ---------------------------------------------------------------------------------
@@ -193,6 +224,7 @@ def probe_public_api() -> PyjabApiReport:
             else requirement("list_java_windows").expected_in,
         ),
         _probe_walk(),
+        _probe_keys(),
         _probe_detach(),
         Fact(
             "pyjab.inspector (CLI fallback)",
@@ -227,6 +259,33 @@ def _probe_walk() -> Fact:
         )
     # 1.8.0 and earlier: walk was in the checkout, not in any release.
     return Fact(name, MISSING, "released in pyjab 1.9.0; this install is older")
+
+
+def _probe_keys() -> Fact:
+    """Whether a key sequence or shortcut can be sent through public API.
+
+    The names checked are a guess at the shape the public API would take, and the fact says
+    so when it finds none: pyjab 1.9.0 has key helpers, and every one of them is private.
+    """
+    name = "public key/shortcut sending"
+    try:
+        from pyjab.common.win32utils import Win32Utils  # noqa: PLC0415 - Windows only
+        from pyjab.jabelement import JABElement  # noqa: PLC0415 - Windows only
+    except ImportError as exc:
+        return Fact(name, UNKNOWN, f"cannot be imported here: {exc}")
+    for owner, candidate in (
+        (Win32Utils, "send_keys"), (Win32Utils, "press_key"),
+        (JABElement, "send_keys"), (JABElement, "press_key"),
+    ):
+        if hasattr(owner, candidate):
+            return Fact(name, AVAILABLE, f"{owner.__name__}.{candidate}()")
+    return Fact(
+        name,
+        MISSING,
+        "every key helper pyjab has is private (Win32Utils._press_key, _send_keys, ...), and "
+        "send_text() types text rather than a modifier chord; "
+        + requirement("send_keys").expected_in,
+    )
 
 
 def _probe_detach() -> Fact:
@@ -294,6 +353,11 @@ class Backend(Protocol):
               row_count: int = 20, max_cells: int = 400) -> TableReading:
         """One page of a table, with its row and column counts."""
 
+    def act(self, window_id: str, locator: str, expected: Record, action: str, *,
+            value: Any = None, simulate: bool = False, row: Optional[int] = None,
+            column: Optional[int] = None) -> None:
+        """Verify the element and act on it, in one element lifetime."""
+
     def close(self) -> None:
         """Release what this backend holds, without touching the applications it observes."""
 
@@ -312,11 +376,18 @@ class AttachedWindow:
 class TableReading:
     """One page of a Java table, with the counts that make the page's size meaningful.
 
-    ``rows`` holds ``None`` for a cell with no Accessible Text interface and ``""`` for a cell
-    that is text and empty -- two different answers, and pyjab's own ``text`` property keeps
-    them apart. A cell that could not be *read* is neither: it is listed by position in
+    ``rows`` holds ``None`` for a cell with no value this layer could read and ``""`` for a
+    cell that is text and empty -- two different answers, and pyjab's own ``text`` property
+    keeps them apart. A cell that could not be *read* is neither: it is listed by position in
     ``unreadable``, because "I could not read it" is a third state and not a value, and
     collapsing it into either of the others would invent an empty table (AGENTS.md §2.4).
+
+    ``from_name`` lists the cells whose value came from the cell's accessible **name** rather
+    than from AccessibleText. That fallback is not a guess: Swing's ``AccessibleJTableCell``
+    reports the cell's value as its name, and a real table in pyjab's test application reports
+    no text interface at all -- the first L3 run read ``None`` for "Kathy" and this is why. The
+    reply says which cells came from where, so a value is never presented as something it is
+    not.
     """
 
     row_count: int
@@ -325,6 +396,8 @@ class TableReading:
     rows: "Tuple[Tuple[Optional[str], ...], ...]"
     #: ``(row, column)`` of cells whose read raised, in row-major order.
     unreadable: "Tuple[Tuple[int, int], ...]" = ()
+    #: ``(row, column)`` of cells whose value came from the accessible name.
+    from_name: "Tuple[Tuple[int, int], ...]" = ()
     truncated: bool = False
     reason: str = ""
 
@@ -442,6 +515,15 @@ class PyjabBackend:
         return table_driver(
             self._driver(window_id), locator,
             row_start=row_start, row_count=row_count, max_cells=max_cells,
+        )
+
+    def act(self, window_id: str, locator: str, expected: Record, action: str, *,
+            value: Any = None, simulate: bool = False, row: Optional[int] = None,
+            column: Optional[int] = None) -> None:
+        """Act on an element.  See :func:`act_driver`."""
+        return act_driver(
+            self._driver(window_id), locator, expected, action,
+            value=value, simulate=simulate, row=row, column=column,
         )
 
     def close(self) -> None:
@@ -619,6 +701,7 @@ def table_driver(driver: Any, locator: str, *, row_start: int = 0,
 
         rows: "List[Tuple[Optional[str], ...]]" = []
         unreadable: "List[Tuple[int, int]]" = []
+        from_name: "List[Tuple[int, int]]" = []
         cells = 0
         stopped_early = False
         for row in range(start, last):
@@ -636,7 +719,17 @@ def table_driver(driver: Any, locator: str, *, row_start: int = 0,
                     values.append(None)
                     continue
                 try:
-                    values.append(cell.text)
+                    value = cell.text
+                    if value is None:
+                        # No Accessible Text: Swing reports a cell's value as its accessible
+                        # name, and a table that does this reports None for every cell rather
+                        # than an empty string.
+                        raw = cell.as_record()
+                        name = raw["name"] if "name" in raw else ""
+                        if name:
+                            value = name
+                            from_name.append((row, column))
+                    values.append(value)
                 except Exception:  # noqa: BLE001
                     unreadable.append((row, column))
                     values.append(None)
@@ -660,9 +753,64 @@ def table_driver(driver: Any, locator: str, *, row_start: int = 0,
             reason = f"{total_rows - last} more row(s) after this page"
         return TableReading(
             row_count=total_rows, column_count=total_columns, row_start=start,
-            rows=tuple(rows), unreadable=tuple(unreadable), truncated=truncated,
-            reason=reason,
+            rows=tuple(rows), unreadable=tuple(unreadable), from_name=tuple(from_name),
+            truncated=truncated, reason=reason,
         )
+
+
+def act_driver(driver: Any, locator: str, expected: Record, action: str, *,
+               value: Any = None, simulate: bool = False, row: Optional[int] = None,
+               column: Optional[int] = None) -> None:
+    """Verify the element at *locator*, then act on **that same element**.
+
+    Resolving, checking and acting happen inside one element lifetime on purpose. Asking the
+    tool layer to verify and then act would resolve twice, and between the two resolutions the
+    tree could change -- which is exactly the race D2 exists to close.
+
+    ``expected`` is the record the handle was taken from. Any disagreement stops the action:
+    an element that is not the one the snapshot named must not be clicked, typed into or
+    selected, however plausible it looks.
+
+    Args:
+        driver: The window's driver.
+        locator: Where the element was.
+        expected: What the handle recorded.
+        action: ``"click"``, ``"double_click"``, ``"context_click"``, ``"set_text"``,
+            ``"clear"``, ``"select"``, ``"select_cell"`` or ``"select_row"``.
+        value: The text to type, or the option to select.
+        simulate: Use simulated mouse/keyboard input instead of the accessibility action.
+            pyjab's docs are explicit about the trade: it brings the window to the front and
+            cannot work from a non-interactive session.
+        row, column: Which cell or row to select, for the table actions.
+
+    Raises:
+        ElementChanged: The element is not the one the handle recorded.  Nothing is done.
+        PyjabUnavailable: The locator no longer resolves at all.
+    """
+    with element_for(driver, locator) as element:
+        actual = Record.from_pyjab(element.as_record())
+        result = verify(expected, actual)
+        if not result.ok:
+            raise ElementChanged(result.message())
+
+        if action == "click":
+            element.click(simulate=simulate)
+        elif action == "double_click":
+            element.double_click()
+        elif action == "context_click":
+            element.context_click()
+        elif action == "set_text":
+            element.send_text(value, simulate=simulate)
+        elif action == "clear":
+            element.clear(simulate=simulate)
+        elif action == "select":
+            element.select(value, simulate=simulate)
+        elif action == "select_cell":
+            element.select_cell(row=row, column=column)
+        elif action == "select_row":
+            element.select_row(row=row)
+        else:  # pragma: no cover - the tools only pass the names above
+            raise ValueError(f"unknown action {action!r}")
 
 
 def find_driver(driver: Any, *, by: str, value: Any, visible: bool = False,

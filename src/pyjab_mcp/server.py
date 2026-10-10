@@ -26,7 +26,14 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 from . import __version__
-from .backend import AttachedWindow, PyjabApiGap, PyjabUnavailable, open_backend
+from .backend import (
+    AttachedWindow,
+    ElementChanged,
+    PyjabApiGap,
+    PyjabUnavailable,
+    open_backend,
+    requirement,
+)
 from .bridge import BridgeClosed, BridgeNotStarted, BridgeStartupError, BridgeThread
 from .diagnostics import collect
 from .handles import HandleTable, locator_for, verify
@@ -163,6 +170,8 @@ class ServerState:
 def _tool_error(exc: BaseException) -> ToolError:
     """Turn an anticipated failure into a message a model can act on."""
     if isinstance(exc, PyjabApiGap):
+        return ToolError(str(exc))
+    if isinstance(exc, ElementChanged):
         return ToolError(str(exc))
     if isinstance(exc, KeyError) and exc.args:
         return ToolError(str(exc.args[0]))
@@ -410,6 +419,29 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
             "tokens. Handles are positions, not references: re-snapshot after the window "
             "changes."
         )
+
+    def _entry(session_id: str, handle: str) -> "tuple[AttachedWindow, object]":
+        """The window and handle entry for a call, or a message saying how to get one.
+
+        Shared by every tool that takes a handle, so "unknown handle" reads the same wherever
+        it happens and always says what to do next.
+        """
+        attached = state.session(session_id)
+        entry = state.handles.get(handle)
+        if entry is None:
+            live = state.handles.handles_for(session_id)
+            raise PyjabUnavailable(
+                f"unknown handle {handle!r}."
+                + (f" This session has {len(live)} live handle(s); java_snapshot lists them."
+                   if live else
+                   " No handles are live for this session -- take a java_snapshot first.")
+            )
+        if entry.session_id != session_id:
+            raise PyjabUnavailable(
+                f"handle {handle!r} belongs to session {entry.session_id!r}, not "
+                f"{session_id!r}."
+            )
+        return attached, entry
 
     @server.tool(
         name="java_find",
@@ -741,10 +773,18 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
                 for column, value in enumerate(row)
             )
             lines.append(f"  row {row_number}: {cells}")
+        if reading.from_name:
+            lines.append(
+                f"{len(reading.from_name)} cell(s) came from the cell's accessible name: this "
+                "application reports no AccessibleText for its cells, and Swing puts the cell "
+                "value in the name. The values are the application's own; the source is stated "
+                "so a reply is never a claim about where a value came from."
+            )
         if reading.unreadable:
             lines.append(
                 f"{len(reading.unreadable)} cell(s) could not be read and are shown as `?`. "
-                "`-` means the cell has no text interface, which is a different answer."
+                "`-` means the cell has no value this call could read, which is a different "
+                "answer."
             )
         if reading.truncated:
             nxt = reading.row_start + len(reading.rows)
@@ -753,5 +793,277 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
                 f"{reading.reason}. Ask again with row_start={nxt}."
             )
         return "\n".join(lines)
+
+    # -----------------------------------------------------------------------------
+    # M5: acting.  Every one of these verifies before it acts, and acts on the element it
+    # verified -- see act_driver, which does both inside one element lifetime.
+    # -----------------------------------------------------------------------------
+
+    @server.tool(
+        name="java_click",
+        annotations=ToolAnnotations(destructive_hint=True, open_world_hint=True),
+    )
+    async def java_click(
+        session_id: str, handle: str, click: str = "left", simulate: bool = False
+    ) -> str:
+        """Click an element: a button, a menu item, a check box, a link, a tree node.
+
+        By default this uses the element's **accessibility action**, which is what the
+        application itself exposes: no mouse moves, no window comes to the front, and it works
+        where there is no interactive desktop. Use `simulate=True` when the accessibility
+        action is ignored — it drives real mouse input, which requires the window to come to
+        the front and cannot work from a service session, and it needs real geometry (cells in
+        some tables report `bounds = -1`, and there is no point to click).
+
+        The element is checked before it is clicked: role, name, position among siblings and
+        bounds are compared against what the snapshot recorded, and if anything differs
+        **nothing is clicked** — the difference is reported instead. That is deliberate: a
+        click that lands on whatever moved into the position is worse than a message.
+
+        Args:
+            session_id: From java_attach_window.
+            handle: The element to click.
+            click: "left", "double" or "right".
+            simulate: Drive real mouse input instead of the accessibility action.
+
+        Returns:
+            What was clicked and how, so the next call knows what state the window is in.
+
+        Errors:
+            ``is_error`` for an unknown handle, for an element that changed since the
+            snapshot, and for a ``click`` value that is not one of the three.
+        """
+        kinds = {"left": "click", "double": "double_click", "right": "context_click"}
+        action = kinds.get(click)
+        if action is None:
+            raise ToolError(
+                f"click must be one of {', '.join(sorted(kinds))}; you gave {click!r}."
+            )
+        try:
+            bridge = await state.started_bridge()
+            attached, entry = _entry(session_id, handle)
+            await bridge.call_backend(
+                "act", entry.window_id, entry.locator, entry.expected, action,
+                simulate=simulate,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise _tool_error(exc) from exc
+        how = "the accessibility action" if not simulate else "simulated mouse input"
+        return (
+            f"Clicked {entry.expected.label} ({click}) via {how}. "
+            "Re-run java_snapshot to see what changed."
+        )
+
+    @server.tool(
+        name="java_set_text",
+        annotations=ToolAnnotations(destructive_hint=True, open_world_hint=True),
+    )
+    async def java_set_text(
+        session_id: str, handle: str, value: str, simulate: bool = False
+    ) -> str:
+        """Type into a text field, text area or editable combo box.
+
+        This sets the text rather than appending to it, and it waits for the field to report
+        the new value before returning, so a following read sees what was typed. By default it
+        goes through the accessibility action; `simulate=True` types real keystrokes instead,
+        which is the fallback when the action is refused.
+
+        Use java_fill_form instead when several fields need values: it is one round trip and
+        it reports each field separately.
+
+        The element is verified before anything is typed, exactly as java_click describes.
+
+        Args:
+            session_id: From java_attach_window.
+            handle: The field to type into.
+            value: The text to set.
+            simulate: Type real keystrokes instead of using the accessibility action.
+
+        Returns:
+            What was set, and a reminder to re-read the field to confirm.
+
+        Errors:
+            ``is_error`` for an unknown handle, an element that changed, or a field that
+            refused the text — the message says to try ``simulate=True`` when that is the
+            likely answer.
+        """
+        try:
+            bridge = await state.started_bridge()
+            attached, entry = _entry(session_id, handle)
+            await bridge.call_backend(
+                "act", entry.window_id, entry.locator, entry.expected, "set_text",
+                value=value, simulate=simulate,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise _tool_error(exc) from exc
+        return (
+            f"Set {entry.expected.label} to {value!r} "
+            f"({'simulated keystrokes' if simulate else 'accessibility action'}). "
+            "Read it back with java_get_text to confirm."
+        )
+
+    @server.tool(
+        name="java_select",
+        annotations=ToolAnnotations(destructive_hint=True, open_world_hint=True),
+    )
+    async def java_select(
+        session_id: str,
+        handle: str,
+        option: str = "",
+        row: Optional[int] = None,
+        column: Optional[int] = None,
+        simulate: bool = False,
+    ) -> str:
+        """Select an option in a combo box, list or tab set — or a row or cell in a table.
+
+        Two shapes, and which one you want is told by the arguments:
+
+        * `option="Tennis"` selects by the text the application shows, for a combo box, a list
+          or a tab.
+        * `row=2` selects a whole table row, and `row=2, column=1` selects one cell. Table
+          selection goes through the table's own accessible selection, which is the path the
+          application responds to — pyjab's docs are explicit that the cells `get_cell()`
+          returns often report `bounds = -1` and cannot be clicked.
+
+        The element is verified before anything is selected, exactly as java_click describes.
+
+        Args:
+            session_id: From java_attach_window.
+            handle: The combo box, list, tab set or table.
+            option: Text to select. Ignored when a row is given.
+            row: Row index to select, 0-based.
+            column: Column index, for one cell rather than the whole row.
+            simulate: Use simulated input where the action supports it.
+
+        Returns:
+            What was selected, and how.
+
+        Errors:
+            ``is_error`` for an unknown handle, an element that changed, an option the control
+            does not have, or neither an option nor a row given.
+        """
+        if row is None and not option:
+            raise ToolError(
+                "give either option=<text> (a combo box, list or tab) or row=<index> "
+                "(a table row or cell)."
+            )
+        if row is None:
+            action, row_value = "select", None
+        elif column is None:
+            action, row_value = "select_row", row
+        else:
+            action, row_value = "select_cell", row
+        try:
+            bridge = await state.started_bridge()
+            attached, entry = _entry(session_id, handle)
+            await bridge.call_backend(
+                "act", entry.window_id, entry.locator, entry.expected, action,
+                value=option or None, simulate=simulate, row=row_value, column=column,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise _tool_error(exc) from exc
+        what = option if option else f"row {row}" + (f", column {column}" if column is not None else "")
+        return f"Selected {what} in {entry.expected.label}. Re-snapshot to confirm."
+
+    @server.tool(
+        name="java_fill_form",
+        annotations=ToolAnnotations(destructive_hint=True, open_world_hint=True),
+    )
+    async def java_fill_form(
+        session_id: str, fields: list[dict], simulate: bool = False
+    ) -> str:
+        """Fill several fields in one call: a list of ``{"handle": ..., "value": ...}``.
+
+        A form is usually several fields, and setting them one at a time costs a round trip
+        each. This is the same verification and the same typing, applied in order, with one
+        reply that says what happened to every field.
+
+        It **does not stop at the first failure**. A form that is half filled with no report is
+        worse than one that is half filled with one: every field is attempted, and each line
+        says whether it worked and why not.
+
+        Args:
+            session_id: From java_attach_window.
+            fields: ``[{"handle": "e:1a2b", "value": "admin"}, ...]``, applied in order.
+            simulate: Type real keystrokes instead of using the accessibility action.
+
+        Returns:
+            One line per field — set, or the reason it was not — and a count.
+
+        Errors:
+            ``is_error`` only for an unknown session, an empty list, or a malformed entry.
+            A field that fails is reported in the reply, because that is a result rather than
+            a failed call.
+        """
+        if not fields:
+            raise ToolError("give at least one field: [{'handle': ..., 'value': ...}].")
+        try:
+            bridge = await state.started_bridge()
+            attached = state.session(session_id)
+        except Exception as exc:  # noqa: BLE001
+            raise _tool_error(exc) from exc
+
+        lines: "list[str]" = []
+        filled = 0
+        for position, item in enumerate(fields):
+            if not isinstance(item, dict) or "handle" not in item or "value" not in item:
+                lines.append(
+                    f"  {position + 1}. skipped: every entry needs 'handle' and 'value', and "
+                    f"this one is {item!r}"
+                )
+                continue
+            handle = str(item["handle"])
+            value = str(item["value"])
+            try:
+                _attached, entry = _entry(session_id, handle)
+            except Exception as exc:  # noqa: BLE001
+                lines.append(f"  {position + 1}. {handle}: {exc}")
+                continue
+            try:
+                await bridge.call_backend(
+                    "act", entry.window_id, entry.locator, entry.expected, "set_text",
+                    value=value, simulate=simulate,
+                )
+            except Exception as exc:  # noqa: BLE001
+                lines.append(f"  {position + 1}. {entry.expected.label}: {exc}")
+            else:
+                filled += 1
+                lines.append(f"  {position + 1}. {entry.expected.label} = {value!r}")
+        return (
+            f"{filled} of {len(fields)} field(s) set:\n"
+            + "\n".join(lines)
+            + "\nRead them back with java_get_text to confirm."
+        )
+
+    @server.tool(
+        name="java_send_keys",
+        annotations=ToolAnnotations(destructive_hint=True, open_world_hint=True),
+    )
+    async def java_send_keys(session_id: str, keys: str) -> str:
+        """Send a keyboard shortcut such as ``alt+y`` — **not available yet**.
+
+        It is here rather than absent so the answer is a reason: pyjab 1.9.0 has key helpers
+        and every one of them is private (``Win32Utils._press_key``, ``_send_keys``, ...), and
+        ``send_text`` types *text*, so it cannot express a modifier chord. Reaching for the
+        private helpers would mean depending on method names nobody promised, in the one area
+        where the wrong key does something irreversible to the application.
+
+        What to do instead: for plain text use java_set_text, which is what a text field
+        wants. For a shortcut, the application usually exposes the same action as a menu item
+        — find it with java_find(role="menu item") and use java_click.
+
+        Args:
+            session_id: From java_attach_window.
+            keys: The chord that was asked for, reported back in the error.
+
+        Errors:
+            Always ``is_error``, with the requirement this is waiting on.
+        """
+        raise ToolError(
+            f"{PyjabApiGap(requirement('send_keys'))}\n"
+            "For plain text, java_set_text works and goes through the accessibility action. "
+            "For a shortcut, the application usually exposes the same action as a menu item: "
+            'find it with java_find(role="menu item") and use java_click.'
+        )
 
     return server

@@ -337,7 +337,14 @@ def test_a_real_table_reads_its_cells_a_page_at_a_time(live, main_window):
     assert reading.column_count == 4, f"the table has {reading.column_count} columns"
 
     first_row = reading.rows[0]
-    assert first_row[0] == "Kathy", f"first cell read as {first_row[0]!r}"
+    print(
+        f"\n[L3] row 0 = {first_row}; from_name={reading.from_name}; "
+        f"unreadable={reading.unreadable}"
+    )
+    assert first_row[0] == "Kathy", (
+        f"first cell read as {first_row[0]!r}; the application reports no AccessibleText for "
+        f"cells, so this comes from the accessible name (from_name={reading.from_name})"
+    )
     assert first_row[1] == "Snowboarding", f"second cell read as {first_row[1]!r}"
 
     later_page = call(bridge, backend.table, main_window.window_id, locator,

@@ -85,14 +85,19 @@ def test_a_cell_that_cannot_be_read_is_recorded_by_position():
     assert reading.rows[1][0] == "Alice", "the rest of the row is still read"
 
 
-def test_a_cell_with_no_text_interface_is_not_counted_as_unreadable():
+def test_a_cell_with_no_text_interface_falls_back_to_its_name_and_says_so():
+    """Swing puts a table cell's value in its accessible name; a real table has no text."""
     target = "//table[@name='Sports table']"
     wordless = driver(cells_that_are_empty={(target, 2, 0)})
 
     reading = table_driver(wordless, TABLE, row_start=0, row_count=3)
 
-    assert reading.unreadable == ()
-    assert reading.rows[2][0] is None
+    assert reading.unreadable == (), "a name-derived value was read successfully"
+    assert reading.from_name == ((2, 0),), (
+        "the reply has to be able to say where a value came from, or a name is presented as "
+        "text"
+    )
+    assert reading.rows[2][0] == "cell 2,0", "the fake names its cells after their position"
     assert reading.rows[2][1] == "Golf"
 
 

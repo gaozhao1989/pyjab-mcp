@@ -106,6 +106,38 @@ class FakeElement:
             return cell_text
         return self._driver.element_text(self.path)
 
+    # -- the actions (M5), recorded on the driver so a test can see what ran --------------
+
+    def _acted(self, action: str, **kwargs) -> None:
+        self._read()
+        self._driver.actions.append({"path": self.path, "action": action, **kwargs})
+
+    def click(self, simulate: bool = False) -> None:
+        self._acted("click", simulate=simulate)
+
+    def double_click(self) -> None:
+        self._acted("double_click")
+
+    def context_click(self) -> None:
+        self._acted("context_click")
+
+    def send_text(self, value: Any, simulate: bool = False,
+                  wait_for_text_update: bool = True) -> None:
+        self._acted("send_text", value=value, simulate=simulate)
+
+    def clear(self, simulate: bool = False, wait_for_text_update: bool = True) -> None:
+        self._acted("clear", simulate=simulate)
+
+    def select(self, option: Any, simulate: bool = False,
+               wait_for_selection: bool = True) -> None:
+        self._acted("select", option=option, simulate=simulate)
+
+    def select_cell(self, row: int, column: int, clear: bool = True) -> None:
+        self._acted("select_cell", row=row, column=column)
+
+    def select_row(self, row: int, clear: bool = True) -> None:
+        self._acted("select_row", row=row)
+
     def release_jabelement(self) -> None:
         """pyjab's ``JABElement.release_jabelement``: the element gives its own reference back.
 
@@ -213,6 +245,8 @@ class FakeDriver:
         self.cells_that_are_empty = set(cells_that_are_empty)
         self.cells_handed_out = 0
         self.searches: List[Dict[str, Any]] = []
+        #: Every action a test caused, in order, with what it was asked for.
+        self.actions: List[Dict[str, Any]] = []
         self.outstanding = 0
         self.handed_out = 0
         self.walk_calls: List[Dict[str, Any]] = []

@@ -200,7 +200,40 @@ under **Unreleased** until it is tagged.
   and the per-cell budget check was dead code because the row count had already been reduced
   to fit it.
 
+### Added
+
+* **M5: the actions — `java_click`, `java_set_text`, `java_select`, `java_fill_form`.** Each
+  one verifies the element and then acts **on the element it verified**, inside one element
+  lifetime, so there is no window between the check and the action in which the tree could
+  move. When the element has changed, nothing happens and the difference is reported: the
+  click that would have landed on whatever moved into the position is a message instead.
+
+  `java_click` maps left/double/right onto pyjab's accessibility action, mouse
+  double-click and right-click, with `simulate=True` for real input where the action is
+  ignored — the trade pyjab documents (window comes to the front, needs real geometry, cannot
+  work from a service session). `java_set_text` waits for the field to report the value, so a
+  following read sees what was typed. `java_select` picks its shape from the arguments: a
+  text option for a combo box, list or tab, or a row or cell for a table, which goes through
+  the table's accessible selection because that is the path applications respond to.
+  `java_fill_form` is one call for several fields, and it does **not** stop at the first
+  failure: a half-filled form with a report is worth more than one without.
+
+* **`java_send_keys` is registered and answers with the requirement it is waiting on (R4).**
+  Every key helper pyjab has is private (`Win32Utils._press_key`, `_send_keys`, ...) and
+  `send_text` types text rather than a modifier chord, so `alt+y` has no public
+  implementation. Driving the private helpers would mean depending on names nobody promised,
+  in the one area where a wrong key does something irreversible. The reply names the
+  requirement **and** the way round it: `java_set_text` for text, or the menu item that
+  exposes the same action, found with `java_find(role="menu item")` and clicked.
+
 ### Fixed
+
+* **A real table's cells report no text, and M4 was reading `None` for all of them.** L3
+  found it: the table's shape came through (4 columns, ≥5 rows) and every cell read as
+  `None`. Swing's `AccessibleJTableCell` puts the cell's *value* in its accessible **name**,
+  so `java_get_table` now falls back to the name when there is no AccessibleText — and says
+  which cells came from where, because a value should never be presented as something it is
+  not. Without this, a whole table of real values would have been reported as unknown.
 
 * **The handle path called a method ``JABDriver`` does not have.** `resolve_driver` released
   the re-resolved element with `driver.release_jabelement(element)`; the method belongs to

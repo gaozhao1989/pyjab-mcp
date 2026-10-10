@@ -10,9 +10,19 @@ which is what makes this usable against a production Java client that you cannot
 
 ## Status
 
-**M1 to M4 are implemented.** `java_diagnostics`, `java_list_windows`, `java_attach_window`,
-`java_snapshot`, `java_find`, `java_get_element`, `java_get_text` and `java_get_table`. It
-needs `pyjab>=1.9.0`, which is the first release with the tree walk a snapshot is built on.
+**M1 to M5 are implemented.** `java_diagnostics`, `java_list_windows`, `java_attach_window`,
+`java_snapshot`, `java_find`, `java_get_element`, `java_get_text`, `java_get_table`,
+`java_click`, `java_set_text`, `java_select` and `java_fill_form`. It needs `pyjab>=1.9.0`,
+which is the first release with the tree walk a snapshot is built on.
+
+`java_send_keys` exists but always reports the requirement it is waiting on: pyjab has no
+public way to send a key sequence, and pretending `send_text` is one would be a lie for
+`alt+y`. The reply says what to do instead.
+
+**Nothing is acted on until it has been checked.** Every action re-finds the element and
+compares role, name, position among siblings and bounds against what the snapshot recorded,
+then acts on the element it just checked — and if anything differs, it does nothing and
+reports the difference.
 
 `java_get_table` is where this substrate earns its place: it reads a `JTable` through the
 JVM's own `AccessibleTable` interface — row and column counts, then cell text, a page of rows

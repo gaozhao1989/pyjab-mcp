@@ -135,16 +135,23 @@ is not, or registered without being documented.
 | observe | `java_find`, `java_get_element`, `java_get_text` | M3 |
 | observe | `java_get_table` | M4 |
 | observe | `java_screenshot` | M6 |
-| act | `java_click`, `java_set_text`, `java_select`, `java_send_keys`, `java_fill_form` | M5 |
+| act | `java_click`, `java_set_text`, `java_select`, `java_fill_form` | M5 |
+| act | `java_send_keys` | M5, blocked on requirement R4 — it answers with the reason rather than pretending `send_text` is a shortcut sender |
 | wait | `java_wait_for` | M6 |
 
 `java_get_table` is where the substrate matters most: it reads a `JTable`'s rows and cells
 through the JVM's own `AccessibleTable` interface, with paging, rather than through a
 platform bridge that does not carry that information.
 
-**Status.** M1 to M4 have shipped: `java_diagnostics`, `java_list_windows`,
+**Status.** M1 to M5 have shipped: `java_diagnostics`, `java_list_windows`,
 `java_attach_window`, `java_snapshot`, `java_find`, `java_get_element`, `java_get_text`,
-`java_get_table`. Two of pyjab's own gaps are still recorded rather
+`java_get_table`, `java_click`, `java_set_text`, `java_select`, `java_fill_form`, and
+`java_send_keys` — which is registered so that asking for a shortcut gets the requirement it
+is waiting on rather than "no such tool".
+
+Every action verifies first and acts on the element it verified, inside one element lifetime,
+so there is no window between the check and the action in which the tree could move. When the
+element has changed, **nothing is done** — the difference is reported instead. Two of pyjab's own gaps are still recorded rather
 than worked around (`AGENTS.md` §6.2): there is no public API that lists Java windows, so
 the listing runs through pyjab's documented `pyjab-inspect windows --json`; and there is no
 non-destructive detach, so a bound window stays bound for the life of the process. Neither

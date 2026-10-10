@@ -48,6 +48,7 @@ class FakeBackend:
         locators: Optional[Dict[str, Any]] = None,
         texts: Optional[Dict[str, Any]] = None,
         table_readings: Optional[Dict[str, Any]] = None,
+        act_error: Optional[BaseException] = None,
     ) -> None:
         self.owner = threading.get_ident()
         self.windows = list(windows)
@@ -60,6 +61,8 @@ class FakeBackend:
         self.resolve_calls = 0
         self.text_calls = 0
         self.table_calls = 0
+        self.acts: "list[dict]" = []
+        self.act_error = act_error
         self.close_calls = 0
         self.closed = False
         self.threads_seen: "set[int]" = set()
@@ -163,6 +166,16 @@ class FakeBackend:
 
             raise PyjabUnavailable(f"the locator {locator!r} no longer resolves")
         return self.texts[locator]
+
+    def act(self, window_id: str, locator: str, expected, action: str, *, value: Any = None,
+            simulate: bool = False, row: Any = None, column: Any = None) -> None:
+        self._check("act")
+        self.acts.append({
+            "locator": locator, "action": action, "value": value,
+            "simulate": simulate, "row": row, "column": column,
+        })
+        if self.act_error is not None:
+            raise self.act_error
 
     def table(self, window_id: str, locator: str, *, row_start: int = 0,
               row_count: int = 20, max_cells: int = 400):

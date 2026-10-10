@@ -13,7 +13,7 @@ from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 
 from pyjab_mcp.backend import PyjabApiGap, PyjabUnavailable, requirement
 from pyjab_mcp.server import ServerState, create_server
-from pyjab_mcp.backend import TableReading
+from pyjab_mcp.backend import ElementChanged, TableReading
 from pyjab_mcp.tree import Record
 from tests._fakebackend import FakeBackend, FakeFactory, window
 from tests._fakedriver import record
@@ -30,6 +30,11 @@ TOOL_ORDER = [
     "java_get_element",
     "java_get_text",
     "java_get_table",
+    "java_click",
+    "java_set_text",
+    "java_select",
+    "java_fill_form",
+    "java_send_keys",
 ]
 
 
@@ -531,3 +536,155 @@ async def test_get_table_pages_through_the_tool():
     assert result.is_error is False
     assert "showing rows 3..4" in await text_of(result)
     assert backend.table_calls == 1
+
+
+# ---------------------------------------------------------------------------------
+# M5: the action tools
+# ---------------------------------------------------------------------------------
+
+
+async def acting_server(**kwargs):
+    """A server with one attached window, one findable button and a handle for it."""
+    server, state, backend, session_id = await attached_server(
+        matches={("name", "OK"): [(BUTTON, BUTTON_LOCATOR)]},
+        locators={BUTTON_LOCATOR: record("push button", "OK", index_in_parent=1)},
+        **kwargs,
+    )
+    found = await server.call_tool("java_find", {"session_id": session_id, "name": "OK"})
+    handle = (await text_of(found)).split("[", 1)[1].split("]", 1)[0]
+    return server, state, backend, session_id, handle
+
+
+@pytest.mark.parametrize("click,action", [
+    ("left", "click"), ("double", "double_click"), ("right", "context_click"),
+])
+async def test_click_maps_the_three_kinds_onto_pyjabs_methods(click, action):
+    server, _state, backend, session_id, handle = await acting_server()
+
+    result = await server.call_tool(
+        "java_click", {"session_id": session_id, "handle": handle, "click": click}
+    )
+
+    assert result.is_error is False
+    assert backend.acts == [{
+        "locator": BUTTON_LOCATOR, "action": action, "value": None,
+        "simulate": False, "row": None, "column": None,
+    }]
+    assert "Re-run java_snapshot" in await text_of(result)
+
+
+async def test_click_refuses_a_kind_that_is_not_one_of_the_three():
+    server, _state, backend, session_id, handle = await acting_server()
+
+    with pytest.raises(ToolError) as caught:
+        await server.call_tool(
+            "java_click", {"session_id": session_id, "handle": handle, "click": "middle"}
+        )
+
+    assert "left, right, double" in str(caught.value) or "double, left, right" in str(caught.value)
+    assert backend.acts == [], "a bad argument must not reach the application"
+
+
+async def test_an_element_that_changed_stops_the_action_and_says_nothing_was_done():
+    server, _state, backend, session_id, handle = await acting_server(
+        act_error=ElementChanged("name was 'OK', now 'Cancel'"),
+    )
+
+    with pytest.raises(ToolError) as caught:
+        await server.call_tool(
+            "java_click", {"session_id": session_id, "handle": handle}
+        )
+
+    assert "Nothing was done" in str(caught.value)
+    assert "name was 'OK', now 'Cancel'" in str(caught.value)
+
+
+async def test_set_text_types_the_value_and_says_how():
+    server, _state, backend, session_id, handle = await acting_server()
+
+    result = await server.call_tool(
+        "java_set_text",
+        {"session_id": session_id, "handle": handle, "value": "admin", "simulate": True},
+    )
+
+    assert result.is_error is False
+    assert backend.acts[0]["action"] == "set_text"
+    assert backend.acts[0]["value"] == "admin"
+    assert backend.acts[0]["simulate"] is True
+    assert "simulated keystrokes" in await text_of(result)
+    assert "java_get_text" in await text_of(result)
+
+
+async def test_select_chooses_the_shape_from_the_arguments():
+    server, _state, backend, session_id, handle = await acting_server()
+
+    await server.call_tool(
+        "java_select", {"session_id": session_id, "handle": handle, "option": "Tennis"}
+    )
+    await server.call_tool(
+        "java_select", {"session_id": session_id, "handle": handle, "row": 2}
+    )
+    await server.call_tool(
+        "java_select", {"session_id": session_id, "handle": handle, "row": 2, "column": 1}
+    )
+
+    assert [act["action"] for act in backend.acts] == ["select", "select_row", "select_cell"]
+    assert backend.acts[0]["value"] == "Tennis"
+    assert backend.acts[2]["row"] == 2 and backend.acts[2]["column"] == 1
+
+
+async def test_select_needs_an_option_or_a_row():
+    server, _state, backend, session_id, handle = await acting_server()
+
+    with pytest.raises(ToolError) as caught:
+        await server.call_tool(
+            "java_select", {"session_id": session_id, "handle": handle}
+        )
+
+    assert "option=<text>" in str(caught.value)
+    assert backend.acts == []
+
+
+async def test_fill_form_attempts_every_field_and_reports_each_one():
+    """A half-filled form with no report is worse than one with a report."""
+    server, _state, backend, session_id, handle = await acting_server()
+
+    result = await server.call_tool("java_fill_form", {
+        "session_id": session_id,
+        "fields": [
+            {"handle": handle, "value": "admin"},
+            {"handle": "e:ffff", "value": "never"},
+            {"value": "no handle at all"},
+        ],
+    })
+
+    assert result.is_error is False, "a field that failed is a result, not a failed call"
+    text = await text_of(result)
+    assert "1 of 3 field(s) set" in text
+    assert "unknown handle 'e:ffff'" in text
+    assert "needs 'handle' and 'value'" in text
+    assert [act["value"] for act in backend.acts] == ["admin"]
+
+
+async def test_fill_form_needs_at_least_one_field():
+    server, _state, _backend, session_id, _handle = await acting_server()
+
+    with pytest.raises(ToolError) as caught:
+        await server.call_tool("java_fill_form", {"session_id": session_id, "fields": []})
+
+    assert "at least one field" in str(caught.value)
+
+
+async def test_send_keys_answers_with_the_requirement_it_is_waiting_on():
+    server, _state, _backend, session_id, _handle = await acting_server()
+
+    with pytest.raises(ToolError) as caught:
+        await server.call_tool(
+            "java_send_keys", {"session_id": session_id, "keys": "alt+y"}
+        )
+
+    message = str(caught.value)
+    assert "pyjab does not provide" in message
+    assert "key sequence or shortcut" in message
+    assert "AGENTS.md" in message
+    assert "java_set_text" in message, "it should also say what to do instead"

@@ -142,6 +142,7 @@ MINIMAL_ARCHITECTURE = """# Architecture
 | session | `java_list_windows`, `java_attach_window` | M1 |
 | observe | `java_snapshot` | M2 |
 | observe | `java_screenshot` | M6 |
+| act | `java_click` | M5 |
 """
 
 
