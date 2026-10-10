@@ -134,7 +134,7 @@ rather than the pixels.
 
 | Not supported | Why |
 |---|---|
-| **Canvas-drawn interfaces** — a `JPanel` painting its own widgets | There are no accessible children, so there is nothing to find, click or read. `java_screenshot` will show you a picture, and a picture is not something you can act on. If a panel like this needs to be driven, the application has to expose the controls. |
+| **Canvas-drawn interfaces** — a `JPanel` painting its own widgets | There are no accessible children, so there is nothing to find, click or read. `java_screenshot` will show you a picture, and a picture is not something you can act on. If a panel like this needs to be driven, the application has to expose the controls. **Where this comes from:** pyjab investigated a canvas-painted panel (`pyjab#73`) and found no accessible children. Neither repository has a regression test for it — pyjab's test application has no canvas — so treat this as the design's expectation rather than a measured result. Adding the test is on the plan. |
 | **Java inside a browser** (an embedded JVM, a Java Web Start descendant) | The browser owns the window and does not publish the applet's Java accessibility tree through JAB. |
 | **Applets in a plugin host** | Same reason: no JAB tree reaches the desktop. |
 | **Non-Java Windows applications** | Nothing here speaks UIA. A UIA-based MCP server is the right tool. |

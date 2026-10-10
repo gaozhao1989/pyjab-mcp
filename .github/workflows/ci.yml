@@ -77,6 +77,15 @@ jobs:
       - name: Maintainer notes stay out of git and out of the sdist
         run: python tools/check_local_only_files.py
 
+      # The release pipeline only ever runs on a tag, which is the worst place to discover a
+      # workflow syntax error: nothing has been published yet, and the fix needs a new tag.
+      # Pinned rather than `latest`, because a tool version that floats turns CI red for
+      # reasons that have nothing to do with the change (AGENTS.md 4).
+      - name: The workflows are valid
+        run: |
+          curl -sL "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz" | tar xz actionlint
+          ./actionlint
+
       # Needs the network: pyjab's changelog is read from GitHub, so nothing is vendored.
       # The state it checks against -- acknowledged.yaml -- is in this repository.
       - name: Every marked pyjab change has an answer here
