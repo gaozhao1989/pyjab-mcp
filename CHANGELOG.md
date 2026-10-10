@@ -161,6 +161,31 @@ under **Unreleased** until it is tagged.
   `bin`). A mismatched pair fails as "pyjab cannot see my window", which is the hardest
   failure in this project to tell apart from a bridge that is simply not enabled.
 
+### Fixed
+
+* **The handle path called a method ``JABDriver`` does not have.** `resolve_driver` released
+  the re-resolved element with `driver.release_jabelement(element)`; the method belongs to
+  **`JABElement`**, and `JABDriver` has never had one. It would have raised `AttributeError`
+  inside the `finally` of every resolution on Windows — the first real desktop run was the
+  first time that line executed.
+
+  Two things had to be true for this to survive the L1 suite, and both were: the adapter
+  guessed, and `tests/_fakedriver.py` was shaped like the guess, so the fake agreed with the
+  mistake instead of with pyjab. The fake now puts the release on the element, where pyjab
+  puts it, and `tests/contract/` asserts the API the adapter actually calls — including the
+  signature that lets an element release itself.
+
+* **The diagnostics job treated "no Java windows" as a failure.** `pyjab-inspect windows`
+  exits 1 when JAB sees nothing, and on a bare runner that is the expected answer rather than
+  an error — `UNAVAILABLE` is not `0`, and "nothing is there" is a measurement (AGENTS.md
+  §2.4). The step reported it and failed; it now reports it and carries on, so the assertion
+  behind it actually runs.
+
+* **The L3 snapshot walked three levels and the controls are seven deep.** The first real run
+  found the frame, the layered panes, the menu bar and "Main panel" — and nothing inside it,
+  so the two assertions about a button and a table failed. The test walks 12 now, and says why:
+  a snapshot's default depth is a budget for an agent, not a fact about the tree.
+
 ### Changed
 
 * **R3 is retired, R1 and R2 are restated against 1.9.0** (`AGENTS.md` §6, and the

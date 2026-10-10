@@ -12,6 +12,11 @@ What it refuses:
   back and which is then read.
 * **A double release** (:class:`DoubleRelease`) -- the same element released twice, which is
   how a reference count gets corrupted rather than crashing.
+
+**A release is something the element does** (``element.release_jabelement()``), because that
+is where pyjab puts it -- ``JABDriver`` has no such method, and an earlier version of this
+file mirrored the adapter's guess instead of pyjab, so both agreed and both were wrong. The
+accounting still lives on the driver, which is the bridge in this picture.
 * **An abandoned walk** -- :class:`FakeTree` hands out an iterator object with a ``close()``
   that the walker has to call when it stops early, and records whether it was called. A real
   generator cannot test this: dropping the last reference closes it too, so a missing
@@ -76,6 +81,17 @@ class FakeElement:
              limit: Optional[int] = None) -> "FakeTree":
         """pyjab's ``JABElement.walk``, in the shape ``walk_driver`` expects."""
         return self._driver.make_tree(max_depth, limit)
+
+    def release_jabelement(self) -> None:
+        """pyjab's ``JABElement.release_jabelement``: the element gives its own reference back.
+
+        ``JABDriver`` has no equivalent, which is the detail that cost a real Windows run --
+        see the module docstring.
+        """
+        if self.released:
+            raise DoubleRelease(f"{self.path} was released twice")
+        self.released = True
+        self._driver.outstanding -= 1
 
 
 class _FakeIterator:
@@ -183,12 +199,6 @@ class FakeDriver:
         self.outstanding += 1
         self.handed_out += 1
         return FakeElement(target, self, locator)
-
-    def release_jabelement(self, element: FakeElement) -> None:
-        if element.released:
-            raise DoubleRelease(f"{element.path} was released twice")
-        element.released = True
-        self.outstanding -= 1
 
     # -- convenience -----------------------------------------------------------------
 

@@ -151,12 +151,44 @@ def test_the_message_pump_is_public_and_takes_no_arguments():
 
 
 @windows_only
-def test_the_driver_still_offers_the_four_things_this_layer_uses():
+def test_the_driver_offers_the_things_this_layer_uses():
+    """Every ``JABDriver`` name the adapter calls, asserted one by one.
+
+    ``release_jabelement`` used to be in this list, and it is not a ``JABDriver`` method at
+    all -- the adapter called ``driver.release_jabelement(element)`` and the L1 fake was
+    shaped the same way, so the two agreed with each other and both were wrong. This test ran
+    on a Windows runner for the first time and failed, which is the whole point of it. The
+    release now goes through the element (see the next test).
+    """
     from pyjab.jabdriver import JABDriver
 
-    for name in ("root_element", "find_element_by_xpath", "release_jabelement", "pid"):
+    for name in ("root_element", "find_element_by_xpath", "pid", "hwnd", "title"):
         assert hasattr(JABDriver, name), f"JABDriver.{name} is used by the backend adapter"
 
     # And the thing this project must never call. If it disappears, that is good news for
     # R2 -- but it would change behaviour, so it is worth noticing either way.
     assert hasattr(JABDriver, "__exit__")
+
+
+@windows_only
+def test_releasing_a_reference_is_something_the_element_does():
+    """The other half of the same finding: the element owns the release, not the driver."""
+    from pyjab.jabelement import JABElement
+
+    assert hasattr(JABElement, "release_jabelement"), (
+        "resolve_driver gives the reference back through the element it resolved; if that "
+        "moves, the handle path leaks Java objects -- issue #43's shape"
+    )
+    signature = inspect.signature(JABElement.release_jabelement)
+    assert list(signature.parameters) == ["self", "jabelement"], (
+        "the default argument is what lets an element release itself, which is how the "
+        f"adapter calls it; the signature is now {signature}"
+    )
+
+
+@windows_only
+def test_the_walk_result_still_reports_its_own_truncation():
+    from pyjab.jabelement import JABTree
+
+    for name in ("truncated", "limit_hit", "count"):
+        assert hasattr(JABTree, name), f"JABTree.{name} is read by walk_driver / render"

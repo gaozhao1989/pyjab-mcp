@@ -176,7 +176,7 @@ SURFACE: Dict[Touchpoint, Entry] = {
         "How a handle is re-resolved (D2). The returned JABElement is owned by this layer "
         "and is released in a finally -- see the next entry.",
     ),
-    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath().as_record"): Entry(
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> as_record"): Entry(
         PUBLIC, "1.9.0",
         "The record of the re-resolved element, compared against the identity stored with "
         "the handle. as_record() is new in 1.9.0 and pyjab documents it as exactly this: "
@@ -192,10 +192,14 @@ SURFACE: Dict[Touchpoint, Entry] = {
         "Documented property; reported, and never used to signal anything -- __exit__ is "
         "the only thing in pyjab that acts on the pid, and this project does not call it.",
     ),
-    ("pyjab.jabdriver", "JABDriver.release_jabelement"): Entry(
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> release_jabelement"): Entry(
         PUBLIC, "1.8.0",
-        "Public and documented as the ownership rule: release every object JAB hands out, "
-        "exactly once. Called on the element find_element_by_xpath returned, in a finally.",
+        "The ownership rule: release every object JAB hands out, exactly once. It lives on "
+        "**JABElement**, not on JABDriver -- and this line was written as "
+        "`driver.release_jabelement(element)` until the contract test ran on a real Windows "
+        "runner and reported that JABDriver has no such attribute. The L1 fake was shaped "
+        "like the mistake, so it agreed; tests/_fakedriver.py now mirrors pyjab, where the "
+        "element gives its own reference back.",
     ),
     ("pyjab.jabdriver", "JABDriver.root_element"): Entry(
         PUBLIC, "1.8.0",
@@ -213,7 +217,7 @@ SURFACE: Dict[Touchpoint, Entry] = {
         "it -- the sibling checkout had it for 62 commits first, which is the trap this "
         "file's released_in field exists for.",
     ),
-    ("pyjab.jabdriver", "JABDriver.root_element.walk().limit_hit"): Entry(
+    ("pyjab.jabdriver", "JABDriver.root_element.walk() -> limit_hit"): Entry(
         PUBLIC, "1.9.0",
         "Probed with getattr on the JABTree, because the attribute is read defensively. It "
         "is the walk's own record of having hit its limit; this project also tracks its own "
@@ -265,6 +269,22 @@ PRIVATE_MARKERS = ("_",)
 def is_pyjab(dotted: str) -> bool:
     """True for ``pyjab`` and ``pyjab.something``, false for ``pyjab_mcp``."""
     return dotted == "pyjab" or dotted.startswith("pyjab.")
+
+
+def _attribute_point(module: str, symbol: str, attribute: str) -> Touchpoint:
+    """``(module, symbol.attribute)``, with a call boundary marked as ``->``.
+
+    ``JABDriver.find_element_by_xpath() -> release_jabelement`` says what it is: an attribute
+    of whatever that call returned. Writing it with a dot instead
+    (``...find_element_by_xpath().release_jabelement``) reads as though the driver had the
+    method -- and that misreading is exactly the bug this file's registry is meant to catch,
+    so the separator earns its place.
+    """
+    if symbol == "*":
+        return (module, attribute)
+    if symbol.endswith(")"):
+        return (module, f"{symbol} -> {attribute}")
+    return (module, f"{symbol}.{attribute}")
 
 
 def _resolve_call_target(node: ast.AST, owners: Mapping[str, Touchpoint]) -> Optional[Touchpoint]:
@@ -362,9 +382,7 @@ class _FileScan(ast.NodeVisitor):
     def visit_Attribute(self, node: ast.Attribute) -> None:
         target = _resolve_call_target(node.value, self.owners)
         if target is not None and is_pyjab(target[0]):
-            module, symbol = target
-            point = (module, f"{symbol}.{node.attr}" if symbol != "*" else node.attr)
-            self._record(point, "attribute", node.lineno)
+            self._record(_attribute_point(*target, node.attr), "attribute", node.lineno)
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
@@ -381,9 +399,7 @@ class _FileScan(ast.NodeVisitor):
         ):
             owner = self.owners.get(node.args[0].id)
             if owner is not None and is_pyjab(owner[0]):
-                module, symbol = owner
-                name = node.args[1].value
-                point = (module, f"{symbol}.{name}" if symbol != "*" else name)
+                point = _attribute_point(*owner, node.args[1].value)
                 self._record(point, f"{func.id} probe", node.lineno)
 
         # importlib.util.find_spec("pyjab.something")
@@ -396,9 +412,7 @@ class _FileScan(ast.NodeVisitor):
         if isinstance(func, ast.Attribute):
             target = _resolve_call_target(func.value, self.owners)
             if target is not None and is_pyjab(target[0]):
-                module, symbol = target
-                point = (module, f"{symbol}.{func.attr}" if symbol != "*" else func.attr)
-                self._record(point, "attribute", node.lineno)
+                self._record(_attribute_point(*target, func.attr), "attribute", node.lineno)
 
         self.generic_visit(node)
 

@@ -479,7 +479,12 @@ def resolve_driver(driver: Any, locator: str) -> Record:
         # The caller never sees the element, so this is the only place it can be released --
         # and releasing it is what keeps a long session from accumulating Java objects,
         # which is issue #43's shape.
-        driver.release_jabelement(element)
+        #
+        # `element.release_jabelement()`, not `driver.release_jabelement(element)`:
+        # JABDriver has no such method, and this line said it did until the contract test ran
+        # on a real Windows runner and failed. The L1 fake was shaped the same way as the
+        # mistake, so it agreed -- see tests/_fakedriver.py, which now mirrors pyjab.
+        element.release_jabelement()
 
 
 def _public_window_listing() -> Optional[Callable[[], Any]]:

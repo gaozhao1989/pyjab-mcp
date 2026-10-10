@@ -239,7 +239,11 @@ def test_a_snapshot_renders_the_controls_the_application_has(live, main_window):
     """Step 2: a bounded view of a real tree, with the elements the app actually builds."""
     bridge, backend = live
 
-    walk = call(bridge, backend.walk, main_window.window_id, max_depth=3, limit=2000)
+    # Deeper than a snapshot's default on purpose: the window frame, layered panes and
+    # content pane come first, so a button lives seven or eight levels down. The first real
+    # run of this file walked three and found the menu bar and "Main panel" but nothing
+    # inside it -- which is a fact about depth, not about the tree.
+    walk = call(bridge, backend.walk, main_window.window_id, max_depth=12, limit=4000)
     rendered = walk.to_text(max_nodes=200, only_interactive=True, fields=("states",))
 
     names = [node.record.name for node in walk.nodes]
@@ -261,7 +265,7 @@ def test_a_handle_resolves_and_verifies_against_the_real_element(live, main_wind
     """Step 3, and the D2 loop where it matters: a real element, re-found and checked."""
     bridge, backend = live
 
-    walk = call(bridge, backend.walk, main_window.window_id, max_depth=3, limit=2000)
+    walk = call(bridge, backend.walk, main_window.window_id, max_depth=12, limit=4000)
     target = next(
         (index for index, node in enumerate(walk.nodes)
          if node.record.name == "Middle button"),

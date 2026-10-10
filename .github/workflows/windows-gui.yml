@@ -112,9 +112,19 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Report where everything is
+        shell: bash
         run: |
           python -c "import os; print('JAVA_HOME =', os.environ.get('JAVA_HOME'))"
-          python -m pyjab.inspector windows
+          # `pyjab-inspect windows` exits 1 when JAB sees no Java window, and on a bare
+          # runner that is the expected answer rather than a failure -- "nothing is there"
+          # is a measurement (this project's AGENTS.md 2.4). The first run of this job went
+          # red on exactly this line, which is a good illustration of the rule: the report
+          # said "no Java windows found", and the job treated it as an error.
+          if python -m pyjab.inspector windows; then
+            echo "::notice::JAB sees at least one Java window on this runner"
+          else
+            echo "::notice::JAB sees no Java windows on this runner, which is expected here"
+          fi
 
       # The assertion, not just the report: the DLL must be found *and* be the one paired
       # with this JDK, and the JAB-enabled state must be readable.

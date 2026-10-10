@@ -136,8 +136,8 @@ def test_the_fake_catches_a_double_release_and_a_use_after_release():
     driver = FakeDriver(locators={"//panel": record("panel", "P")})
     element = driver.find_element_by_xpath("//panel")
 
-    driver.release_jabelement(element)
+    element.release_jabelement()
     with pytest.raises(UseAfterRelease):
         element.as_record()
     with pytest.raises(DoubleRelease):
-        driver.release_jabelement(element)
+        element.release_jabelement()
