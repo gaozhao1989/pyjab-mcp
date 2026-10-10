@@ -49,7 +49,12 @@ except ImportError:  # pragma: no cover - the script path
 CONSOLE_SCRIPT = "pyjab-mcp = pyjab_mcp.__main__:main"
 WHEEL_FORBIDDEN_PREFIXES = ("build/", "dist/")
 
-#: Files an sdist must contain: the package, the tests, the guards, and the published docs.
+#: Files an sdist must contain: the package, the tests, the guards, the published docs, and the
+#: MCPB entry script. That last one is here rather than trusted to ``MANIFEST.in``: the sdist
+#: ships ``tools/build_mcpb.py``, and the packer copies ``mcpb/entry.py`` into the bundle, so an
+#: sdist without it publishes a tool that cannot run where it was published. This list is
+#: checked against a real build in CI's ``package`` job, which is what makes a dropped
+#: ``recursive-include`` a red build rather than a discovery.
 SDIST_REQUIRED = (
     "CHANGELOG.md",
     "LICENSE",
@@ -57,6 +62,7 @@ SDIST_REQUIRED = (
     "acknowledged.yaml",
     "pyproject.toml",
     "docs/ARCHITECTURE.md",
+    "mcpb/entry.py",
     "src/pyjab_mcp/__main__.py",
     "src/pyjab_mcp/bridge.py",
     "tests/contract/test_pyjab_contract.py",

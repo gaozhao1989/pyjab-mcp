@@ -21,7 +21,12 @@ the pipeline's, and it refuses the release on any of them.
 * **the six guards**, which refuse rather than warn; the seventh script in the same step,
   `tools/check_pyjab_readiness.py`, reports only;
 * **the artifact, not the rules** — `python -m build`, `tools/check_dist_contents.py --dist dist`
-  and `twine check`;
+  and `twine check`. That guard reads the *built* sdist, and one thing about building locally is
+  worth knowing if you have just edited `MANIFEST.in`: setuptools' manifest_maker carries a
+  previous `src/*.egg-info/SOURCES.txt` forward as a base and `recursive-include` only adds to
+  it, so a stale `egg-info` makes a local build look right after a line is gone. **`rm -rf
+  src/*.egg-info` before judging a local build** — CI builds from a clean checkout, where the
+  list is current, which is why the guard is right and the local answer was wrong;
 * **the changelog-immutability record**, so a released section cannot be edited afterwards;
 * **that nothing is already published under this version** — `verify` fails when PyPI reports the
   version, and also when the index cannot be read at all, because during a release "I could not
@@ -225,7 +230,10 @@ tagged commit, no release — see
 `release.yml` does the rest: it verifies that the tag matches `__version__`, `server.json` and the
 changelog, runs the suite and the guards, builds and checks the artifact, publishes to PyPI through
 Trusted Publishing, publishes the metadata to the MCP Registry, and creates the GitHub release
-with the changelog section as its notes.
+with the changelog section as its notes. **It also builds the MCPB bundle and attaches it to that
+release** — `tools/build_mcpb.py` from the same `dist` artifact, in a job that runs on
+`workflow_dispatch` too: there it builds and validates the bundle, uploads it as a workflow
+artifact and attaches nothing, which is how the bundle is checked *before* a tag exists.
 
 ## After the tag
 

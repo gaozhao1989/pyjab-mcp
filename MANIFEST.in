@@ -12,6 +12,17 @@ recursive-include tests *.py
 # tools, and a wheel contains only the package. tools/check_dist_contents.py enforces both
 # halves of that sentence.
 recursive-include tools *.py
+# The MCPB entry script. It is not a tool and it is not part of the package: the packer copies
+# it into the bundle verbatim, so an sdist that ships tools/build_mcpb.py without it ships a
+# packer that cannot run where it was published. It is listed in SDIST_REQUIRED in
+# tools/check_dist_contents.py rather than trusted to this line -- that list is checked against
+# a real built sdist in CI's `package` job, so dropping this line fails the build.
+#
+# Judging that locally takes one step: setuptools' manifest_maker reads a previous
+# `src/*.egg-info/SOURCES.txt` as a *base* and `recursive-include` only ever adds to it, so a
+# stale egg-info makes a local build look right after this line is gone. Remove it first --
+# `rm -rf src/*.egg-info` -- or the local answer is about the last build rather than this one.
+recursive-include mcpb *.py
 
 # ARCHITECTURE.md ships; the two notes below do not. Excluded by name rather than by a
 # pattern over docs/, precisely so that adding a third public page is a one-line change

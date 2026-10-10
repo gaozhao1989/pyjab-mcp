@@ -20,6 +20,23 @@
 # must move up into `acknowledged`.
 
 acknowledged:
+  # Found by the guard while PR #36 was open, on the orchestrator's measurement of the catching
+  # shape above: this project's handlers were read before anything was written here.
+  - commit: line:4541adb8685e
+    what: >-
+      nothing needed -- the five calls now armed to raise RuntimeError
+      (getAccessibleTextInfo, getAccessibleTextRange, getAccessibleTableCellInfo,
+      setTextContents, getVersionInfo) are reached here only through pyjab's public API, and this
+      package catches no JABException at all: the 32 broad `except Exception` handlers already
+      treat a failed read as a failed read, so the new RuntimeError is caught where the old falsy
+      return was handled. The read named as deliberately not armed, getAccessibleContextInfo, is
+      the one every property goes through, so the search and lookup paths are unaffected. One
+      behaviour change is an improvement and needs no code: a table cell that used to read falsy
+      is now recorded in `unreadable` rather than possibly becoming an empty string. 1.11.0 is not
+      on PyPI, so no supported install changes today; the drift job's contract tests against
+      pyjab@master, where this change already is, are the backstop if this reasoning is wrong
+      (last green: run 38047937968).
+
   # Found by the guard on 2026-10-10, mid-session, while the release this marker belongs to had
   # not happened: the drift machinery doing its job rather than a change anyone announced.
   - commit: line:504876b8fb65
