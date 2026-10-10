@@ -1,14 +1,21 @@
 name: CI
 
-# A starting point, not a finished pipeline. It runs the portable suite on the three
-# platforms and nothing else. What it deliberately does not have yet:
+# Four jobs, and what each of them can and cannot prove:
 #
-#   * a windows-gui job. It is the only layer that can drive a live application, and
-#     pyjab's wording about its own equivalent applies here verbatim: a green run of this
-#     file says nothing about a live application, and a red one blocks nothing. Add it
-#     when there is a server to drive.
-#   * a release job. Nothing is published yet, and a release pipeline written before the
-#     first release encodes guesses.
+#   * `tests` -- the portable suite on three platforms. It installs the real pyjab and the
+#     real mcp SDK, so a broken import, a bad pin or a package that only works in a
+#     checkout fails here.
+#   * `guards` -- the rules from AGENTS.md that were being kept by hand. Each guard is a
+#     separate step so a failure names the rule it broke.
+#   * `package` -- builds the sdist and wheel and checks the *artifact*: what is inside it,
+#     and whether the console script survives.
+#   * a `windows-gui` job is still deliberately absent. It is the only layer that can drive
+#     a live application, and pyjab's wording about its own equivalent applies verbatim: a
+#     green run of this file says nothing about a live application, and a red one blocks
+#     nothing. Add it when there is a server to drive.
+#
+# There is also no release job: nothing is published yet, and a pipeline written before the
+# first release encodes guesses.
 
 on:
   push:
@@ -45,3 +52,78 @@ jobs:
           python -m pip install -e ".[dev]"
       - name: Run the portable suite
         run: python -m pytest tests/
+
+  guards:
+    name: guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # The package must import for the documented-surface guard, which asks the server
+      # what it registers rather than reading the source.
+      - name: Every pyjab touchpoint is public, released, and recorded
+        run: python tools/check_pyjab_api_surface.py
+
+      - name: The architecture page and the code agree
+        run: python tools/check_documented_surface.py
+
+      - name: Maintainer notes stay out of git and out of the sdist
+        run: python tools/check_local_only_files.py
+
+      # The release pipeline only ever runs on a tag, which is the worst place to discover a
+      # workflow syntax error: nothing has been published yet, and the fix needs a new tag.
+      # Pinned rather than `latest`, because a tool version that floats turns CI red for
+      # reasons that have nothing to do with the change (AGENTS.md 4).
+      - name: The workflows are valid
+        run: |
+          curl -sL "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz" | tar xz actionlint
+          ./actionlint
+
+      # Needs the network: pyjab's changelog is read from GitHub, so nothing is vendored.
+      # The state it checks against -- acknowledged.yaml -- is in this repository.
+      - name: Every marked pyjab change has an answer here
+        run: python tools/check_pyjab_changelog.py --strict
+
+      # Report-only on purpose: this one goes red the day pyjab ships the release, and a
+      # job that fails until somebody else publishes is a job people learn to ignore.
+      - name: Report what pyjab still owes this project
+        run: python tools/check_pyjab_readiness.py
+
+  package:
+    name: build distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Build sdist and wheel
+        run: python -m build
+      - name: Check metadata
+        run: python -m twine check dist/*
+
+      # The rules can be right and the build still wrong: this reads the artifact.
+      - name: Check what the sdist and the wheel actually contain
+        run: python tools/check_dist_contents.py --dist dist
+
+      # pyproject.toml says what should be installed; only this says what was.
+      - name: The console script installs and the server builds, from the wheel
+        run: |
+          python -m venv /tmp/check-wheel
+          /tmp/check-wheel/bin/python -m pip install --quiet dist/*.whl
+          # Not `pyjab-mcp --help`: the console script has no CLI, it is the stdio server,
+          # and running it would block on stdin. Building the server is the check that
+          # proves the wheel's entry point reaches real code without waiting for a client.
+          /tmp/check-wheel/bin/python -c "from pyjab_mcp.server import create_server; print('server', create_server().name)"
+          /tmp/check-wheel/bin/python -c "import importlib.metadata as m; print('version', m.version('pyjab-mcp'))"

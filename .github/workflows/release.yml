@@ -1,0 +1,160 @@
+name: Release
+
+# Tag-driven, and only tag-driven. `main` is the release line (AGENTS.md 4); the tag is the
+# promise, which is why every check runs *before* anything is uploaded: a PyPI version can
+# never be unpublished or overwritten (AGENTS.md 2.3).
+#
+# `workflow_dispatch` exists to dry-run the verify job -- the version guard, the suite, the
+# guards and a real build -- without publishing anything. Publishing steps are skipped unless
+# this run is a tag.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify the tag agrees with the package
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # First, and before anything else: three files name the release, and a mismatch is the
+      # mistake that is only discovered after PyPI already has the package.
+      - name: The tag, the package, server.json and the changelog have to agree
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            # A dry run has no tag: check what the tree currently claims to be.
+            TAG="v$(python -c "import pyjab_mcp; print(pyjab_mcp.__version__)")"
+            echo "::notice::dry run -- checking $TAG (a .devN version is expected to fail)"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          python tools/check_release_version.py "$TAG" || {
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "::warning::a dry run is allowed to find the version unprepared"
+            else
+              exit 1
+            fi
+          }
+
+      - name: The portable suite
+        run: python -m pytest tests/ -q
+
+      - name: The guards
+        run: |
+          python tools/check_pyjab_api_surface.py
+          python tools/check_documented_surface.py
+          python tools/check_local_only_files.py
+          python tools/check_pyjab_changelog.py
+          python tools/check_pyjab_readiness.py
+
+      - name: Build, and check the artifact rather than the rules
+        run: |
+          python -m build
+          python tools/check_dist_contents.py --dist dist
+          python -m twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    name: publish to PyPI
+    needs: verify
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # Trusted publishing: no token in this repository at all. The environment name is part of
+    # what PyPI checks, so it is configured on the PyPI side once (docs/RELEASING.md).
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pyjab-mcp
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  registry:
+    name: publish to the MCP Registry
+    needs: pypi
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # The registry hosts metadata and points at PyPI for the package itself, so this runs
+      # after PyPI has the version server.json names.
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      # The registry's own validator, before publish and before anything else in this job:
+      # it is the authority on its schema, and a rejection here is discovered after PyPI has
+      # already published the package (docs/RELEASING.md, "What went wrong the first time").
+      - name: The registry has to accept server.json
+        run: |
+          python -m pytest tests/test_packaging.py -q -k server_json
+          ./mcp-publisher validate
+
+      - name: Authenticate with GitHub OIDC
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish
+        run: ./mcp-publisher publish
+
+  github-release:
+    name: the GitHub release, with the changelog as its notes
+    needs: verify
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Write the notes from the release's changelog section
+        run: |
+          python tools/check_release_version.py --notes "${{ github.ref_name }}" > NOTES.md
+          test -s NOTES.md || { echo "::error::no changelog section for ${{ github.ref_name }}"; exit 1; }
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --notes-file NOTES.md \
+            --verify-tag

@@ -1,8 +1,17 @@
 include LICENSE
 include README.md
+include CHANGELOG.md
 include pyproject.toml
+# The record of what was done about each marked pyjab change. It ships so that a source
+# checkout can run its own guards -- tools/check_pyjab_changelog.py reads it, and the guard
+# is not much use if the file it checks is missing from the sdist.
+include acknowledged.yaml
 recursive-include src *.py
 recursive-include tests *.py
+# The guards and verification scripts. sdist only, like pyjab's tools/: they are maintainer
+# tools, and a wheel contains only the package. tools/check_dist_contents.py enforces both
+# halves of that sentence.
+recursive-include tools *.py
 
 # ARCHITECTURE.md ships; the two notes below do not. Excluded by name rather than by a
 # pattern over docs/, precisely so that adding a third public page is a one-line change
@@ -15,3 +24,9 @@ include docs/ARCHITECTURE.md
 exclude AGENTS.md
 exclude docs/PLAN.md
 exclude docs/DESIGN.md
+exclude docs/RELEASE_READINESS.md
+
+# The local agent configuration -- the skills that describe how this checkout is worked
+# on, and the same reasoning as above. Pruned by directory rather than by file, so a new
+# skill cannot be forgotten here.
+prune .agents

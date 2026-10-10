@@ -28,3 +28,15 @@ htmlcov/
 AGENTS.md
 docs/PLAN.md
 docs/DESIGN.md
+docs/RELEASE_READINESS.md
+
+# --- local agent configuration, also deliberately not published ----------------------
+#
+# The skills under .agents/skills/ tell the harness *how this checkout is worked on* --
+# the pyjab dependency rules, the thread-affinity procedure, this machine's venv and
+# proxy. They take effect from the working tree without being versioned. pyjab's own
+# .gitignore does the same thing for the same reason.
+#
+# MANIFEST.in prunes the directory as well: an sdist is built from the working tree, so
+# .gitignore does not protect it. Keep the two in step.
+/.agents/

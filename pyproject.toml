@@ -31,26 +31,41 @@ classifiers = [
 ]
 
 dependencies = [
-    # The substrate. Pinned to a range rather than a floor once 1.9.0 exists, because the
-    # tree-walk API this project needs (docs/DESIGN.md D1) does not.
-    "pyjab>=1.8.0",
-    # The official SDK. FastMCP's decorator registration is what the plan's tool surface
-    # is written against.
-    "mcp>=1.0.0",
-    # FastMCP's own boundary type; declared because this project's tool signatures use it.
+    # The substrate. 1.10.0 is the floor: 1.9.0 brought the tree walk and `as_record` (the
+    # M2 snapshot, and the fields a handle re-verifies against), and 1.10.0 brought
+    # `list_java_windows()` and `JABDriver.detach()` -- the two APIs this project spent M1
+    # and M2 waiting on, and the reason the listing no longer needs a fallback. A floor below
+    # this one permits an install that cannot list a window through the API. See AGENTS.md 6.
+    "pyjab>=1.10.0",
+    # The official SDK. `mcp.server.mcpserver.MCPServer` is the 2.x name for what used to be
+    # FastMCP -- 1.x exposes `mcp.server.fastmcp` instead, so the floor is genuinely 2.0 and
+    # a 1.x install fails at import, not at runtime.
+    "mcp>=2.0",
+    # MCPServer's own boundary type; declared because this project's tool signatures use it.
     "pydantic>=2.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
+    # 1.x in strict mode: the marker on the test is what turns a coroutine into a test.
     "pytest-asyncio>=0.21",
+    # `python -m build` and `python -m twine check`, used by the CI `package` job. Listed
+    # here rather than installed in a workflow `run:` step, because hand-listing is exactly
+    # how pyjab's ci.yml and release.yml drifted and a release failed after its tag.
+    "build>=1.2",
+    "twine>=5.0",
+    # `tools/check_pyjab_changelog.py` reads `acknowledged.yaml`, which is the record of
+    # what was done about each pyjab change marked as affecting this project (AGENTS.md 1a).
+    "PyYAML>=6.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/gaozhao1989/pyjab-mcp"
 Repository = "https://github.com/gaozhao1989/pyjab-mcp"
 Issues = "https://github.com/gaozhao1989/pyjab-mcp/issues"
+Changelog = "https://github.com/gaozhao1989/pyjab-mcp/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/gaozhao1989/pyjab-mcp/blob/main/docs/CLIENTS.md"
 
 [project.scripts]
 # The name the MCP client config will use. Not a guess: it is what docs/PLAN.md 4 fixes
@@ -71,3 +86,7 @@ addopts = "-ra"
 # see. faulthandler is built in, so this needs no dependency; on the timeout it prints
 # every thread's stack, which names the call that never returned.
 faulthandler_timeout = 300
+# pytest-asyncio 1.x in strict mode: the marker on the test is the only thing that turns a
+# coroutine into a test, so a forgotten marker is a skipped test rather than a silent one.
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"

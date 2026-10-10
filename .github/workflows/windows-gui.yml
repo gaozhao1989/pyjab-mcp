@@ -1,0 +1,132 @@
+name: windows GUI (L3)
+
+# The only layer that can say a tool call worked against a real application: Windows, a
+# desktop session, a JDK and a running Swing app. Everything else in this repository is a
+# fake or a handshake.
+#
+# Two notes about its nature, both from PLAN §6:
+#
+#   * it is **not a status check**. A push cannot run it, so a green default CI run still
+#     says nothing about a live window -- and a red one here blocks no merge. It is
+#     `workflow_dispatch` for that reason, plus a weekly schedule so it actually runs
+#     sometimes instead of only when somebody remembers.
+#   * it **still cannot replace the run that matters**, which is against the application
+#     you care about. This one drives pyjab's test app, because that is the only Swing
+#     application available to a hosted runner.
+#
+# The desktop session is real: pyjab measured `windows-latest` as session 2, `console`,
+# `explorer.exe` running -- an interactive session, not a service in session 0.
+
+on:
+  # Dispatch and a weekly schedule, and deliberately **no push trigger** -- the note this
+  # replaces explains why it is worth writing down: GitHub only accepts `workflow_dispatch`
+  # for a workflow that exists on the default branch, so a workflow being *verified* on a
+  # feature branch cannot be dispatched at all. M1-M9 were verified with a temporary
+  # branch-scoped `push:` trigger for exactly that reason, and it was removed here once the
+  # branch was merged. pyjab hit the same wall with its own GUI job.
+  workflow_dispatch:
+    inputs:
+      java:
+        description: "Temurin JDK for the end-to-end job"
+        default: "17"
+        required: false
+  schedule:
+    # Mondays, 07:00 UTC, an hour after the pyjab-drift job: if drift breaks the contract,
+    # that job says so first and this one is not the thing you are reading at breakfast.
+    - cron: "0 7 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: end-to-end on a real desktop (JDK ${{ github.event.inputs.java || '17' }})
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ github.event.inputs.java || '17' }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # The application is pyjab's, from the sdist of the version that is installed, so the
+      # Java side and the bridge side cannot be from different releases. pyjab's own GUI
+      # suite compiles this file on this runner, which is why it is a known-good target
+      # rather than a second Java program nobody has built.
+      - name: Fetch pyjab's test application
+        run: python tools/fetch_test_app.py --out app-src
+
+      - name: Enable Java Access Bridge before any JVM starts
+        run: |
+          python -c "from pyjab import config; open(config.A11Y_PROPS_PATH, 'w').write(config.A11Y_PROPS_CONTENT); print('wrote', config.A11Y_PROPS_PATH)"
+          python -c "from pyjab.common.service import Service; print('enabled:', Service().is_bridge_enabled())"
+
+      # -s so the snapshot it printed is in the log: when this fails, the tree it saw is the
+      # evidence, and a failing assertion without it is a guessing game.
+      - name: Run the L3 suite
+        env:
+          PYJAB_MCP_E2E: "1"
+          PYJAB_TEST_APP_SRC: ${{ github.workspace }}\app-src
+        run: python -m pytest tests/e2e -v -s
+
+      - name: Upload the log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-log
+          path: |
+            app-src
+          if-no-files-found: ignore
+
+  diagnostics:
+    name: diagnostics on JDK ${{ matrix.java }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # PLAN §10: the report has to be correct on 8, 17 and 21. They differ in *where*
+        # the bridge DLL lives (JDK 8: jre\bin, 11+: bin), which is exactly the kind of
+        # thing a report that cannot tell "missing" from "unreadable" gets wrong.
+        java: ["8", "17", "21"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Report where everything is
+        shell: bash
+        run: |
+          python -c "import os; print('JAVA_HOME =', os.environ.get('JAVA_HOME'))"
+          # `pyjab-inspect windows` exits 1 when JAB sees no Java window, and on a bare
+          # runner that is the expected answer rather than a failure -- "nothing is there"
+          # is a measurement (this project's AGENTS.md 2.4). The first run of this job went
+          # red on exactly this line, which is a good illustration of the rule: the report
+          # said "no Java windows found", and the job treated it as an error.
+          if python -m pyjab.inspector windows; then
+            echo "::notice::JAB sees at least one Java window on this runner"
+          else
+            echo "::notice::JAB sees no Java windows on this runner, which is expected here"
+          fi
+
+      # The assertion, not just the report: the DLL must be found *and* be the one paired
+      # with this JDK, and the JAB-enabled state must be readable.
+      - name: java_diagnostics has to be right about this JDK
+        run: python tools/verify_diagnostics_jdk.py

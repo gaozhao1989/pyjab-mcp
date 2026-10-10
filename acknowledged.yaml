@@ -1,0 +1,76 @@
+# What this project did about pyjab changes marked "Affects: pyjab-mcp".
+#
+# Why the state lives here rather than in pyjab's changelog: pyjab freezes its released
+# changelog sections with a check of its own (`tools/check_changelog_immutable.py`), so
+# "pyjab-mcp has dealt with this" cannot be appended there without editing published text.
+#
+# How it is checked: `tools/check_pyjab_changelog.py` reads pyjab's changelog (the sibling
+# checkout, $PYJAB_CHANGELOG, or GitHub), finds every `Affects: pyjab-mcp` line, and fails
+# for each one that is not listed under `acknowledged` -- and for each entry there whose
+# marker has gone, because a stale acknowledgement claims something about a change that no
+# longer exists.
+#
+# The id is the commit on the marker line, or `line:<digest>` when the marker carries none.
+# A marker written without a commit is keyed by its text, so rewording it forces a fresh
+# answer rather than inheriting the previous one.
+#
+# `context` below is **not enforced** and is not a place to avoid answering a marker: it
+# records pyjab work from before the marker convention existed, so that the reasons this
+# project pins what it pins are not lost. Anything listed there that later gets a marker
+# must move up into `acknowledged`.
+
+acknowledged:
+  # Keyed by `line:<digest>` rather than a commit, because pyjab's marker for this change
+  # carries a release rather than a hash. That is the point of the fallback: the marker was
+  # reworded (it used to name commit 8ec88a3, before the release section existed), so the id
+  # changed and the answer had to be given again. The earlier text named the commit; it is
+  # recorded here instead so the history is not lost.
+  - commit: line:02c8f88bc084
+    what: >-
+      pyjab stops configuring logging: Logger no longer calls logging.basicConfig on the
+      root logger. It now adds a NullHandler to its own logger and sets that logger's level
+      (commit 8439ac4, PR #164; first released in 1.10.0). Nothing to change here.
+
+      * The server has always owned its logging: pyjab_mcp/__main__.py calls
+        logging.basicConfig(stream=sys.stderr) as its first act, before any pyjab import, so
+        the sequence the marker warns about -- importing pyjab first and inheriting its
+        format and level -- cannot happen in this program.
+      * Nothing here uses pyjab's Logger. The API-surface guard records no touchpoint on
+        pyjab.common.logger and fails the build if one appears.
+      * The property that does matter is that pyjab's records still *propagate* to whatever
+        the application configured, because a bridge that cannot enable Java Access Bridge
+        logs an error and a server that never sees it reports a worse message to the model
+        than the one pyjab wrote. Read from the source, not executed: the new __init__ adds a
+        NullHandler and sets a level, and does not touch propagate (which stays True by
+        default). tests/contract/test_pyjab_contract.py pins the observable half of that --
+        a record logged through pyjab's Logger reaches a handler on the root logger -- and the
+        weekly pyjab-drift job runs it against master, which is where the new implementation
+        actually executes.
+      * No pin change: `pyjab>=1.9.0` already admits 1.10.0.
+
+context:
+  - commit: a5dacfb
+    what: >-
+      The public tree walk (PR #156), released in 1.9.0. M2's java_snapshot is built on it:
+      the pin moved to pyjab>=1.9.0 in the same change, and `tests/contract/` pins the shape
+      it returns. `as_record()`'s fields are what a handle re-verifies against, so both are
+      contract-tested rather than assumed.
+
+  - commit: 479f893
+    what: >-
+      The thread-affinity rule written into pyjab's public docs (PR #157). Documentation
+      only: the rule it states is what `BridgeThread` already implements, and the code
+      depends on `Win32Utils.pump_messages()`, which was already public in 1.8.0.
+
+  - commit: 9fb0426
+    what: >-
+      The bridge DLL search beside a running JVM (PR #158). Nothing to do here: it adds a
+      search source inside `pyjab.config.find_bridge_dll`, whose signature and read-only
+      behaviour are what `java_diagnostics` calls, unchanged.
+
+  - commit: cc64f63
+    what: >-
+      `get_screenshot()` deprecated and released as 1.9.0 (PR #162). Nothing calls it --
+      this project has no screenshot tool yet -- and the pin moved to 1.9.0 for the tree
+      walk, not for this. When `java_screenshot` is built (M6) it should use
+      `get_screenshot_as_png`/`_as_base64`, which are not deprecated.

@@ -1,0 +1,60 @@
+name: pyjab drift
+
+# The load-bearing half of AGENTS.md §1a. A marker in pyjab's changelog is a judgement and
+# can be forgotten; these tests are not a judgement -- they pin the exact shapes this
+# project reads, so a pyjab change that breaks it fails a job whether or not anyone wrote
+# anything down.
+#
+# Installing from git rather than from PyPI is the point: this catches drift **before** a
+# release, when it is still cheap, instead of after, when the version is immutable.
+#
+# Why windows-latest: `pyjab.jabelement` and `pyjab.jabdriver` raise ImportError off Windows
+# by design, so the contract tests that matter most cannot even import elsewhere.
+#
+# Scheduled rather than per-push, because what it watches lives in another repository: a push
+# here cannot make pyjab@master change, and a run that cannot fail is not worth paying for.
+
+on:
+  schedule:
+    # Mondays, 06:00 UTC, before the working week starts.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: contract tests against pyjab@master
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install this project's dependencies, then pyjab from master
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          # --no-deps so this is only pyjab that moves: a transitive dependency changing
+          # would be reported as a pyjab drift, which is a different problem.
+          python -m pip install --no-deps --force-reinstall "git+https://github.com/gaozhao1989/pyjab@master"
+          python -c "import importlib.metadata as m; print('pyjab', m.version('pyjab'))"
+
+      # The contract, first and on its own: if this is red the rest is noise.
+      - name: The shapes this project depends on
+        run: python -m pytest tests/contract/ -v
+
+      # Then everything else, because a pyjab change can break this project outside the
+      # three contract areas -- and a failure here is a finding either way.
+      - name: The whole suite against pyjab@master
+        run: python -m pytest tests/ -q
+
+      # And the announced half: a marker nobody has answered here.
+      - name: Every marked pyjab change has an answer here
+        run: python tools/check_pyjab_changelog.py --strict

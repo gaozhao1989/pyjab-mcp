@@ -97,22 +97,77 @@ calling it from another *appears to work* — until a dialog opens later and is 
 found. Only an end-to-end test on a real desktop can catch it, and the test is "start the
 executor, wait, open a dialog, then find it".
 
+## Where the code lives
+
+Every module in `src/pyjab_mcp/` is listed here. That is not decoration: a new module
+missing from this table is a signal rather than an oversight, and
+`tools/check_documented_surface.py` fails the build until it is added. pyjab keeps the same
+rule for its own module list.
+
+| file | what |
+|---|---|
+| `src/pyjab_mcp/__init__.py` | the version, and the rule that nothing here imports pyjab at module scope |
+| `src/pyjab_mcp/__main__.py` | the console script: stdio only, and stdout belongs to the protocol |
+| `src/pyjab_mcp/server.py` | the MCP surface — server state, the tool functions, failure messages |
+| `src/pyjab_mcp/bridge.py` | `BridgeThread`: the one thread that owns the bridge, its pump and its work queue |
+| `src/pyjab_mcp/backend.py` | the only module that imports pyjab, plus the recorded requirements it is waiting on |
+| `src/pyjab_mcp/diagnostics.py` | the environment report, where `UNAVAILABLE` is never `0` |
+| `src/pyjab_mcp/tree.py` | tree records and the bounded renderer: what a snapshot shows, and what it says it left out |
+| `src/pyjab_mcp/handles.py` | element handles — a locator plus an expected identity, holding no JAB reference |
+| `src/pyjab_mcp/windows.py` | plain window records, and turning a title or hwnd into exactly one of them |
+
+`tools/` holds the guards and verification scripts. They ship in the sdist and not in the
+wheel — the same split pyjab uses, and for the same reason: they are maintainer tools, and
+a wheel contains only the package.
+
 ## Tool surface
 
 Deliberately small. Mapping pyjab's sixty-odd methods onto sixty-odd tools would dilute
-the model's tool selection for no gain.
+the model's tool selection for no gain. The `ships` column is checked against what
+`create_server()` actually registers, so a tool cannot be documented as available when it
+is not, or registered without being documented.
 
-| group | tools |
-|---|---|
-| diagnostics | `java_diagnostics` |
-| session | `java_list_windows`, `java_attach_window` |
-| observe | `java_snapshot`, `java_find`, `java_get_element`, `java_get_text`, `java_get_table`, `java_screenshot` |
-| act | `java_click`, `java_set_text`, `java_select`, `java_send_keys`, `java_fill_form` |
-| wait | `java_wait_for` |
+| group | tools | ships |
+|---|---|---|
+| diagnostics | `java_diagnostics` | M1 |
+| session | `java_list_windows`, `java_attach_window` | M1 |
+| observe | `java_snapshot` | M2 |
+| observe | `java_find`, `java_get_element`, `java_get_text` | M3 |
+| observe | `java_get_table` | M4 |
+| act | `java_click`, `java_set_text`, `java_select`, `java_fill_form` | M5 |
+| act | `java_send_keys` | M5, blocked on requirement R4 — it answers with the reason rather than pretending `send_text` is a shortcut sender |
+| wait | `java_wait_for` | M6 |
+| observe | `java_screenshot` | M6 |
 
 `java_get_table` is where the substrate matters most: it reads a `JTable`'s rows and cells
 through the JVM's own `AccessibleTable` interface, with paging, rather than through a
 platform bridge that does not carry that information.
+
+**Status.** M1 to M6 have shipped: `java_diagnostics`, `java_list_windows`,
+`java_attach_window`, `java_snapshot`, `java_find`, `java_get_element`, `java_get_text`,
+`java_get_table`, `java_click`, `java_set_text`, `java_select`, `java_fill_form`, and
+`java_send_keys` — which is registered so that asking for a shortcut gets the requirement it
+is waiting on rather than "no such tool".
+
+Every action verifies first and acts on the element it verified, inside one element lifetime,
+so there is no window between the check and the action in which the tree could move. When the
+element has changed, **nothing is done** — the difference is reported instead.
+
+`java_wait_for` waits for a window to appear or an element's text to change, polling between
+bridge calls rather than inside one: the bridge has a single owning thread, so a wait that ran
+on it would block every other call for its whole duration. A timeout is reported as a result
+rather than an error, because "not yet" is something an agent can act on. Two of pyjab's own gaps are still recorded rather
+than worked around (`AGENTS.md` §6.2): there is no public API that lists Java windows, so
+the listing runs through pyjab's documented `pyjab-inspect windows --json`; and there is no
+non-destructive detach, so a bound window stays bound for the life of the process. Neither
+is a correctness problem for a server driving one application, and both are the reason a
+tool's error message names a requirement instead of a private import.
+
+`java_snapshot` reads a bounded part of the tree — pyjab 1.9.0's `JABElement.walk`, which
+releases every JAB reference as it advances — and gives each rendered element a handle.
+Nothing is held between calls: a handle is a locator plus the identity the snapshot
+recorded, and a later call re-finds the element and checks role, name, position and bounds
+before doing anything.
 
 ## Verification
 
@@ -120,7 +175,17 @@ platform bridge that does not carry that information.
 |---|---|---|
 | L1 pure logic | any platform | no — renders from a fake tree |
 | L2 integration | `windows-latest`, default CI | no — packaging, import, `tools/list` |
-| L3 end to end | `windows-latest` with a real desktop, dispatched by hand | **yes** |
+| L3 end to end | `windows-latest` with a real desktop: `windows-gui.yml`, dispatched by hand **or** weekly | **yes** |
+
+L3 is `tests/e2e/`, which is skipped unless `PYJAB_MCP_E2E=1`, and `windows-gui.yml` also
+checks `java_diagnostics` on JDK 8, 17 and 21 — the three JDKs put the bridge DLL in different
+places, which is exactly what a report that cannot tell "missing" from "unreadable" gets
+wrong. The application it drives is pyjab's own test app, compiled from the sdist of the
+installed pyjab, because that is the only Swing application a hosted runner has.
+
+The one test in that file worth knowing about is the last one: it starts a **second JVM after
+the executor has been idle** and requires its window to appear. A pump on the wrong thread
+passes every other test in the repository and fails that one.
 
 **L1 needs a fake built before the thing it fakes.** pyjab's reference-counting test
 bridge raises on a double release and on use after release, and it found two real leaks.
