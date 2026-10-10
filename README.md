@@ -175,6 +175,13 @@ gh run watch
 It is not a status check: nobody runs it unless somebody asks (or the week comes round), so a
 green default CI run still says nothing about a live window.
 
+## Releasing
+
+Tag-driven: bump `src/pyjab_mcp/__init__.py`, move the changelog's `Unreleased` section under
+the new version, set `server.json`, then `python tools/check_release_version.py v0.1.0` and tag.
+[`docs/RELEASING.md`](docs/RELEASING.md) has the whole procedure, the two one-time setups (a
+PyPI pending publisher and the registry namespace), and what the four release jobs do.
+
 ## Working on it
 
 ```console

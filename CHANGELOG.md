@@ -10,6 +10,32 @@ under **Unreleased** until it is tagged.
 
 ### Added
 
+* **M9: the release pipeline, and the registry validator that caught a real mistake.**
+  `.github/workflows/release.yml` is tag-driven: `verify` (the version guard, the suite, every
+  guard, a real build and `twine check`) runs before anything is uploaded; then PyPI via OIDC
+  trusted publishing with no token in the repository, then the MCP Registry, then the GitHub
+  release with the changelog section as its notes. `workflow_dispatch` rehearses the whole
+  verify job without publishing.
+
+  `tools/check_release_version.py` refuses a release whose tag, package version, `server.json`
+  and changelog do not agree — the four places that name a release, checked before the one
+  action that cannot be undone. It also writes the release notes, so the notes and the check
+  cannot disagree about what a release contains.
+
+  **The registry's validator rejected the first `server.json`, and it was right.** The published
+  JSON schema at `2025-07-09` spells the package fields `registry_type`/`runtime_hint` and
+  mentions no other version; the registry API required `registryType`, and treated the
+  deprecated `$schema` as a failure to publish. Had this surfaced during a real release it would
+  have been discovered *after* PyPI had the package, which cannot be undone. The file now follows
+  the current schema (`2025-12-11`), the `registry` job runs `mcp-publisher validate` before
+  `publish`, and `PYJAB_MCP_REGISTRY=1` runs the same validator from the test suite. The static
+  schema, a published changelog and memory all disagreed with the authority; only the authority
+  was right.
+
+  `docs/RELEASING.md` has the procedure and the two things that must exist before the first tag:
+  a PyPI pending publisher for `pyjab-mcp` (workflow `release.yml`, environment `pypi`) and the
+  registry's GitHub namespace verification.
+
 * **pyjab 1.9.0 is the floor, and M2 is built on it.** The release shipped the tree walk
   (`JABElement.walk` → `JABTree` with a truncation flag) and `JABElement.as_record()`, which
   is what the precheck called R3 and what `java_snapshot` needed. The pin moved to

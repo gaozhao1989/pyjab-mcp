@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 from importlib import metadata
 from pathlib import Path
@@ -104,16 +105,26 @@ def test_local_only_files_are_kept_out_of_git_and_out_of_the_sdist():
 
 
 def test_server_json_satisfies_the_registry_schema_it_names():
-    """Validated against the fields the registry's own schema requires, not from memory.
+    """The fields the registry's current schema requires, in the names it requires.
 
-    The schema is preview and its field names have changed before -- it uses
-    ``registry_type``/``runtime_hint`` in snake_case, where an earlier draft was camelCase --
-    so the required keys and the name pattern are checked against the URL the file names.
+    Read from the published schema rather than remembered, and the reading mattered twice:
+
+    * the version this project first used (2025-07-09) spells these ``registry_type`` and
+      ``runtime_hint``; the current one (2025-12-11) and the registry API spell them
+      ``registryType`` and ``runtimeHint``. The registry's own validator returned
+      ``422 ... body.packages[0].registryType expected length >= 1`` for the snake_case file,
+      which is the kind of failure that would otherwise have arrived *after* PyPI had already
+      published the package.
+    * 2025-07-09 also requires ``version`` inside a package; 2025-12-11 does not. Keeping it
+      is still valid, and it is what a client needs to install a specific release.
     """
     server = json.loads((REPO_ROOT / "server.json").read_text(encoding="utf-8"))
 
-    assert server["$schema"].endswith("server.schema.json")
-    # ServerDetail -> Server: required
+    assert server["$schema"] == (
+        "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
+    ), "a deprecated schema is reported by mcp-publisher as a failure to publish"
+
+    # ServerDetail: required
     for key in ("name", "description", "version"):
         assert server.get(key), f"the registry requires {key!r}"
     assert re.fullmatch(r"[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+", server["name"]), (
@@ -122,12 +133,39 @@ def test_server_json_satisfies_the_registry_schema_it_names():
     assert len(server["description"]) <= 100, "the schema caps the description at 100 characters"
 
     package = server["packages"][0]
-    # Package: required registry_type, identifier, version, transport
-    for key in ("registry_type", "identifier", "version", "transport"):
+    # Package: required registryType, identifier, transport
+    for key in ("registryType", "identifier", "transport"):
         assert package.get(key), f"the registry requires packages[].{key!r}"
-    assert package["registry_type"] == "pypi"
+    assert package["registryType"] == "pypi", "the documented values are npm/pypi/oci/nuget/mcpb"
     assert package["identifier"] == "pyjab-mcp"
     assert package["transport"] == {"type": "stdio"}, "this server is stdio only"
+
+
+@pytest.mark.skipif(
+    not os.environ.get("PYJAB_MCP_REGISTRY"),
+    reason="needs the mcp-publisher binary and the network; set PYJAB_MCP_REGISTRY=1",
+)
+def test_the_registry_accepts_server_json():
+    """The authority on the schema is the registry, so this asks it when asked to.
+
+    Off by default because it needs a downloaded binary and a network round trip, and it is
+    *on* in the release workflow, where publishing metadata the registry rejects would
+    otherwise be discovered after PyPI already had the package.
+    """
+    import shutil
+    import subprocess
+
+    publisher = shutil.which("mcp-publisher") or str(REPO_ROOT / "mcp-publisher")
+    if not Path(publisher).exists():
+        pytest.skip("mcp-publisher is not installed")
+
+    result = subprocess.run(
+        [publisher, "validate"], cwd=REPO_ROOT, capture_output=True, text=True, timeout=120
+    )
+    assert result.returncode == 0, (
+        f"the registry rejected server.json:\n{result.stdout}\n{result.stderr}"
+    )
+    assert "is valid" in result.stdout
 
 
 def test_server_json_names_the_release_the_package_builds():

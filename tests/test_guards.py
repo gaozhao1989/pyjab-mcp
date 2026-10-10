@@ -26,6 +26,7 @@ import tools.check_documented_surface as docs_guard
 import tools.check_local_only_files as local_guard
 import tools.check_pyjab_api_surface as surface_guard
 import tools.check_pyjab_readiness as readiness_guard
+import tools.check_release_version as release_guard
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 Entry = surface_guard.Entry
@@ -490,3 +491,61 @@ def test_the_guard_script_runs_and_exits_zero(script):
     )
 
     assert result.returncode == 0, f"{script} exited {result.returncode}:\n{result.stdout}\n{result.stderr}"
+
+
+# ---------------------------------------------------------------------------------
+# tools/check_release_version.py
+# ---------------------------------------------------------------------------------
+
+
+def test_the_release_guard_refuses_a_version_that_disagrees_with_itself():
+    """Three files name the release; PyPI cannot be un-published, so they have to agree first."""
+    problems = release_guard.check("v9.9.9")
+
+    assert any("__init__.py" in problem for problem in problems)
+    assert any("server.json" in problem for problem in problems)
+    assert any("CHANGELOG.md" in problem for problem in problems)
+
+
+def test_the_release_guard_refuses_a_tag_that_is_not_a_release():
+    problems = release_guard.check("nightly-2026-10-10")
+
+    assert len(problems) == 1
+    assert "not a release tag" in problems[0]
+
+
+def test_the_release_guard_accepts_a_tree_that_agrees_with_itself(tmp_path, monkeypatch):
+    """The passing path, proved rather than assumed."""
+    import json
+
+    import pyjab_mcp
+
+    (tmp_path / "server.json").write_text(json.dumps({
+        "version": "0.1.0",
+        "packages": [{"identifier": "pyjab-mcp", "version": "0.1.0"}],
+    }), encoding="utf-8")
+    (tmp_path / "CHANGELOG.md").write_text(
+        "# Changelog\n\n## Unreleased\n\n## [0.1.0] - 2026-10-10\n\n### Added\n\n- it works\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(release_guard, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(pyjab_mcp, "__version__", "0.1.0")
+
+    assert release_guard.check("v0.1.0") == []
+    assert release_guard.check("0.1.0") == [], "the v is conventional, not required"
+
+
+def test_the_release_notes_come_from_the_changelog_section(tmp_path, monkeypatch):
+    (tmp_path / "CHANGELOG.md").write_text(
+        "# Changelog\n\n## Unreleased\n\n- in flight\n\n"
+        "## [0.2.0] - 2026-11-01\n\n### Added\n\n- the new thing\n\n"
+        "## [0.1.0] - 2026-10-10\n\n- the old thing\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(release_guard, "REPO_ROOT", tmp_path)
+
+    notes = release_guard.section("v0.2.0")
+
+    assert "the new thing" in notes
+    assert "the old thing" not in notes, "a section ends at the next heading"
+    assert "in flight" not in notes, "Unreleased is not a release's notes"

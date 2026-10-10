@@ -35,7 +35,6 @@ What it is looking for, in order of how much it would hurt to get wrong:
 
 from __future__ import annotations
 
-import asyncio
 import os
 import shutil
 import subprocess
@@ -386,16 +385,27 @@ def handle_in(text: str) -> str:
     return match.group(1)
 
 
-async def wait_for_tool_window(server, title: str, timeout: float = STARTUP_TIMEOUT) -> str:
-    """Poll java_list_windows through the tools until *title* appears."""
-    deadline = time.monotonic() + timeout
-    seen = ""
-    while time.monotonic() < deadline:
-        seen = await tool(server, "java_list_windows", {})
-        if title in seen:
-            return seen
-        await asyncio.sleep(POLL_INTERVAL)
-    pytest.fail(f"{title!r} never appeared through java_list_windows. Last reply:\n{seen}")
+@pytest.mark.asyncio
+async def test_waiting_for_something_that_never_happens_reports_rather_than_raises(live,
+                                                                                  main_window):
+    """A timeout is a measurement, not a crash: an agent can act on "not yet" and cannot act
+    on an exception."""
+    from pyjab_mcp.server import ServerState, create_server
+
+    bridge, _backend = live
+    server = create_server(state=ServerState(bridge=bridge))
+    attached = await tool(server, "java_attach_window", {"title": MAIN_TITLE})
+    session_id = attached.split(" ", 1)[0]
+
+    result = await tool(
+        server, "java_wait_for",
+        {"session_id": session_id, "window_title": "No Such Window Anywhere",
+         "timeout": 2.0, "poll_interval": 0.5},
+    )
+
+    assert result.startswith("timed out after"), result
+    assert "Last seen: windows visible:" in result, result
+    print(f"\n[L3] {result.splitlines()[0]}")
 
 
 @pytest.mark.asyncio
@@ -462,8 +472,30 @@ async def test_the_whole_flow_through_the_mcp_tools(live, main_window):
         server, "java_click",
         {"session_id": session_id, "handle": handle_in(dialog_button)},
     )
-    await wait_for_tool_window(server, "A Dialog")
-    print("\n[L3] the six-step flow completed through the MCP tools")
+    # java_wait_for does the waiting, rather than this test polling -- which is the point of
+    # having it: a fixed sleep is either too short or wasted, and an agent cannot sleep at all.
+    waited = await tool(
+        server, "java_wait_for",
+        {"session_id": session_id, "window_title": "A Dialog", "timeout": 30.0},
+    )
+    assert waited.startswith("met after"), waited
+
+    # And looking at it, for the case the tree cannot answer.
+    shot = await server.call_tool(
+        "java_screenshot", {"session_id": session_id}
+    )
+    assert shot.is_error is False, shot
+    images = [part for part in shot.content if part.type == "image"]
+    assert images, f"java_screenshot returned {[p.type for p in shot.content]}"
+    import base64
+
+    png = base64.b64decode(images[0].data)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n", f"not a PNG: {png[:8]!r}"
+    assert len(png) > 1000, f"a {len(png)}-byte PNG of a whole window is suspiciously small"
+    print(
+        f"\n[L3] the six-step flow completed through the MCP tools; "
+        f"java_wait_for: {waited}; java_screenshot: {len(png)} bytes of PNG"
+    )
 
     # 8. And the form-filling shortcut reports each field it was given.
     filled = await tool(server, "java_fill_form", {

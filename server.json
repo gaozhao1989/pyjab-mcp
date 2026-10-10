@@ -1,5 +1,5 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.gaozhao1989/pyjab-mcp",
   "description": "Drive Java desktop apps from an AI agent, through the JVM's own accessibility tree",
   "version": "0.1.0",
@@ -9,10 +9,10 @@
   },
   "packages": [
     {
-      "registry_type": "pypi",
+      "registryType": "pypi",
       "identifier": "pyjab-mcp",
       "version": "0.1.0",
-      "runtime_hint": "uvx",
+      "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
       }

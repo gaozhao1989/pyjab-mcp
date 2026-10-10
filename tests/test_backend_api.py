@@ -9,8 +9,12 @@ message quietly going stale.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+from typing import List
 
 import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 from pyjab_mcp.backend import (
     AVAILABLE,
@@ -23,6 +27,44 @@ from pyjab_mcp.backend import (
     probe_public_api,
     requirement,
 )
+
+
+def test_the_installed_pyjab_has_what_the_pin_buys():
+    """First, and it names the fix and the missing capability.
+
+    Learned the hard way: a virtual environment left on pyjab 1.9.0 after the pin moved to
+    1.10.0 produced nine failures across the suite -- a KeyError for a retired requirement, a
+    contract test for a function that was not there, a diagnostics fact that had moved --
+    every one of them true, and none of them saying "upgrade pyjab". One test that says so is
+    worth nine that do not.
+
+    Feature-detected rather than version-compared, like everything else here (§6.3): what
+    matters is the capability, not the number.
+    """
+    import pyjab
+
+    missing: "List[str]" = []
+    if not hasattr(pyjab, "list_java_windows"):
+        missing.append("pyjab.list_java_windows() -- java_list_windows needs it (1.10.0)")
+
+    if sys.platform == "win32":  # pragma: no cover - the import is Windows-only
+        from pyjab.jabdriver import JABDriver
+
+        if not hasattr(JABDriver, "detach"):
+            missing.append("JABDriver.detach() -- releasing a session needs it (1.10.0)")
+    else:
+        # Importing jabdriver off Windows raises pyjab's own descriptive ImportError, so the
+        # API's presence is read from the installed source **without importing it**.
+        driver_source = (Path(pyjab.__path__[0]) / "jabdriver.py").read_text(encoding="utf-8")
+        if "def detach" not in driver_source:
+            missing.append("JABDriver.detach() -- releasing a session needs it (1.10.0)")
+
+    assert not missing, (
+        f"this environment has pyjab {getattr(pyjab, '__version__', 'unknown')}, which is "
+        f"missing: "
+        + "; ".join(missing)
+        + ". Upgrade it: python -m pip install -U pyjab"
+    )
 
 
 def test_pyjab_is_installed_and_probed():
