@@ -56,6 +56,29 @@ only runs on Windows; the macOS path is here because the file also holds servers
 Restart Claude Desktop after editing. **Backslashes must be doubled in JSON**, which is why
 the path above has `\\` where Windows uses `\`.
 
+### The `.mcpb` bundle, where there is no config file to edit
+
+Every release carries `pyjab-mcp-<version>.mcpb`. Claude Desktop installs a bundle by opening
+the file — the mechanism Anthropic's own packaging guide documents is **dragging the `.mcpb`
+onto the Claude Desktop window** — and after that the server appears in the same list as the
+`mcpServers` entries above. There is no JSON to edit, no virtual environment and no `PATH`
+problem, because the bundle carries the server, its dependencies and its entry script, and
+Claude starts it with the `python` on your `PATH`.
+
+Two things the bundle does not change, and both are why it is worth reading this before
+installing it:
+
+* **The requirements in "Before you connect anything" are still the requirements.** No Python
+  interpreter and no JDK is inside the file. Windows, a 64-bit Python 3.10 or newer, a JDK with
+  Java Access Bridge enabled, and a Java application that is already running are all still
+  needed — the bundle removes the *dependency management*, not the environment.
+* **MCPB enforces no permissions.** There is no manifest-level sandbox: the bundled server runs
+  with the full privileges of the user who installed it, exactly as `pyjab-mcp.exe` would.
+  Read the source before installing a bundle from anyone, this one included.
+
+To remove it, remove the extension the same way you added it and delete the directory Claude
+unpacked it into.
+
 ## Claude Code
 
 The CLI writes the config for you, which avoids the path problem entirely:

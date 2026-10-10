@@ -1301,11 +1301,14 @@ def test_the_verify_job_is_exactly_the_release_checks_in_order():
 
 
 def test_the_release_job_graph_keeps_the_half_published_hazard_closed():
-    """`github-release` needing only `verify` is the hazard; this pins the graph that carries it.
+    """`github-release` needing only `verify` is the hazard; this pins every job's `needs`.
 
     The reviewer demonstrated that `github-release` losing its only dependency leaves every
     other pin green -- and that is the exact condition issue #31 is about: the release job then
     runs without the checks, so a duplicate version produces a GitHub release with no package.
+    The `mcpb` job is pinned here for the same reason from the other side: it attaches a file
+    *to* that release, so its dependencies are what decide whether the attachment lands
+    somewhere, and off what.
     """
     path = REPO_ROOT / ".github" / "workflows" / "release.yml"
     workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -1329,6 +1332,12 @@ def test_the_release_job_graph_keeps_the_half_published_hazard_closed():
         "the registry points at a package that should exist first, so its metadata publish must "
         "wait for `pypi`"
     )
+    assert needs("mcpb") == ["verify", "github-release"], (
+        "`mcpb` attaches the bundle to the GitHub release, so it has to wait for that release "
+        "to exist, and it waits for `verify` so the bundle can only be built from an artifact "
+        "whose checks passed. Either dependency lost is a bundle built from a dist/ nobody "
+        "checked, or one attached to a release that is not there."
+    )
 
 
 def test_the_verify_job_cannot_be_told_to_ignore_its_own_failure():
@@ -1351,6 +1360,105 @@ def test_the_verify_job_cannot_be_told_to_ignore_its_own_failure():
         assert name in jobs, f"the `{name}` job was renamed or removed"
         assert not jobs[name].get("continue-on-error"), (
             f"`{name}` declares a job-level `continue-on-error`"
+        )
+
+
+# ---------------------------------------------------------------------------------
+# The `mcpb` job -- the bundle runs on both triggers, and only the tag touches the release
+# ---------------------------------------------------------------------------------
+#
+# The hazard here is not a wrong verdict, it is a *skipped job*. `github-release` carries
+# `if: github.event_name == 'push'`, and GitHub skips a job whose `needs` were skipped, so the
+# obvious `needs: [verify, github-release]` would mean the bundle was never built or validated
+# on a `workflow_dispatch` -- the one run a maintainer can make before the irreversible step.
+# That is why `always()` is part of the contract and not a detail, and why it is pinned.
+
+MCPB_JOB = "mcpb"
+MCPB_BUILD_STEP = "Build the MCPB bundle"
+MCPB_UPLOAD_STEP = "Attach the bundle to the release"
+
+
+def release_jobs():
+    path = REPO_ROOT / ".github" / "workflows" / "release.yml"
+    workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return workflow["jobs"]
+
+
+def test_the_mcpb_job_builds_on_every_trigger_and_attaches_only_on_a_tag():
+    """Both halves of issue #35's wiring, pinned because each is silent when it is lost.
+
+    Dropping `always()` skips the job on a dispatch -- the build is then unverifiable without
+    pushing a tag. Dropping the upload's `if:` puts the bundle on a release that a dispatch
+    does not create, or (worse, if the `gh` call were made non-fatal) lets the write-permission
+    path run on a trigger that was only meant to build. Each assertion below was checked by
+    mutating the workflow and watching this test go red and no other.
+    """
+    jobs = release_jobs()
+    assert MCPB_JOB in jobs, "the mcpb job was renamed or removed"
+    job = jobs[MCPB_JOB]
+
+    assert "always()" in str(job.get("if", "")), (
+        f"`{MCPB_JOB}` has if: {job.get('if')!r}. Without `always()` the job is skipped whenever "
+        "`github-release` is, which is every `workflow_dispatch` -- so the build and its "
+        "validation would exist only on the one trigger nobody can rehearse."
+    )
+    assert "needs.verify.result == 'success'" in str(job.get("if", "")), (
+        "the job no longer requires `verify` to have succeeded, so a tag whose checks failed "
+        "still gets a bundle built from its artifact"
+    )
+    assert not job.get("continue-on-error"), (
+        f"`{MCPB_JOB}` declares a job-level `continue-on-error`, so a bundle that cannot be "
+        "built leaves the run green"
+    )
+
+    steps = job.get("steps") or []
+    build = [step for step in steps if step.get("name") == MCPB_BUILD_STEP]
+    assert len(build) == 1, (
+        f"`{MCPB_JOB}` has {len(build)} steps named {MCPB_BUILD_STEP!r}. If it was renamed, "
+        "retarget this pin; if it was deleted, the job uploads an artifact that was never "
+        "built."
+    )
+    assert "tools/build_mcpb.py" in build[0].get("run", ""), (
+        "the build step no longer runs the packer, so the packaging logic is wherever it went "
+        "-- and tests/test_packaging.py cannot reach a shell snippet inside YAML"
+    )
+    assert "--validate-with-mcpb" in build[0].get("run", ""), (
+        "the build step no longer asks for Anthropic's own schema validation; only the offline "
+        "field validator would run"
+    )
+    assert "if" not in build[0], (
+        "the build step is conditional, so the bundle can be skipped while the job stays green"
+    )
+    assert not build[0].get("continue-on-error"), (
+        "the build step ignores its own failure, so a bundle that was not built is uploaded"
+    )
+
+    artifacts = [
+        step for step in steps
+        if str(step.get("uses", "")).startswith("actions/upload-artifact")
+    ]
+    assert any(
+        "*.mcpb" in str(step.get("with", {}).get("path", "")) for step in artifacts
+    ), (
+        "no step uploads the built bundle as a workflow artifact, so on a dispatch -- where "
+        "nothing is attached to a release -- the bundle a reviewer would verify is thrown away"
+    )
+
+    uploads = [step for step in steps if step.get("name") == MCPB_UPLOAD_STEP]
+    assert len(uploads) == 1, f"`{MCPB_JOB}` has {len(uploads)} steps named {MCPB_UPLOAD_STEP!r}"
+    upload = uploads[0]
+    assert upload.get("if") == "github.event_name == 'push'", (
+        f"the release upload is guarded by {upload.get('if')!r}. It has to be the tag push and "
+        "nothing else: a dispatch must build and validate the bundle without attaching it to a "
+        "release that does not exist."
+    )
+    assert "gh release upload" in upload.get("run", ""), (
+        "the upload step no longer attaches the bundle to the release"
+    )
+    for fragment in ("|| true", "2>/dev/null", "; true"):
+        assert fragment not in upload.get("run", ""), (
+            f"the upload step contains {fragment!r}, so a failed attachment leaves the run "
+            "green and the release without its bundle"
         )
 
 

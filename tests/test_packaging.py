@@ -2,19 +2,30 @@
 
 These assert the things that are cheap to check and expensive to discover late: that the
 package imports anywhere, that the entry point names something real, that no module has
-started importing pyjab at module scope, and that local-only files stay local.
+started importing pyjab at module scope, that local-only files stay local, and that the MCPB
+bundle -- the artifact a user actually installs -- says what it is and carries what it needs.
 
 The pyjab one is not hypothetical. ``pyjab`` raises ``ImportError`` off Windows by design,
 so a module-scope import here would make this package unimportable on every non-Windows
 machine -- including the ones that only run the tests.
+
+The bundle tests build a *real* bundle with a *stub* ``dist/`` and read the zip back. Every
+failure the bundle can have is one a user meets as an uninstallable file rather than as a red
+test, so the assertions are about the artifact: the version it declares, the platform, the
+entry point the manifest names, the directory the shipped entry script looks in, and what must
+not be inside.
 """
 
 from __future__ import annotations
 
 import ast
+import importlib.util
 import json
 import os
 import re
+import subprocess
+import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -23,6 +34,10 @@ import pyjab_mcp
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = REPO_ROOT / "src" / "pyjab_mcp"
+PACKER = REPO_ROOT / "tools" / "build_mcpb.py"
+ENTRY_SCRIPT = REPO_ROOT / "mcpb" / "entry.py"
+BUNDLE_MANIFEST = "manifest.json"
+BUNDLE_ENTRY = "server/entry.py"
 
 
 def modules():
@@ -217,3 +232,257 @@ def test_the_readme_carries_the_registry_ownership_line():
         "the registry reads this line out of the *published* package's README; it has to be "
         "here before the tag, because it cannot be added afterwards"
     )
+
+
+# ---------------------------------------------------------------------------------
+# The MCPB bundle -- `tools/build_mcpb.py`, read back out of the zip it produces
+# ---------------------------------------------------------------------------------
+#
+# The packer is run as a script here, against a stub `dist/` and with `--skip-dependencies`,
+# so this is offline and needs no network. What it produces is then read as a zip: the
+# assertions are about the artifact, because the artifact is what a user installs. The one
+# fact that needs both halves -- where the entry script looks for the dependencies -- is
+# asserted by *executing the file that is in the bundle*, not the file in the repository.
+
+
+def _stub_wheel(dist: Path) -> Path:
+    """A wheel pip installs offline with no dependencies: what `python -m build` would leave.
+
+    Real enough for pip (``METADATA``, ``WHEEL``, ``RECORD``), and it declares the package's
+    own version, so the packer's "the bundle's contents and its manifest agree" check is
+    exercised rather than bypassed.
+    """
+    version = pyjab_mcp.__version__
+    dist.mkdir(parents=True, exist_ok=True)
+    wheel = dist / f"pyjab_mcp-{version}-py3-none-any.whl"
+    info = f"pyjab_mcp-{version}.dist-info"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("pyjab_mcp/__init__.py", f'__version__ = "{version}"\n')
+        archive.writestr(
+            f"{info}/METADATA",
+            f"Metadata-Version: 2.1\nName: pyjab-mcp\nVersion: {version}\n\n",
+        )
+        archive.writestr(
+            f"{info}/WHEEL",
+            "Wheel-Version: 1.0\nGenerator: tests/test_packaging.py\n"
+            "Root-Is-Purelib: true\nTag: py3-none-any\n",
+        )
+        archive.writestr(f"{info}/RECORD", "")
+    return wheel
+
+
+#: The interpreter the stub bundle is vendored for. It is the one running the tests, so the
+#: entry script's own arithmetic -- `cp3XX` from `sys.version_info` -- is what decides the
+#: directory name, and the packer has to agree with it rather than with a constant.
+RUNNING_MINOR = f"{sys.version_info.major}.{sys.version_info.minor}"
+
+
+@pytest.fixture(scope="module")
+def bundle(tmp_path_factory):
+    """A bundle built once, from a stub `dist/`, for the tests below to read."""
+    root = tmp_path_factory.mktemp("mcpb")
+    dist = root / "dist"
+    _stub_wheel(dist)
+    out = root / "out"
+
+    result = subprocess.run(
+        [sys.executable, str(PACKER),
+         "--dist", str(dist), "--out", str(out),
+         "--python-versions", RUNNING_MINOR, "--skip-dependencies"],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=600,
+    )
+    assert result.returncode == 0, (
+        f"the packer exited {result.returncode}:\n{result.stdout}\n{result.stderr}"
+    )
+
+    built = out / f"pyjab-mcp-{pyjab_mcp.__version__}.mcpb"
+    assert built.is_file(), f"the packer did not write {built}:\n{result.stdout}"
+    return built
+
+
+def bundle_members(bundle: Path):
+    with zipfile.ZipFile(bundle) as archive:
+        return set(archive.namelist())
+
+
+def bundle_manifest(bundle: Path):
+    with zipfile.ZipFile(bundle) as archive:
+        return json.loads(archive.read(BUNDLE_MANIFEST).decode("utf-8"))
+
+
+def loaded_entry_script(tmp_path, source: str):
+    """Import the entry script *as the bundle ships it*, without starting the server."""
+    path = tmp_path / "bundled-entry.py"
+    path.write_text(source, encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("bundled_entry", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_bundle_manifest_carries_the_package_version(bundle):
+    """The version has one authority. A second place it lives is a second place to drift."""
+    document = bundle_manifest(bundle)
+
+    assert document["version"] == pyjab_mcp.__version__
+
+
+def test_the_bundle_declares_windows_only(bundle):
+    """Java Access Bridge is a Windows API; installing this anywhere else is a dead end."""
+    document = bundle_manifest(bundle)
+
+    assert document["compatibility"]["platforms"] == ["win32"]
+
+
+def test_the_entry_point_the_manifest_names_is_inside_the_zip(bundle):
+    """A manifest naming a file the bundle does not contain fails on the user's machine.
+
+    The launch command is checked in the same place because it is the other half of the same
+    fact: the host runs `command args`, and both have to survive into the bundle.
+    """
+    document = bundle_manifest(bundle)
+    members = bundle_members(bundle)
+    launch = document["server"]["mcp_config"]
+
+    assert document["server"]["entry_point"] in members, (
+        f"the manifest names {document['server']['entry_point']!r}, which is not in the zip"
+    )
+    assert launch["command"] == "python", (
+        "no interpreter is bundled, so the command has to be the `python` on the user's PATH"
+    )
+    assert launch["args"] == ["${__dirname}/" + document["server"]["entry_point"]], (
+        "the args have to address the bundle with ${__dirname}, or the launch path is wrong "
+        "wherever the host unpacks it"
+    )
+
+
+def test_the_entry_script_looks_where_the_packer_vendored(bundle, tmp_path):
+    """The two halves of "the dependencies are on sys.path", asserted against the artifact.
+
+    The entry script computes ``vendor/cp3XX`` from ``sys.version_info`` and prepends it; the
+    packer installs into a directory of its own naming. If they disagree the bundle fails
+    inside a native import on the user's machine, which is the failure hardest to read.
+    """
+    with zipfile.ZipFile(bundle) as archive:
+        source = archive.read(BUNDLE_ENTRY).decode("utf-8")
+    entry = loaded_entry_script(tmp_path, source)
+
+    vendored = "server/" + entry.vendor_name().replace(os.sep, "/")
+    members = bundle_members(bundle)
+    inside = sorted(member for member in members if member.startswith(vendored + "/"))
+
+    assert inside, (
+        f"the entry script prepends {vendored!r}, which the bundle does not contain. It "
+        f"carries {sorted(m for m in members if m.startswith('server/vendor'))[:3]} instead."
+    )
+    assert any(member.endswith("/pyjab_mcp/__init__.py") for member in inside), (
+        f"{vendored!r} is in the bundle but does not hold the package: {inside[:5]}"
+    )
+
+
+def test_the_bundle_ships_the_tracked_entry_script(bundle):
+    """What runs is what is in the repository: a generated copy is a copy nobody reviewed."""
+    with zipfile.ZipFile(bundle) as archive:
+        shipped = archive.read(BUNDLE_ENTRY)
+
+    assert shipped == ENTRY_SCRIPT.read_bytes()
+
+
+def test_the_bundle_carries_no_local_only_file_and_no_bytecode(bundle):
+    """The bundle is a thing a stranger installs, so it may not carry maintainer notes.
+
+    The names come from the guard that keeps them out of the sdist and out of git rather than
+    being repeated here: there is one list of what stays local, and this is the third
+    mechanism that has to agree with it.
+    """
+    from tools.check_local_only_files import LOCAL_ONLY
+
+    members = bundle_members(bundle)
+    leaked = []
+    for local in LOCAL_ONLY:
+        stripped = local.rstrip("/")
+        leaked += [m for m in members if m == stripped or m.startswith(stripped + "/")]
+    bytecode = sorted(
+        member for member in members
+        if "__pycache__" in member.split("/") or member.endswith((".pyc", ".pyo"))
+    )
+
+    assert leaked == [], f"local-only files are inside the bundle: {leaked}"
+    assert bytecode == [], (
+        f"compiled bytecode is inside the bundle: {bytecode[:5]}. It is platform- and "
+        "version-locked, and it is not what was reviewed."
+    )
+
+
+def test_the_packer_refuses_a_staged_tree_that_carries_a_local_only_file(tmp_path):
+    """The artifact-level check, proved able to fail rather than trusted.
+
+    The end-to-end assertion above is necessarily about what *this* repository happens to
+    contain, and a maintainer note is not in the working tree of a checkout that ignores it --
+    so the predicate is tested directly, with a tree that does contain one.
+    """
+    import tools.build_mcpb as packer
+    from tools.check_local_only_files import LOCAL_ONLY
+
+    (tmp_path / LOCAL_ONLY[0].rstrip("/")).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / LOCAL_ONLY[0].rstrip("/")).write_text("maintainer notes\n", encoding="utf-8")
+    (tmp_path / "server").mkdir()
+    (tmp_path / "server" / "__pycache__").mkdir()
+    (tmp_path / "server" / "entry.pyc").write_text("", encoding="utf-8")
+
+    problems = packer.staged_problems(tmp_path)
+
+    assert any("LOCAL-ONLY FILE IN THE BUNDLE" in problem for problem in problems), problems
+    assert any("BUILD ARTEFACT IN THE BUNDLE" in problem for problem in problems), problems
+
+
+def test_the_packer_says_how_to_make_a_dist_when_there_is_none(tmp_path):
+    """An empty `dist/` must be a sentence, not an empty bundle.
+
+    "I could not find the wheel" and "there is no wheel" both have to end the build: the
+    packer bundles the *built* artifact and nothing from the working tree, so a silent empty
+    bundle is the worst outcome available to it.
+    """
+    empty = tmp_path / "dist"
+    empty.mkdir()
+
+    result = subprocess.run(
+        [sys.executable, str(PACKER), "--dist", str(empty), "--out", str(tmp_path / "out"),
+         "--python-versions", RUNNING_MINOR, "--skip-dependencies"],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=600,
+    )
+    output = result.stdout + result.stderr
+
+    assert result.returncode != 0, f"the packer packed an empty dist/:\n{output}"
+    assert "python -m build" in output, (
+        "the refusal has to name the command that fixes it, or the reader is left to guess"
+    )
+    if (tmp_path / "out").exists():
+        assert not list((tmp_path / "out").glob("*.mcpb")), (
+            "a refusal that still leaves a bundle behind is not a refusal"
+        )
+
+
+def test_the_manifest_validator_refuses_a_field_the_schema_does_not_document(tmp_path):
+    """`additionalProperties: false` means an invented field is a refusal, not a warning."""
+    import tools.build_mcpb as packer
+
+    document = packer.manifest(pyjab_mcp.__version__)
+    document["permissions"] = {"filesystem": "read"}
+
+    problems = packer.check_manifest(document)
+
+    assert any("UNDOCUMENTED FIELD" in problem for problem in problems), problems
+
+
+def test_the_manifest_validator_refuses_a_manifest_missing_a_required_field():
+    """Every field the schema requires has to be present, `author` and `server` included."""
+    import tools.build_mcpb as packer
+
+    document = packer.manifest(pyjab_mcp.__version__)
+    del document["author"]
+
+    problems = packer.check_manifest(document)
+
+    assert any("MISSING FIELD: author" in problem for problem in problems), problems
+

@@ -60,6 +60,23 @@ under **Unreleased** until it is tagged.
   ships one, `tools/check_pyjab_readiness.py` says READY and a `java_focus_window` tool is an
   hour of work.
 
+* **`pyjab-mcp` ships as an MCPB bundle, attached to every GitHub release.** The remaining
+  distribution item was a file a user can install without a build step, and the packer is
+  `tools/build_mcpb.py` rather than a `run:` block so that what it produces is pinned offline by
+  `tests/test_packaging.py` — the version it declares is read from `pyjab_mcp.__version__` and
+  re-read from the file it wrote, the platform is `win32`, the entry point the manifest names and
+  the vendored directory the shipped `mcpb/entry.py` prepends are both asserted *inside the zip*,
+  and an empty `dist/` is refused with the command that fixes it instead of becoming an empty
+  bundle. A new `mcpb` job builds it from the release's own wheel and attaches it with
+  `gh release upload`; on `workflow_dispatch` the same job builds and validates the bundle and
+  keeps it as a workflow artifact, because a job that can only run on a tag is a job nobody can
+  verify. It does **not** bundle a Python interpreter: Windows, a 64-bit Python 3.10 or newer and
+  a JDK with Java Access Bridge enabled are still required — the bundle vendors the dependency
+  tree for every supported CPython minor, because `pydantic-core`, `cffi`, `rpds-py` and
+  `pywin32` ship per-interpreter wheels — and MCPB enforces no permissions, so the server runs
+  with the full privileges of the user who installed it. `README.md`, `docs/CLIENTS.md` and
+  `docs/RELEASING.md` say so where a user reads it.
+
 
 ## [0.1.2] - 2026-10-10
 

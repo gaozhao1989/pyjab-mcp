@@ -225,7 +225,10 @@ tagged commit, no release — see
 `release.yml` does the rest: it verifies that the tag matches `__version__`, `server.json` and the
 changelog, runs the suite and the guards, builds and checks the artifact, publishes to PyPI through
 Trusted Publishing, publishes the metadata to the MCP Registry, and creates the GitHub release
-with the changelog section as its notes.
+with the changelog section as its notes. **It also builds the MCPB bundle and attaches it to that
+release** — `tools/build_mcpb.py` from the same `dist` artifact, in a job that runs on
+`workflow_dispatch` too: there it builds and validates the bundle, uploads it as a workflow
+artifact and attaches nothing, which is how the bundle is checked *before* a tag exists.
 
 ## After the tag
 

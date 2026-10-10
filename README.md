@@ -91,7 +91,8 @@ contributor needs is above, and the rules that are not prose are enforced by the
 
 * Windows
 * Python 3.10 or newer
-* A JVM on the machine, for the application being driven
+* A JDK with **Java Access Bridge** enabled — `"%JAVA_HOME%\bin\jabswitch" -enable`, then
+  restart the Java application — for the application being driven
 * `pyjab`, which brings the rest
 
 ## Install
@@ -101,6 +102,27 @@ pip install pyjab-mcp
 ```
 
 Working on the server itself is `pip install -e ".[dev]"` — see [Working on it](#working-on-it).
+
+### Or install the bundle: one file, no build step
+
+Every release also carries `pyjab-mcp-<version>.mcpb` — the built wheel, its dependencies
+vendored for each supported CPython minor, and one entry script, in a single file. Download it
+from the [releases page](https://github.com/gaozhao1989/pyjab-mcp/releases) and hand it to the
+client: Claude Desktop installs a `.mcpb` by opening it, and
+[docs/CLIENTS.md](docs/CLIENTS.md) has the details.
+
+**The bundle changes none of the requirements above.** It carries no Python interpreter, and it
+cannot carry a JDK: this server drives Java Access Bridge, so **64-bit Windows, a 64-bit Python
+3.10 or newer, and a JDK with Java Access Bridge enabled** are still what the machine has to
+provide — and the Java application it drives still has to be running before you attach to it.
+It is tens of megabytes because it holds the dependency tree for every CPython minor
+`pyproject.toml` declares: `pydantic-core`, `cffi`, `rpds-py` and `pywin32` ship compiled
+wheels tagged for one minor version each, so a bundle vendored for a single interpreter would
+fail inside a native import on another.
+
+**MCPB enforces no permissions.** There is no manifest-level sandbox — a bundled server runs
+with the full privileges of the user who installed it, exactly as it would if you had started
+it by hand. Read the source before installing a `.mcpb` from anyone, this one included.
 
 ## Use
 
