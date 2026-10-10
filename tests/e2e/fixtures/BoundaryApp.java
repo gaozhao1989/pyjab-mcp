@@ -4,6 +4,8 @@ import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 
 import javax.swing.JButton;
 import javax.swing.JFrame;
@@ -15,32 +17,32 @@ import javax.swing.SwingUtilities;
  * The two boundaries this project documents, as a running application.
  *
  * <p>Written for pyjab-mcp's end-to-end layer, which had no way to test what its own README
- * tells users: that a canvas-drawn interface has no accessible children (so a screenshot is
- * all there is), and that two elements can share an accessible name (which is why a handle
- * carries a position as well as a name).
+ * tells users: that a canvas-drawn interface has no accessible children (so a screenshot is all
+ * there is), and that two elements can share an accessible name (which is why a handle carries a
+ * position as well as a name).
  *
- * <p>pyjab's own test application has no canvas and no duplicate names, and adding them there
- * would be a change to a different repository for the sake of a test in this one. This file is
- * forty lines and belongs here.
- *
- * <p>The three controls are deliberately neighbours:
+ * <p><strong>Why the names are set the way they are.</strong> The first version of this file used
+ * {@code setName(...)} everywhere and the end-to-end run could not find either element: JAB saw
+ * no component called "Canvas panel" and none called "Duplicate field". Two different reasons,
+ * both now measured rather than assumed:
  *
  * <ul>
- *   <li>{@code Canvas panel} paints shapes and contains no child components at all -- the
- *       accessible tree has a leaf, not a subtree, and the pixels come from paintComponent;
- *   <li>{@code Duplicate field} is the accessible name of <em>two</em> text fields with
- *       different contents, so a search by name has to return both and a handle has to be
- *       able to tell them apart by where they are;
- *   <li>{@code Ordinary button} is there so a test can distinguish "the canvas has nothing to
- *       offer" from "the window could not be read".
+ *   <li>a {@code JPanel} is found by its **accessible name**, which is
+ *       {@code getAccessibleContext().setAccessibleName(...)} — {@code setName} does not reach it;
+ *   <li>a {@code JTextField} reports its **content** as its accessible name, so setting a name is
+ *       beside the point. That is the same rule that made {@code java_set_text} rename the field
+ *       it had just typed into, and it is why this file uses two buttons instead.
  * </ul>
  *
- * <p>Built for Java 8: the end-to-end job runs JDK 17, and the diagnostics matrix runs 8, so
- * staying compatible costs nothing and keeps the option open.
+ * <p>A button's accessible name is its text, which is the case JAB is best at: two buttons with
+ * the same text and different actions, and a status label each of them writes to, so a test can
+ * tell which of two same-named handles was actually clicked.
+ *
+ * <p>Built for Java 8: the end-to-end job runs JDK 17 and the diagnostics matrix runs 8, so
+ * staying compatible costs nothing.
  */
 public final class BoundaryApp {
 
-    /** The window title, overridable so several instances can run at once. */
     private static final String DEFAULT_TITLE = "pyjab-mcp boundary app";
 
     public static void main(String[] args) {
@@ -62,27 +64,53 @@ public final class BoundaryApp {
     private static void build(String title) {
         JFrame frame = new JFrame(title);
         frame.setName("Boundary frame");
+        frame.getAccessibleContext().setAccessibleName("Boundary frame");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setLayout(new BorderLayout());
 
         Canvas panel = new Canvas();
         panel.setName("Canvas panel");
+        panel.getAccessibleContext().setAccessibleName("Canvas panel");
         panel.setPreferredSize(new Dimension(260, 140));
         frame.add(panel, BorderLayout.CENTER);
 
         JPanel controls = new JPanel();
         controls.setName("Controls panel");
+        controls.getAccessibleContext().setAccessibleName("Controls panel");
 
-        JTextField first = new JTextField("first value", 10);
-        first.setName("Duplicate field");
-        JTextField second = new JTextField("second value", 10);
-        second.setName("Duplicate field");
-        JButton button = new JButton("Ordinary button");
-        button.setName("Ordinary button");
+        // A text field rather than a label, for a reason the first end-to-end run taught: a
+        // text component's text is the one thing this project has already proven it can read,
+        // and a label's is not. Its accessible name will be its content, which is the rule that
+        // makes java_set_text rename what it types into -- here it is the *evidence*.
+        final JTextField status = new JTextField("nothing clicked yet", 22);
+        status.setName("Status field");
+        status.setEditable(false);
+
+        JButton first = new JButton("Duplicate button");
+        first.setName("Duplicate button");
+        first.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                status.setText("clicked the first one");
+            }
+        });
+
+        JButton second = new JButton("Duplicate button");
+        second.setName("Duplicate button");
+        second.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                status.setText("clicked the second one");
+            }
+        });
+
+        JButton ordinary = new JButton("Ordinary button");
+        ordinary.setName("Ordinary button");
 
         controls.add(first);
         controls.add(second);
-        controls.add(button);
+        controls.add(ordinary);
+        controls.add(status);
         frame.add(controls, BorderLayout.SOUTH);
 
         frame.pack();
