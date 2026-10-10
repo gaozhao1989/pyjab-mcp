@@ -49,6 +49,8 @@ class FakeBackend:
         texts: Optional[Dict[str, Any]] = None,
         table_readings: Optional[Dict[str, Any]] = None,
         act_error: Optional[BaseException] = None,
+        screenshots: Optional[Dict[Any, bytes]] = None,
+        keys_error: Optional[BaseException] = None,
     ) -> None:
         self.owner = threading.get_ident()
         self.windows = list(windows)
@@ -78,6 +80,12 @@ class FakeBackend:
         self.texts = dict(texts or {})
         #: ``locator -> TableReading``.
         self.table_readings = dict(table_readings or {})
+        #: ``locator | None -> PNG bytes``.
+        self.screenshots = dict(screenshots or {})
+        self.screenshot_calls = 0
+        #: Every chord a tool call sent, in order.
+        self.keys_sent: "list[str]" = []
+        self.keys_error = keys_error
 
     def bind(self, owner: int) -> "FakeBackend":
         """Declare which thread owns this backend.
@@ -190,6 +198,21 @@ class FakeBackend:
                 "java_snapshot or java_get_element will show what it is."
             )
         return reading
+
+    def screenshot(self, window_id: str, locator: Any = None, expected: Any = None) -> bytes:
+        self._check("screenshot")
+        self.screenshot_calls += 1
+        if locator is not None and locator not in self.locators:
+            from pyjab_mcp.backend import PyjabUnavailable
+
+            raise PyjabUnavailable(f"the locator {locator!r} no longer resolves")
+        return self.screenshots.get(locator, b"\x89PNG\r\n\x1a\n fake")
+
+    def send_keys(self, window_id: str, keys: str) -> None:
+        self._check("send_keys")
+        self.keys_sent.append(keys)
+        if self.keys_error is not None:
+            raise self.keys_error
 
     def close(self) -> None:
         self._check("close")

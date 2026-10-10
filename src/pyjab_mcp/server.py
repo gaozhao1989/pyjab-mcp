@@ -1054,30 +1054,66 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
         annotations=ToolAnnotations(destructive_hint=True, open_world_hint=True),
     )
     async def java_send_keys(session_id: str, keys: str) -> str:
-        """Send a keyboard shortcut such as ``alt+y`` — **not available yet**.
+        """Send a keyboard shortcut — ``alt+y``, ``ctrl+shift+s`` — to the window.
 
-        It is here rather than absent so the answer is a reason: pyjab 1.9.0 has key helpers
-        and every one of them is private (``Win32Utils._press_key``, ``_send_keys``, ...), and
-        ``send_text`` types *text*, so it cannot express a modifier chord. Reaching for the
-        private helpers would mean depending on method names nobody promised, in the one area
-        where the wrong key does something irreversible to the application.
+        Use it for an action the application only exposes as a chord: a menu accelerator, a
+        toolbar shortcut, a keystroke a canvas-drawn control listens for.
 
-        What to do instead: for plain text use java_set_text, which is what a text field
-        wants. For a shortcut, the application usually exposes the same action as a menu item
-        — find it with java_find(role="menu item") and use java_click.
+        **Nothing is focused and nothing is clicked.** The chord goes to whichever window
+        currently has the keyboard focus — normally the attached one, because attaching
+        brought it forward. That is deliberate on pyjab's side: clicking a control to focus
+        its window would activate that control, and a shortcut usually exists to avoid
+        exactly that. If a call seems to do nothing, the window probably does not have focus;
+        `java_click` something harmless in it first, or use `java_wait_for` to watch for the
+        result.
+
+        Chords are written with `+` between key names and are case-insensitive:
+        `ctrl`, `alt`, `shift`, `tab`, `enter`, `escape`, `spacebar`, the arrow keys, and
+        single letters or digits. A name that is not a key is an error rather than a silent
+        no-op — a wrong chord acts on somebody else's application and cannot be taken back.
+
+        Whether this works depends on the pyjab you have installed: the API was written and
+        merged upstream (gaozhao1989/pyjab#168) after 1.10.0, which is the newest release on
+        PyPI. It is probed rather than assumed, so the release that carries it makes this tool
+        work with no change here; until then it answers with the requirement.
 
         Args:
             session_id: From java_attach_window.
-            keys: The chord that was asked for, reported back in the error.
+            keys: The chord, such as "alt+y".
+
+        Returns:
+            What was sent, and the reminder that a shortcut's effect has to be looked for —
+            this tool cannot see what the application did with it.
 
         Errors:
-            Always ``is_error``, with the requirement this is waiting on.
+            ``is_error`` for an unknown session, a chord whose key names pyjab does not
+            recognise (with the name it did not recognise), or a pyjab without the API —
+            which names the requirement and what to do instead.
         """
-        raise ToolError(
-            f"{PyjabApiGap(requirement('send_keys'))}\n"
-            "For plain text, java_set_text works and goes through the accessibility action. "
-            "For a shortcut, the application usually exposes the same action as a menu item: "
-            'find it with java_find(role="menu item") and use java_click.'
+        try:
+            bridge = await state.started_bridge()
+            attached = state.session(session_id)
+            await bridge.call_backend("send_keys", attached.window_id, keys)
+        except PyjabApiGap as exc:
+            raise ToolError(
+                f"{exc}\n"
+                "For plain text, java_set_text works and goes through the accessibility "
+                "action. For a shortcut, the application usually exposes the same action as "
+                'a menu item: find it with java_find(role="menu item") and use java_click.'
+            ) from exc
+        except ValueError as exc:
+            # pyjab validates the chord and raises rather than doing nothing, on purpose.
+            raise ToolError(
+                f"{exc}\n"
+                "Write a chord with the keys separated by '+': 'alt+y', 'ctrl+shift+s'. "
+                "Names are case-insensitive and come from pyjab's virtual-key table."
+            ) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise _tool_error(exc) from exc
+        return (
+            f"Sent {keys!r} to the focused window. Nothing is focused for you, so if the "
+            "application did not react, give the window focus first. Check the result with "
+            "java_get_text, java_snapshot or java_wait_for."
         )
 
     # -----------------------------------------------------------------------------
