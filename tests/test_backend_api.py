@@ -316,3 +316,42 @@ def test_a_windows_only_api_off_windows_is_an_environment_answer(monkeypatch):
         PyjabBackend().java_windows()
 
     assert "Windows-only" in str(caught.value)
+
+
+def test_a_chord_goes_to_the_driver_when_pyjab_has_the_api():
+    from pyjab_mcp.backend import send_keys_driver
+    from tests._fakedriver import FakeDriver
+
+    driver = FakeDriver()
+
+    send_keys_driver(driver, "alt+y")
+
+    assert driver.keys_sent == ["alt+y"]
+
+
+def test_the_gap_is_reported_when_pyjab_has_no_public_send_keys():
+    """The probe, not a version comparison: an older pyjab gets the requirement."""
+    from pyjab_mcp.backend import PyjabApiGap, send_keys_driver
+    from tests._fakedriver import FakeDriver
+
+    class WithoutIt(FakeDriver):
+        send_keys = None
+
+    with pytest.raises(PyjabApiGap) as caught:
+        send_keys_driver(WithoutIt(), "alt+y")
+
+    assert "key sequence or shortcut" in str(caught.value)
+
+
+def test_a_chord_pyjab_does_not_recognise_is_an_error_rather_than_a_no_op():
+    """pyjab raises on purpose: a wrong chord acts on somebody else's application."""
+    from pyjab_mcp.backend import send_keys_driver
+    from tests._fakedriver import FakeDriver
+
+    driver = FakeDriver()
+
+    with pytest.raises(ValueError) as caught:
+        send_keys_driver(driver, "alt+banana")
+
+    assert "banana" in str(caught.value)
+    assert driver.keys_sent == [], "nothing was sent"

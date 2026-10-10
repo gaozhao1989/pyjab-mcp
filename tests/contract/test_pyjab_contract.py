@@ -268,3 +268,70 @@ def test_the_driver_can_detach_without_terminating_anything():
     assert list(inspect.signature(JABDriver.detach).parameters) == ["self"]
     doc = (JABDriver.detach.__doc__ or "").lower()
     assert "without terminating" in doc, "detach has to be the non-destructive one"
+
+
+
+def _driver_class():
+    """``JABDriver`` if pyjab can be imported here, otherwise ``None``.
+
+    Importing ``pyjab.jabdriver`` off Windows raises pyjab's descriptive ImportError, which is
+    a legitimate "cannot check this here" rather than a failure of the contract.
+    """
+    try:
+        from pyjab.jabdriver import JABDriver
+    except Exception:  # noqa: BLE001 - the ImportError is pyjab's own, and it is informative
+        return None
+    return JABDriver
+
+
+def test_the_driver_can_send_a_chord_when_the_release_carries_it():
+    """R4's shape, pinned before this project depends on it.
+
+    The API is on pyjab's development branch and not on PyPI (gaozhao1989/pyjab#168, closed as
+    completed on 2026-10-10). `windows-gui` installs the pin, so this skips there;
+    `.github/workflows/pyjab-drift.yml` installs `pyjab@master`, so it **runs** there -- which
+    is the whole reason to pin the shape before the release rather than after.
+
+    What is asserted is what this server relies on: the name, the single argument, and the
+    two sentences of documentation that say the chord goes to whatever has focus and that an
+    unknown key is an error. Those two are the parts a caller gets wrong.
+    """
+    driver = _driver_class()
+    if driver is None:  # pragma: no cover - needs Windows
+        pytest.skip("pyjab.jabdriver cannot be imported on this platform")
+
+    if not hasattr(driver, "send_keys"):
+        pytest.skip(
+            "this pyjab has no public send_keys; it is merged upstream and unreleased, and "
+            "the drift job (pyjab@master) is where this test is expected to run"
+        )
+
+    assert list(inspect.signature(driver.send_keys).parameters) == ["self", "keys"], (
+        "java_send_keys calls JABDriver.send_keys(keys) with exactly one argument"
+    )
+    doc = (driver.send_keys.__doc__ or "").lower()
+    assert "keyboard focus" in doc, (
+        "where the chord goes is the part this server states to users in the tool's reply, "
+        "and the part that would change silently if the implementation started focusing or "
+        "clicking something to make the shortcut work"
+    )
+
+
+def test_an_unknown_key_name_is_an_error_rather_than_a_silent_no_op():
+    """pyjab's own rule, and the reason java_send_keys can report a bad chord at all."""
+    try:
+        from pyjab.common.win32utils import Win32Utils
+    except Exception:  # noqa: BLE001 - win32utils needs Windows to import at all
+        pytest.skip("win32utils cannot be imported on this platform")
+
+    sender = getattr(Win32Utils, "send_keys", None)
+    if sender is None:  # pragma: no cover - needs the unreleased API
+        pytest.skip("this pyjab has no public send_keys yet")
+    if sys.platform != "win32":  # pragma: no cover - needs Windows
+        pytest.skip("win32utils needs Windows to construct")
+
+    with pytest.raises(ValueError):
+        Win32Utils().send_keys("alt+not_a_key")
+
+    with pytest.raises(ValueError):
+        Win32Utils().send_keys("")

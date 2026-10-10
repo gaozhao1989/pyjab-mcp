@@ -90,8 +90,9 @@ REQUIREMENTS: "tuple[Requirement, ...]" = (
             "does something irreversible to the application."
         ),
         expected_in=(
-            "a pyjab minor after 1.10.0; 1.10.0 has no public key API. Tracked as "
-            "gaozhao1989/pyjab#168"
+            "the pyjab release after 1.10.0: the API is written and merged "
+            "(gaozhao1989/pyjab#168 is closed as completed) but it is not on PyPI yet, and "
+            "this project only depends on released pyjab"
         ),
     ),
 )
@@ -351,6 +352,9 @@ class Backend(Protocol):
                    expected: Optional[Record] = None) -> bytes:
         """PNG bytes for the bound window, or for one verified element."""
 
+    def send_keys(self, window_id: str, keys: str) -> None:
+        """Send a keyboard chord to whichever window has the keyboard focus."""
+
     def close(self) -> None:
         """Release what this backend holds, without touching the applications it observes."""
 
@@ -554,6 +558,10 @@ class PyjabBackend:
         return screenshot_driver(
             self._driver(window_id), locator=locator, expected=expected
         )
+
+    def send_keys(self, window_id: str, keys: str) -> None:
+        """Send a keyboard chord.  See :func:`send_keys_driver`."""
+        return send_keys_driver(self._driver(window_id), keys)
 
     def close(self) -> None:
         """Detach every bound window, releasing its JAB reference and leaving it running.
@@ -857,6 +865,34 @@ def act_driver(driver: Any, locator: str, expected: Record, action: str, *,
             element.select_row(row=row)
         else:  # pragma: no cover - the tools only pass the names above
             raise ValueError(f"unknown action {action!r}")
+
+
+def send_keys_driver(driver: Any, keys: str) -> None:
+    """Send a keyboard chord -- ``alt+y`` -- to whichever window has the keyboard focus.
+
+    pyjab 1.10.0 has no public way to do this, and pyjab's development branch has had one
+    since gaozhao1989/pyjab#168 closed: ``JABDriver.send_keys(keys)`` (and the same on
+    ``JABElement`` and ``Win32Utils``). It is not on PyPI, and this project depends only on
+    released pyjab -- so the call is **probed rather than assumed**, exactly like the window
+    listing and ``detach()`` before their releases. When the attribute is absent the
+    requirement is reported instead, which is the honest answer rather than a private import.
+
+    Two things about the semantics belong in this docstring, because they are what a caller
+    gets wrong:
+
+    * **Nothing is focused and nothing is clicked.** The chord goes to whatever currently has
+      the keyboard focus, which is normally the attached window because attaching brought it
+      forward. pyjab's own note says why it is built that way: clicking a control to focus its
+      window would activate that control, and avoiding that is usually the whole point of a
+      shortcut.
+    * **An unknown key name raises ``ValueError``** rather than doing nothing. That is
+      deliberate on pyjab's side -- a shortcut that silently does nothing, or sends the wrong
+      key, acts on somebody else's application and cannot be taken back.
+    """
+    send = getattr(driver, "send_keys", None)
+    if send is None:
+        raise PyjabApiGap(requirement("send_keys"))
+    send(keys)
 
 
 def screenshot_driver(driver: Any, *, locator: Optional[str] = None,

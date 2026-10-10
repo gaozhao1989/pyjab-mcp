@@ -135,7 +135,7 @@ is not, or registered without being documented.
 | observe | `java_find`, `java_get_element`, `java_get_text` | M3 |
 | observe | `java_get_table` | M4 |
 | act | `java_click`, `java_set_text`, `java_select`, `java_fill_form` | M5 |
-| act | `java_send_keys` | M5, blocked on requirement R4 — it answers with the reason rather than pretending `send_text` is a shortcut sender |
+| act | `java_send_keys` | M5 — sends a chord where pyjab provides one, probed rather than assumed, and answers with requirement R4 where it does not |
 | wait | `java_wait_for` | M6 |
 | observe | `java_screenshot` | M6 |
 
@@ -161,9 +161,12 @@ rather than an error, because "not yet" is something an agent can act on. The tw
 listing comes from the bridge, with pyjab's documented `pyjab-inspect windows --json` left as
 the fallback for an install below the pin — and `JABDriver.detach()` releases a window
 **without terminating its process**, which is what lets a session end without killing the
-application it was observing. One gap is still recorded rather than worked around: there is no
-public API for a key sequence, so `java_send_keys` answers with the requirement, the version
-expected to close it, and the issue tracking it, instead of reaching for a private helper.
+application it was observing. One gap is still recorded rather than worked around, and it is now a
+*release* gap rather than a missing API: there is no public way to send a key sequence in any
+**released** pyjab, so `java_send_keys` probes for `JABDriver.send_keys` and answers with the
+requirement when it is absent — the API is written and merged upstream
+(gaozhao1989/pyjab#168) and will make the tool work with no change here. The probe is the same
+mechanism that made the window listing and `detach()` start working the day 1.10.0 landed.
 
 `java_snapshot` reads a bounded part of the tree — pyjab 1.9.0's `JABElement.walk`, which
 releases every JAB reference as it advances — and gives each rendered element a handle.

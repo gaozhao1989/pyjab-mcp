@@ -206,6 +206,13 @@ class FakeTree:
 
 
 class FakeDriver:
+    #: The names pyjab's virtual-key table has, near enough for a fake that raises on the
+    #: same input the real one raises on.
+    VIRTUAL_KEYS = frozenset({
+        "ctrl", "alt", "shift", "tab", "enter", "escape", "spacebar", "left_arrow",
+        "right_arrow", "up_arrow", "down_arrow",
+    }) | frozenset("abcdefghijklmnopqrstuvwxyz0123456789")
+
     """A stand-in for ``JABDriver`` with a reference count.
 
     Args:
@@ -248,6 +255,8 @@ class FakeDriver:
         #: Every action a test caused, in order, with what it was asked for.
         self.actions: List[Dict[str, Any]] = []
         self.detached = False
+        #: Every chord a test caused, in order.
+        self.keys_sent: List[str] = []
         self.outstanding = 0
         self.handed_out = 0
         self.walk_calls: List[Dict[str, Any]] = []
@@ -327,6 +336,20 @@ class FakeDriver:
         return element
 
     # -- what PyjabBackend.detach uses ------------------------------------------------
+
+    def send_keys(self, keys: str) -> None:
+        """pyjab's ``JABDriver.send_keys``: the chord goes to whatever has focus.
+
+        No element is involved and nothing is clicked, which is why this is on the driver and
+        not on the element: pyjab puts the primitive on all three, and this server calls the
+        driver's because ``java_send_keys`` takes no element.
+        """
+        if not keys or not keys.strip():
+            raise ValueError("send_keys() needs a key or a chord, such as 'alt+y'")
+        unknown = [name for name in keys.split("+") if name.lower() not in self.VIRTUAL_KEYS]
+        if unknown:
+            raise ValueError(f"unknown key name(s) {unknown} in {keys!r}")
+        self.keys_sent.append(keys)
 
     def detach(self) -> None:
         """pyjab's ``JABDriver.detach``: release the binding, leave the process alone.

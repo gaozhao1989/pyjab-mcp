@@ -21,9 +21,11 @@ which is what makes this usable against a production Java client that you cannot
 brought the tree walk a snapshot is built on, and 1.10.0 brought the public window listing and
 `JABDriver.detach()`, which is what lets a session end without terminating the application.
 
-`java_send_keys` exists but always reports the requirement it is waiting on: pyjab has no
-public way to send a key sequence, and pretending `send_text` is one would be a lie for
-`alt+y`. The reply says what to do instead.
+`java_send_keys` sends a chord where the installed pyjab provides one, and reports the
+requirement where it does not: no **released** pyjab can send `alt+y` yet — the API is written
+and merged upstream (`pyjab#168`) — and the tool probes for it rather than assuming, so the
+release that carries it makes the tool work with no change here. Until then the reply says
+what to do instead.
 
 **Two elements can share a name**, which is why a handle carries where an element *is* as well as
 what it is called: searching by name returns every match, each gets its own handle, and the

@@ -166,6 +166,18 @@ SURFACE: Dict[Touchpoint, Entry] = {
         "the point: its bridge_without_window() helper is what R1 needs and is not in the "
         "module's __all__.",
     ),
+    ("pyjab.jabdriver", "JABDriver.send_keys"): Entry(
+        UNRELEASED, "",
+        "Probed with getattr and called only when it is there: the public chord primitive "
+        "this project asked for as R4, written and merged in gaozhao1989/pyjab#168 (closed "
+        "as completed on 2026-10-10) but **not on PyPI** -- and this project depends only on "
+        "released pyjab. JABDriver.send_keys(keys), JABElement.send_keys(keys) and "
+        "Win32Utils.send_keys(keys) all exist on pyjab's development branch; the driver form "
+        "is the one this server calls, because java_send_keys takes no element. The day it is "
+        "released, java_send_keys starts working with no change here -- which is the whole "
+        "reason the call site probes instead of raising the requirement unconditionally. "
+        "See backend.REQUIREMENTS key 'send_keys'.",
+    ),
     ("pyjab.jabdriver", "JABDriver.detach"): Entry(
         PUBLIC, "1.10.0",
         "Releases the root element's JAB reference and forgets the window, **without "

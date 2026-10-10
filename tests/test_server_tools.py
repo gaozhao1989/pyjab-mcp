@@ -677,8 +677,27 @@ async def test_fill_form_needs_at_least_one_field():
     assert "at least one field" in str(caught.value)
 
 
-async def test_send_keys_answers_with_the_requirement_it_is_waiting_on():
-    server, _state, _backend, session_id, _handle = await acting_server()
+async def test_send_keys_sends_the_chord_when_pyjab_provides_the_api():
+    """The point of #15: the tool has to start working on the release that answers R4."""
+    server, _state, backend, session_id, _handle = await acting_server()
+
+    result = await server.call_tool(
+        "java_send_keys", {"session_id": session_id, "keys": "alt+y"}
+    )
+
+    assert result.is_error is False
+    assert backend.keys_sent == ["alt+y"]
+    text = await text_of(result)
+    assert "Nothing is focused for you" in text, (
+        "the focus semantics are the part a caller gets wrong, so the reply states them"
+    )
+
+
+async def test_send_keys_answers_with_the_requirement_when_the_api_is_absent():
+    """An older pyjab: the probe finds nothing and the requirement is the answer."""
+    server, _state, _backend, session_id, _handle = await acting_server(
+        keys_error=PyjabApiGap(requirement("send_keys")),
+    )
 
     with pytest.raises(ToolError) as caught:
         await server.call_tool(
@@ -688,8 +707,27 @@ async def test_send_keys_answers_with_the_requirement_it_is_waiting_on():
     message = str(caught.value)
     assert "pyjab does not provide" in message
     assert "key sequence or shortcut" in message
-    assert "gaozhao1989/pyjab#168" in message, "the reply says where it is tracked"
     assert "java_set_text" in message, "it should also say what to do instead"
+
+
+async def test_a_chord_the_installed_pyjab_does_not_recognise_is_an_input_error():
+    """pyjab raises ValueError rather than sending nothing, and the reply says how to write one."""
+    server, _state, backend, session_id, _handle = await acting_server(
+        keys_error=ValueError("unknown key name(s) ['banana'] in 'alt+banana'"),
+    )
+
+    with pytest.raises(ToolError) as caught:
+        await server.call_tool(
+            "java_send_keys", {"session_id": session_id, "keys": "alt+banana"}
+        )
+
+    message = str(caught.value)
+    assert "banana" in message, "the name it did not recognise is the useful part"
+    assert "separated by '+'" in message, "and how to write a chord instead"
+    assert "java_diagnostics" not in message, (
+        "this is an argument problem, not an environment one, so the environment hint would "
+        "send the reader the wrong way"
+    )
 
 
 async def test_an_unexpected_failure_still_tells_the_model_what_to_do():
@@ -703,3 +741,38 @@ async def test_an_unexpected_failure_still_tells_the_model_what_to_do():
 
     assert "FileNotFoundError" in str(error), "the original failure is not hidden"
     assert "java_diagnostics" in str(error), "and the model is told where to look next"
+
+
+async def test_screenshot_returns_an_image_block_and_nothing_else():
+    """Found by accident, and worth a test: the fake backend had no ``screenshot`` at all.
+
+    Nothing noticed, because java_screenshot was only ever exercised at L3. A tool with no
+    tool-level test is a tool whose plumbing nobody checks -- `call_backend("screenshot")`
+    resolves the method by name, so a typo or a missing method is a runtime AttributeError.
+    """
+    server, _state, backend, session_id = await attached_server(
+        matches={}, screenshots={None: b"\x89PNG\r\n\x1a\n a whole window"},
+    )
+
+    result = await server.call_tool("java_screenshot", {"session_id": session_id})
+
+    assert result.is_error is False
+    assert backend.screenshot_calls == 1
+    types = [part.type for part in result.content]
+    assert types == ["image"], f"the reply is the image and nothing else: {types}"
+    import base64
+
+    assert base64.b64decode(result.content[0].data)[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+async def test_a_screenshot_of_nothing_is_reported_rather_than_returned_empty():
+    """An empty PNG would look like a black window; saying so is the honest answer."""
+    server, _state, _backend, session_id = await attached_server(
+        matches={}, screenshots={None: b""},
+    )
+
+    with pytest.raises(ToolError) as caught:
+        await server.call_tool("java_screenshot", {"session_id": session_id})
+
+    assert "came back empty" in str(caught.value)
+    assert "java_get_element" in str(caught.value), "and where to look at what it does report"
