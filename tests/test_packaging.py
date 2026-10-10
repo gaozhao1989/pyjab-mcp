@@ -1,10 +1,10 @@
-"""What can be checked before there is anything to check.
+"""What can be checked about the package itself, on any machine.
 
-The server does not exist yet, so these assert the things that are already true and would
-be expensive to discover later: that the package imports anywhere, that the entry point
-names something real, and that no module has started importing pyjab at module scope.
+These assert the things that are cheap to check and expensive to discover late: that the
+package imports anywhere, that the entry point names something real, that no module has
+started importing pyjab at module scope, and that local-only files stay local.
 
-That last one is not hypothetical. ``pyjab`` raises ``ImportError`` off Windows by design,
+The pyjab one is not hypothetical. ``pyjab`` raises ``ImportError`` off Windows by design,
 so a module-scope import here would make this package unimportable on every non-Windows
 machine -- including the ones that only run the tests.
 """
@@ -28,7 +28,7 @@ def modules():
 
 def test_the_package_imports_and_has_a_version():
     assert pyjab_mcp.__version__
-    assert pyjab_mcp.__version__ != "0.0.0" or "not released"  # placeholder until 0.1.0
+    assert pyjab_mcp.__version__ != "0.0.0"
 
 
 def test_there_is_something_to_check():
@@ -55,17 +55,40 @@ def test_nothing_imports_pyjab_at_module_scope(path):
     )
 
 
-def test_the_entry_point_points_at_something_that_exists(tmp_path):
+def test_every_package_module_is_reachable_without_windows():
+    """Import them all: a Windows-only import at module scope would fail here first."""
+    import importlib
+
+    for path in modules():
+        name = path.stem
+        if name == "__init__":
+            continue
+        importlib.import_module(f"pyjab_mcp.{name}")
+
+
+def test_the_entry_point_points_at_something_that_exists():
     """A console script naming a missing module fails at install, not at import."""
     text = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert 'pyjab-mcp = "pyjab_mcp.__main__:main"' in text
 
-    # The target is allowed not to exist yet -- the skeleton declares the entry point
-    # before the server -- but that has to be a decision with a date on it, not an
-    # accident. This test is the reminder.
-    target = PACKAGE / "__main__.py"
-    if not target.exists():
-        pytest.xfail(
-            "pyjab_mcp.__main__ does not exist yet, so the console script would not run. "
-            "Expected during M1 skeleton work; remove this xfail then."
-        )
+    # M1 shipped __main__.py, so this is now a real assertion rather than the xfail the
+    # skeleton carried while the entry point existed before the server did.
+    assert (PACKAGE / "__main__.py").is_file()
+
+
+def test_local_only_files_are_kept_out_of_git_and_out_of_the_sdist():
+    """Two mechanisms, and both are needed: an sdist is built from the working tree.
+
+    ``.gitignore`` does not protect an sdist, so a note that is ignored by git and not
+    pruned by ``MANIFEST.in`` is published by the next ``python -m build``. That is pyjab's
+    reasoning, and it has already gone wrong there once.
+    """
+    gitignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+    manifest = (REPO_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+
+    for ignored in ("AGENTS.md", "docs/PLAN.md", "docs/DESIGN.md"):
+        assert ignored in gitignore, f"{ignored} is a maintainer note and must stay local"
+        assert f"exclude {ignored}" in manifest, f"{ignored} is not excluded from the sdist"
+
+    assert "/.agents/" in gitignore, "the local skills must not be versioned"
+    assert "prune .agents" in manifest, "the local skills must not be published in an sdist"

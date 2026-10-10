@@ -114,6 +114,13 @@ the model's tool selection for no gain.
 through the JVM's own `AccessibleTable` interface, with paging, rather than through a
 platform bridge that does not carry that information.
 
+**Status.** M1 ships the diagnostics and session groups: `java_diagnostics` works today, and
+`java_list_windows` / `java_attach_window` are wired but answer with a requirement instead
+of a window list, because released pyjab (1.8.0) has no public way to arm a bridge without
+binding an application window. That is one of three recorded pyjab-side requirements, and
+the report is deliberate — the alternative is importing a private name and depending on
+behaviour nobody promised. `README.md` states the user-facing consequence.
+
 ## Verification
 
 | layer | runs where | can it drive a live application? |

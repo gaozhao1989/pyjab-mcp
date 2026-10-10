@@ -1,5 +1,6 @@
 include LICENSE
 include README.md
+include CHANGELOG.md
 include pyproject.toml
 recursive-include src *.py
 recursive-include tests *.py
@@ -15,3 +16,8 @@ include docs/ARCHITECTURE.md
 exclude AGENTS.md
 exclude docs/PLAN.md
 exclude docs/DESIGN.md
+
+# The local agent configuration -- the skills that describe how this checkout is worked
+# on, and the same reasoning as above. Pruned by directory rather than by file, so a new
+# skill cannot be forgotten here.
+prune .agents
