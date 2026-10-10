@@ -158,8 +158,9 @@ tagged commit, no release — see
 1. **Bump the version, write the changelog entry, and open a pull request.** The bump is
    reviewed like anything else, and **CI has to be green before it merges**.
 2. **Dispatch L3 on the merged commit, and wait for it to be green.** It is the only layer that
-   can say a live window still works, the job is `workflow_dispatch`-only, and the pipeline now
-   requires a successful run on the commit being tagged:
+   can say a live window still works; the job runs when dispatched by hand or on its weekly
+   schedule and never on a push, so a green default CI run says nothing about a live window. The
+   pipeline now requires a successful run on the commit being tagged:
 
    ```console
    gh workflow run windows-gui.yml -f java=17
@@ -334,10 +335,11 @@ Access Bridge enabled, and that the server attaches to an application that is al
 * **Aggregator listings** (LobeHub, PulseMCP, Smithery, mcp.so). They pull from the official
   registry; a submission is a form on somebody else's site.
 * **Dispatching L3.** `tests/e2e` and the `windows-gui.yml` job are the only things that can
-  prove a live window still works, and the job is `workflow_dispatch`-only — it runs when
-  somebody asks, and never by itself. The pipeline then *requires* the result: `verify` fails when
-  the tagged commit has no successful `windows-gui.yml` run, so a forgotten dispatch is a refused
-  release rather than an unverified one:
+  prove a live window still works. The job runs weekly on its own schedule and can be dispatched
+  by hand, but nothing in the release pipeline starts it and its schedule is not on demand: the
+  pipeline *requires* the result — `verify` fails when the tagged commit has no successful
+  `windows-gui.yml` run — so a forgotten dispatch is a refused release rather than an unverified
+  one:
 
   ```console
   gh workflow run windows-gui.yml -f java=17
