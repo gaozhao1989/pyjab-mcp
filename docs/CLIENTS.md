@@ -68,10 +68,14 @@ Claude starts it with the `python` on your `PATH`.
 Two things the bundle does not change, and both are why it is worth reading this before
 installing it:
 
-* **The requirements in "Before you connect anything" are still the requirements.** No Python
-  interpreter and no JDK is inside the file. Windows, a 64-bit Python 3.10 or newer, a JDK with
-  Java Access Bridge enabled, and a Java application that is already running are all still
-  needed — the bundle removes the *dependency management*, not the environment.
+* **The requirements in "Before you connect anything" are still the requirements, and one of
+  them is narrower here.** No Python interpreter and no JDK is inside the file. Windows, a
+  64-bit **CPython 3.10-3.13**, a JDK with Java Access Bridge enabled, and a Java application
+  that is already running are all still needed — the bundle removes the *dependency management*,
+  not the environment. The bundle is narrower than `pip install`, which has no upper bound,
+  because its compiled dependencies ship one wheel per CPython minor and it carries a tree per
+  supported minor. On any other interpreter it stops with a sentence naming the interpreter it
+  found and the ones the file carries, instead of failing inside a native import.
 * **MCPB enforces no permissions.** There is no manifest-level sandbox: the bundled server runs
   with the full privileges of the user who installed it, exactly as `pyjab-mcp.exe` would.
   Read the source before installing a bundle from anyone, this one included.

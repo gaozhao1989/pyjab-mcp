@@ -70,12 +70,15 @@ under **Unreleased** until it is tagged.
   bundle. A new `mcpb` job builds it from the release's own wheel and attaches it with
   `gh release upload`; on `workflow_dispatch` the same job builds and validates the bundle and
   keeps it as a workflow artifact, because a job that can only run on a tag is a job nobody can
-  verify. It does **not** bundle a Python interpreter: Windows, a 64-bit Python 3.10 or newer and
+  verify. It does **not** bundle a Python interpreter: Windows, a 64-bit **CPython 3.10-3.13** and
   a JDK with Java Access Bridge enabled are still required — the bundle vendors the dependency
   tree for every supported CPython minor, because `pydantic-core`, `cffi`, `rpds-py` and
-  `pywin32` ship per-interpreter wheels — and MCPB enforces no permissions, so the server runs
-  with the full privileges of the user who installed it. `README.md`, `docs/CLIENTS.md` and
-  `docs/RELEASING.md` say so where a user reads it.
+  `pywin32` ship per-interpreter wheels, and it says so in its own manifest rather than claiming
+  "3.10 or newer" — and MCPB enforces no permissions, so the server runs with the full privileges
+  of the user who installed it. `README.md`, `docs/CLIENTS.md` and `docs/RELEASING.md` say so
+  where a user reads it, and on an interpreter the bundle carries nothing for, `mcpb/entry.py`
+  stops with a sentence naming what it found and what the file holds instead of letting an
+  `ImportError` out of a native module name a DLL.
 
 
 ## [0.1.2] - 2026-10-10

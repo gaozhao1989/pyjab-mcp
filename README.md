@@ -111,14 +111,16 @@ from the [releases page](https://github.com/gaozhao1989/pyjab-mcp/releases) and 
 client: Claude Desktop installs a `.mcpb` by opening it, and
 [docs/CLIENTS.md](docs/CLIENTS.md) has the details.
 
-**The bundle changes none of the requirements above.** It carries no Python interpreter, and it
-cannot carry a JDK: this server drives Java Access Bridge, so **64-bit Windows, a 64-bit Python
-3.10 or newer, and a JDK with Java Access Bridge enabled** are still what the machine has to
-provide — and the Java application it drives still has to be running before you attach to it.
-It is tens of megabytes because it holds the dependency tree for every CPython minor
-`pyproject.toml` declares: `pydantic-core`, `cffi`, `rpds-py` and `pywin32` ship compiled
-wheels tagged for one minor version each, so a bundle vendored for a single interpreter would
-fail inside a native import on another.
+**The bundle changes none of the requirements above, and it narrows one of them to the
+interpreters it actually carries.** It bundles no Python interpreter and no JDK: this server
+drives Java Access Bridge, so **64-bit Windows, 64-bit CPython 3.10-3.13, and a JDK with Java
+Access Bridge enabled** are still what the machine has to provide — and the Java application it
+drives still has to be running before you attach to it. That range is narrower than `pip
+install`, which has no upper bound, and it is not a detail: the bundle is tens of megabytes
+because it carries one dependency tree **per supported minor**, since `pydantic-core`, `cffi`,
+`rpds-py`, `cryptography` and `pywin32` ship compiled wheels tagged for one minor each. Started
+on any other interpreter it stops with a sentence naming the interpreter it found and the ones
+the file carries, rather than an `ImportError` from a native module.
 
 **MCPB enforces no permissions.** There is no manifest-level sandbox — a bundled server runs
 with the full privileges of the user who installed it, exactly as it would if you had started

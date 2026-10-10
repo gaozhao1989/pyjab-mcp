@@ -310,10 +310,27 @@ def bundle_manifest(bundle: Path):
         return json.loads(archive.read(BUNDLE_MANIFEST).decode("utf-8"))
 
 
-def loaded_entry_script(tmp_path, source: str):
-    """Import the entry script *as the bundle ships it*, without starting the server."""
-    path = tmp_path / "bundled-entry.py"
-    path.write_text(source, encoding="utf-8")
+def vendored_tags(bundle: Path):
+    """The ``cp3XX`` trees the zip actually carries, read out of the archive."""
+    return sorted({
+        member.split("/")[2]
+        for member in bundle_members(bundle)
+        if member.startswith("server/vendor/cp") and member.count("/") >= 3
+    })
+
+
+def unpacked_entry_script(bundle: Path, tmp_path):
+    """Unpack the bundle's ``server/`` tree and import the entry script from *there*.
+
+    From there rather than from the repository, because the script addresses its vendored tree
+    relative to its own file: a copy in a scratch directory would look for ``vendor/`` in that
+    directory and find nothing, which is a different question from the one being asked.
+    """
+    with zipfile.ZipFile(bundle) as archive:
+        for member in archive.namelist():
+            if member.startswith("server/"):
+                archive.extract(member, tmp_path)
+    path = tmp_path / "server" / "entry.py"
     spec = importlib.util.spec_from_file_location("bundled_entry", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -363,10 +380,7 @@ def test_the_entry_script_looks_where_the_packer_vendored(bundle, tmp_path):
     packer installs into a directory of its own naming. If they disagree the bundle fails
     inside a native import on the user's machine, which is the failure hardest to read.
     """
-    with zipfile.ZipFile(bundle) as archive:
-        source = archive.read(BUNDLE_ENTRY).decode("utf-8")
-    entry = loaded_entry_script(tmp_path, source)
-
+    entry = unpacked_entry_script(bundle, tmp_path)
     vendored = "server/" + entry.vendor_name().replace(os.sep, "/")
     members = bundle_members(bundle)
     inside = sorted(member for member in members if member.startswith(vendored + "/"))
@@ -467,7 +481,7 @@ def test_the_manifest_validator_refuses_a_field_the_schema_does_not_document(tmp
     """`additionalProperties: false` means an invented field is a refusal, not a warning."""
     import tools.build_mcpb as packer
 
-    document = packer.manifest(pyjab_mcp.__version__)
+    document = packer.manifest(pyjab_mcp.__version__, packer.supported_python_versions())
     document["permissions"] = {"filesystem": "read"}
 
     problems = packer.check_manifest(document)
@@ -479,10 +493,123 @@ def test_the_manifest_validator_refuses_a_manifest_missing_a_required_field():
     """Every field the schema requires has to be present, `author` and `server` included."""
     import tools.build_mcpb as packer
 
-    document = packer.manifest(pyjab_mcp.__version__)
+    document = packer.manifest(pyjab_mcp.__version__, packer.supported_python_versions())
     del document["author"]
 
     problems = packer.check_manifest(document)
 
     assert any("MISSING FIELD: author" in problem for problem in problems), problems
+
+
+# ---------------------------------------------------------------------------------
+# What the bundle claims about Python, against what it carries
+# ---------------------------------------------------------------------------------
+#
+# The failure this closes is not a red test anywhere else: a bundle that advertises "3.10 or
+# newer" while carrying trees for 3.10-3.13 installs happily on 3.14 and then dies inside a
+# native import, where the message names a DLL. The declared range is therefore read out of the
+# *built* manifest and compared with the directories in the *built* zip -- the claim and the
+# artefact, in both directions -- rather than with anything the packer says about itself.
+
+#: The manifest's list of the minors it carries: a parenthesised, comma-separated run of version
+#: numbers. Anchored on that shape rather than on a sentence, so the prose around it is free.
+DECLARED_MINORS = re.compile(r"\((\d+\.\d+(?:,\s*\d+\.\d+)+)\)")
+
+
+@pytest.fixture(scope="module")
+def declared_bundle(tmp_path_factory):
+    """A bundle vendored for exactly the minors `pyproject.toml` declares -- the release shape.
+
+    Separate from `bundle` above, which vendors for the interpreter running the tests so the
+    entry script and the packer can be checked against each other on any machine. This one is
+    what a release produces, and it is the only one whose declared range can be compared with
+    the project's own claim.
+    """
+    import tools.build_mcpb as packer
+
+    root = tmp_path_factory.mktemp("mcpb-declared")
+    dist = root / "dist"
+    _stub_wheel(dist)
+    out = root / "out"
+
+    result = subprocess.run(
+        [sys.executable, str(PACKER),
+         "--dist", str(dist), "--out", str(out),
+         "--python-versions", ",".join(packer.supported_python_versions()),
+         "--skip-dependencies"],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=900,
+    )
+    assert result.returncode == 0, (
+        f"the packer exited {result.returncode}:\n{result.stdout}\n{result.stderr}"
+    )
+    return out / f"pyjab-mcp-{pyjab_mcp.__version__}.mcpb"
+
+
+def test_the_bundles_declared_python_support_is_what_it_vendors(declared_bundle):
+    """The manifest's range and the zip's trees are one fact, and the docs agree with both."""
+    import tools.build_mcpb as packer
+
+    document = bundle_manifest(declared_bundle)
+    described = document["long_description"]
+
+    matches = DECLARED_MINORS.findall(described)
+    assert len(matches) == 1, (
+        "the manifest no longer carries exactly one explicit list of the CPython minors it "
+        f"vendors for, so the claim cannot be compared with the artifact: {matches!r}"
+    )
+    declared = [text.strip() for text in matches[0].split(",")]
+    carried = ["%s.%s" % (tag[2], tag[3:]) for tag in vendored_tags(declared_bundle)]
+
+    assert declared == carried, (
+        f"the manifest says it carries {declared} and the zip carries {carried}. A user on an "
+        "interpreter between those two meets an ImportError from a native module."
+    )
+    assert packer.supported_python_versions() == declared, (
+        "the manifest and pyproject.toml disagree about which Pythons this project supports, so "
+        "one of the two has to move"
+    )
+
+    stated = packer.python_range(declared)
+    assert stated in described, (
+        f"the manifest's prose does not state the range it carries ({stated!r}): {described!r}"
+    )
+    for page in ("README.md", "docs/CLIENTS.md"):
+        text = (REPO_ROOT / page).read_text(encoding="utf-8")
+        assert stated in text, (
+            f"{page} does not state the range the bundle covers ({stated!r}). The bundle's "
+            "prerequisites are given there, so the prose has to move with the trees."
+        )
+
+
+def test_the_entry_script_refuses_an_interpreter_the_bundle_does_not_carry(
+    bundle, tmp_path, monkeypatch, capsys
+):
+    """The refusal has to name the interpreter, the trees present, and where to go instead.
+
+    The bundle here vendors only for the interpreter running the tests, so asking it to run
+    under another one is the case a user on an un-vendored minor meets. `sys.version_info` is
+    what the shipped script reads, so that is what the test changes -- the loaded module is the
+    file out of the zip, not a copy of the repository's.
+    """
+    entry = unpacked_entry_script(bundle, tmp_path)
+    tags = vendored_tags(bundle)
+    monkeypatch.setattr(sys, "version_info", (2, 7, 18, "final", 0))
+
+    code = entry.main()
+    message = capsys.readouterr().err
+    print(message)
+
+    assert code == 2, f"the entry script did not refuse an unsupported interpreter:\n{message}"
+    assert "2.7.18" in message, "the message has to name the interpreter it found"
+    for tag in tags:
+        assert "%s.%s" % (tag[2], tag[3:]) in message, (
+            f"the message does not name {tag}, which the bundle does carry:\n{message}"
+        )
+    assert "pip install pyjab-mcp" in message, (
+        "the message has to say what to do instead, or it is a dead end"
+    )
+    assert message.count("\n") < 12, (
+        "the refusal is longer than a refusal; it belongs on stderr in front of a person "
+        "whose server just did not start"
+    )
 

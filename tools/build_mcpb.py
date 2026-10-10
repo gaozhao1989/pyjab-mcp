@@ -127,9 +127,15 @@ SCHEMA_URL = (
     "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json"
 )
 
-#: The same prose the README carries, because the host shows this where a user decides to
-#: install -- and the two honest limits (a JDK is still required, and MCPB enforces nothing)
-#: belong where that decision is made, not only in a repository document.
+#: The prose the host shows where a user decides to install -- and the two honest limits (a JDK
+#: is still required, and MCPB enforces nothing) belong where that decision is made, not only in
+#: a repository document.
+#:
+#: ``{range}`` and ``{minors}`` are filled in from the same list the vendoring loop uses. That
+#: is not tidiness: this paragraph is the only place the bundle states which interpreters it
+#: carries, and a hand-written "3.10 or newer" while the zip holds trees for 3.10-3.13 is a
+#: claim the artefact cannot keep. The user meets the difference as an ImportError from a native
+#: module, which names a DLL and not the mismatch.
 LONG_DESCRIPTION = """\
 Drive Java desktop applications from an AI agent, through the JVM's own accessibility tree
 rather than by guessing at pixels.
@@ -137,8 +143,11 @@ rather than by guessing at pixels.
 **What this needs on the machine, none of which the bundle can supply:**
 
 * **Windows 10/11** -- Java Access Bridge is a Windows API.
-* **64-bit Python 3.10 or newer** -- the bundle vendors its dependencies for each supported
-  CPython minor, but for 64-bit Windows only.
+* **64-bit CPython {range}** -- the bundle carries one dependency tree per supported minor and
+  nothing for any other interpreter. The minors are ({minors}).
+  That is not a choice: `pydantic-core`, `cffi`, `rpds-py`, `cryptography` and `pywin32`
+  ship compiled wheels tagged for one minor each, so a tree built for one cannot be imported
+  by another. The `pip install` path has no such bound.
 * **A JDK with Java Access Bridge enabled** -- `"%JAVA_HOME%\\bin\\jabswitch" -enable`.
 * **A Java application that is already running.** This server only ever attaches to
   applications it did not launch; nothing here starts or restarts your app.
@@ -150,6 +159,33 @@ hand. Read the source before installing a bundle from anyone, this one included.
 Start with the `java_diagnostics` tool: it names the part of the environment that is missing
 instead of leaving a tool call to fail.
 """
+
+
+def _minor(version: str) -> "tuple[int, int]":
+    major, minor = version.split(".")
+    return int(major), int(minor)
+
+
+def python_range(minors: Sequence[str]) -> str:
+    """``3.10-3.13`` for a contiguous run, ``3.10, 3.12`` otherwise, ``3.10`` for one.
+
+    Used for both the manifest's prose and the entry script's refusal, so the range a user reads
+    and the range the bundle enforces are the same string.
+    """
+    ordered = sorted(minors, key=_minor)
+    contiguous = all(
+        _minor(later) == (_minor(earlier)[0], _minor(earlier)[1] + 1)
+        for earlier, later in zip(ordered, ordered[1:])
+    )
+    if len(ordered) > 1 and contiguous:
+        return f"{ordered[0]}-{ordered[-1]}"
+    return ", ".join(ordered)
+
+
+def long_description(minors: Sequence[str]) -> str:
+    """The prose, with the CPython range the bundle actually carries filled in."""
+    ordered = sorted(minors, key=_minor)
+    return LONG_DESCRIPTION.format(range=python_range(ordered), minors=", ".join(ordered))
 
 
 # ---------------------------------------------------------------------------------
@@ -167,16 +203,19 @@ def package_version() -> str:
     return pyjab_mcp.__version__
 
 
-def manifest(version: str) -> Dict[str, object]:
-    """The manifest the bundle carries.
+def manifest(version: str, minors: Sequence[str]) -> Dict[str, object]:
+    """The manifest the bundle carries, for the *minors* it is being vendored for.
 
     Only fields ``references/manifest-schema.md`` documents appear here. Three documented
     fields are deliberately absent, because inventing a value for them would be a guess:
 
     * ``compatibility.claude_desktop`` -- no floor has been measured against any host;
-    * ``compatibility.runtimes`` -- the honest requirement is a Python *minor* whose vendored
-      tree is present, and whether the host parses a compound range such as ``">=3.10,<3.14"``
-      has not been verified, so the requirement is stated in ``long_description`` instead;
+    * ``compatibility.runtimes`` -- the honest requirement is a set of Python *minors* whose
+      vendored trees are present, and the compound range that would express it is not something
+      either plausible parser agrees on: Python's ``packaging`` wants ``">=3.10,<3.14"`` and
+      node-semver rejects the comma, while the host is a Node application. A range it mis-reads
+      could refuse a correct install, so the requirement is stated in ``long_description`` (a
+      manifest field) and pinned against the zip by ``tests/test_packaging.py`` instead;
     * ``tools`` / ``prompts`` -- the surface is the 15 registered tools, which
       `docs/ARCHITECTURE.md` is the record of; listing them a second time here is a second
       place for them to go stale.
@@ -191,7 +230,7 @@ def manifest(version: str) -> Dict[str, object]:
             "Drive Java desktop applications from an AI agent, through the JVM's own "
             "accessibility tree."
         ),
-        "long_description": LONG_DESCRIPTION,
+        "long_description": long_description(minors),
         "author": {
             "name": "Gary Gao",
             "email": "gaozhao89@qq.com",
@@ -540,7 +579,7 @@ def build(
         server.mkdir(parents=True)
         (server / ENTRY_SCRIPT.name).write_bytes(ENTRY_SCRIPT.read_bytes())
 
-        document = manifest(version)
+        document = manifest(version, versions)
         manifest_path = staging / "manifest.json"
         manifest_path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
 

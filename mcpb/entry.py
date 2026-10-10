@@ -10,8 +10,10 @@ Three things a bare ``sys.path.insert`` would get wrong, and what is done instea
 * **the dependencies are per interpreter.** ``pydantic-core``, ``cffi``, ``rpds-py``,
   ``cryptography`` and ``pywin32`` ship compiled extensions whose wheels are tagged for one
   CPython *minor* version, so the bundle vendors one tree per supported minor under
-  ``vendor/cp3XX`` and this picks the tree that matches the interpreter that is running. A
-  bundle that put the wrong tree on the path would not fail with a sentence -- it would fail
+  ``vendor/cp3XX`` and this picks the tree that matches the interpreter that is running. The
+  bundle therefore covers a *range* of interpreters and not "3.10 or newer", and an interpreter
+  outside it is refused with a sentence naming what was found and what is carried -- because a
+  bundle that put the wrong tree on the path would not fail with a sentence, it would fail
   inside a native import.
 * **``pip install --target`` writes ``.pth`` files, and a plain ``sys.path`` entry does not
   process them.** ``pywin32`` needs its own: the ``.pth`` adds ``win32``, ``win32/lib`` and
@@ -66,17 +68,36 @@ def vendored_interpreters() -> "list[str]":
     )
 
 
+def minor(tag: str) -> str:
+    """``cp310`` -> ``3.10``: how a person writes the interpreter a tree is for."""
+    digits = tag[2:]
+    return "%s.%s" % (digits[0], digits[1:])
+
+
+def unsupported(present: "list[str]", running=None) -> str:
+    """The sentence for an interpreter this bundle carries nothing for.
+
+    It has to name three things, because the failure it replaces names none of them: an
+    ImportError out of a native module reports a DLL. What the user needs is which interpreter
+    was found, which ones the file does carry, and where to go instead.
+    """
+    info = sys.version_info if running is None else running
+    return (
+        "pyjab-mcp: this bundle carries dependencies for CPython %s (64-bit Windows) and "
+        "nothing for CPython %d.%d.%d, which is what is running. Install the server with "
+        "`pip install pyjab-mcp` instead, or run the bundle with one of those interpreters.\n"
+        % (
+            ", ".join(minor(tag) for tag in present) or "no interpreter at all",
+            info[0], info[1], info[2],
+        )
+    )
+
+
 def main(argv=None) -> int:
     """Put the vendored dependencies on ``sys.path`` and run the server."""
     path = vendor_dir()
     if not os.path.isdir(path):
-        available = ", ".join(vendored_interpreters()) or "no interpreter at all"
-        sys.stderr.write(
-            "pyjab-mcp: this bundle vendors its dependencies for %s, and it is running on "
-            "CPython %d.%d.%d. Install the server with `pip install pyjab-mcp` instead, or "
-            "run the bundle with one of those interpreters.\n"
-            % (available, sys.version_info[0], sys.version_info[1], sys.version_info[2])
-        )
+        sys.stderr.write(unsupported(vendored_interpreters()))
         return 2
     if sys.maxsize <= 2 ** 32:
         # The vendored wheels are win_amd64; a 32-bit interpreter cannot load them, and the
