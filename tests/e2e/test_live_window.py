@@ -646,7 +646,14 @@ async def test_two_elements_with_the_same_name_are_two_handles(live, boundary_wi
     clicking one has to produce *its* sentence -- which is the only way to tell "two handles" from
     "the same handle twice". A name-only identity would make them indistinguishable, and a tool
     would report the wrong button as clicked.
+
+    The status field is read through its locator rather than through a second search, because a
+    text component's accessible name is its *content*: the clicks below change that content, and
+    the first version of this test looked it up by what it said and failed on the line before the
+    interesting part. Its text, its path in the tree and the two buttons are all things earlier
+    tests already prove.
     """
+    from pyjab_mcp.handles import locator_for
     from pyjab_mcp.server import ServerState, create_server
 
     bridge, backend = live
@@ -655,38 +662,40 @@ async def test_two_elements_with_the_same_name_are_two_handles(live, boundary_wi
 
     attached = await tool(server, "java_attach_window", {"title": BOUNDARY_TITLE})
     session_id = attached.split(" ", 1)[0]
+    window_id = state.session(session_id).window_id
 
-    # One handle for the status field, found by what it says *now*. Its accessible name is its
-    # content, so the clicks below rename it -- and the handle still reads it, because the locator
-    # is a path and the name is content.
-    status_reply = await tool(
-        server, "java_find", {"session_id": session_id, "name": "nothing clicked yet"}
-    )
-    status_handle = handle_in(status_reply)
+    # First, the evidence. A failure after this line arrives with what JAB actually reported,
+    # which the first two runs did not have.
+    dump = boundary_tree(bridge, backend, window_id)
+    print(f"\n[L3] JAB reported:\n{dump}")
 
     found = await tool(
         server, "java_find", {"session_id": session_id, "name": "Duplicate button"}
     )
     handles = re.findall(r"\[(e:[0-9a-f]+)\]", found)
     assert len(handles) == 2, (
-        f"two buttons share this name; the reply listed {handles}:\n{found}\n"
-        f"JAB saw:\n{boundary_tree(bridge, backend, state.session(session_id).window_id)}"
+        f"two buttons share this name; the reply listed {handles}:\n{found}\n{dump}"
     )
 
-    first = await tool(server, "java_click", {"session_id": session_id, "handle": handles[0]})
-    first_text = await tool(
-        server, "java_get_text", {"session_id": session_id, "handle": status_handle}
+    walk = call(bridge, backend.walk, window_id, max_depth=12)
+    text_nodes = [index for index, node in enumerate(walk.nodes) if node.record.role == "text"]
+    assert len(text_nodes) == 1, (
+        f"the fixture has exactly one text component, the status field; this window has "
+        f"{len(text_nodes)}. JAB reported:\n{dump}"
     )
-    assert "clicked the first one" in first_text, (
-        f"the first handle must click the first button: {first!r} then {first_text!r}"
+    status_locator = locator_for(walk, text_nodes[0])
+
+    first = await tool(server, "java_click", {"session_id": session_id, "handle": handles[0]})
+    first_text = call(bridge, backend.text, window_id, status_locator)
+    assert "clicked the first one" in (first_text or ""), (
+        f"the first handle must click the first button: {first!r} then status={first_text!r}. "
+        f"JAB reported:\n{dump}"
     )
 
     second = await tool(server, "java_click", {"session_id": session_id, "handle": handles[1]})
-    second_text = await tool(
-        server, "java_get_text", {"session_id": session_id, "handle": status_handle}
-    )
-    assert "clicked the second one" in second_text, (
-        f"the second handle must click the second button, not the first again: "
-        f"{second!r} then {second_text!r}"
+    second_text = call(bridge, backend.text, window_id, status_locator)
+    assert "clicked the second one" in (second_text or ""), (
+        f"the second handle must click the second button, not the first again: {second!r} then "
+        f"status={second_text!r}. JAB reported:\n{dump}"
     )
     print("\n[L3] two same-named buttons stayed two different handles")
