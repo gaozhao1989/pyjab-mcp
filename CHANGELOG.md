@@ -85,7 +85,12 @@ under **Unreleased** until it is tagged.
   would have died at startup on the one interpreter that tree exists for. The check names the
   tree, the distribution that asked and the requirement as written; the packer installs what it
   reports by name until every tree is satisfied, and a tree it cannot satisfy fails the build
-  rather than shipping.
+  rather than shipping. It is a **satisfaction** check and not a presence one — a tree carrying a
+  version its own metadata excludes is reported and repaired — it follows extras to a fixed
+  point, it answers for every patch level of the target minor because the patch level is the
+  user's, and a marker naming something a bundle cannot know (the OS build the user will run) is
+  carried and said so rather than filled in from the build machine, which is the wrong-machine
+  category the check exists for.
 
 
 ## [0.1.2] - 2026-10-10

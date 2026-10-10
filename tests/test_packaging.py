@@ -682,6 +682,159 @@ def test_the_closure_check_follows_an_extra_to_its_requirements(tmp_path):
     )
 
 
+def test_the_closure_check_follows_extras_to_a_fixed_point(tmp_path):
+    """One pass is not enough: the second extra is only asked once the first one is known.
+
+    `B[F]; extra == "E"` is false until something asks for `E` on `B`, so a single pass over the
+    metadata loses everything below the first level. This is the reviewer's example, at depth
+    two: `mcp -> pyjwt[crypto] -> sqlalchemy[asyncio] -> greenlet`.
+    """
+    import tools.build_mcpb as packer
+
+    tree = tmp_path / "cp312"
+    _write_dist(tree, "mcp", "2.3.0", requires=("pyjwt[crypto]>=2.10.1",))
+    _write_dist(tree, "pyjwt", "2.15.1",
+                requires=('sqlalchemy[asyncio]>=2.0; extra == "crypto"',))
+    _write_dist(tree, "sqlalchemy", "2.0.44",
+                requires=('greenlet>=1; extra == "asyncio"',))
+
+    missing = packer.unsatisfied_requirements(tree, "3.12")
+    print(missing)
+
+    assert [item.name for item in missing] == ["greenlet"], (
+        "the extras walk stopped at the first level: " + repr(missing)
+    )
+
+
+def test_the_closure_check_reports_a_present_but_violating_version(tmp_path):
+    """Presence is not satisfaction: a tree contradicting its own metadata is reported.
+
+    Measured as unreachable in the four shipped trees today -- every marker-guarded requirement
+    there is a floor, and installing by name picks the newest version a minor accepts -- but it
+    goes live the moment a dependency gains a marker-guarded upper bound, and the failure would
+    be the shape of the one this check was written for.
+    """
+    import tools.build_mcpb as packer
+
+    tree = tmp_path / "cp312"
+    _write_dist(tree, "consumer", "1.0",
+                requires=('dep>=2.0,<2.5; python_version >= "3.11"',))
+    _write_dist(tree, "dep", "2.9")
+
+    missing = packer.unsatisfied_requirements(tree, "3.12")
+    print(missing)
+
+    assert [item.name for item in missing] == ["dep"], (
+        "`dep 2.9` does not satisfy `dep>=2.0,<2.5`, and the tree must be reported: "
+        + repr(missing)
+    )
+    assert "2.9" in missing[0].complaint and "<2.5" in missing[0].complaint, missing[0].complaint
+    assert missing[0].specifier == "<2.5,>=2.0", (
+        "the specifiers have to travel with the report, or the fill cannot repair the version: "
+        + repr(missing[0])
+    )
+
+
+def test_the_closure_check_answers_for_the_whole_patch_range(tmp_path):
+    """A marker on `python_full_version` is about a patch level the user picks, not us.
+
+    A bundle is built once and installed by whoever turns up, so "3.10" has to mean every
+    3.10.x: the requirement below is needed by 3.10.2 and by 3.10.4 alike, and answering at
+    `.0` alone -- or at whatever patch this build machine happens to run -- would miss it.
+    """
+    import tools.build_mcpb as packer
+
+    tree = tmp_path / "cp310"
+    _write_dist(tree, "consumer", "1.0", requires=(
+        'floor>=1; python_full_version >= "3.10.2"',
+        'window>=1; python_full_version >= "3.10.2" and python_full_version < "3.10.5"',
+        'old>=1; python_full_version < "3.10.2"',
+    ))
+
+    missing = sorted(item.name for item in packer.unsatisfied_requirements(tree, "3.10"))
+    print(missing)
+
+    assert missing == ["floor", "old", "window"], (
+        "every patch level of the target is a user's, so a marker that is true at any of them "
+        "has to be carried -- `old` at 3.10.0, `floor` from 3.10.2, `window` only between "
+        "3.10.2 and 3.10.4: " + repr(missing)
+    )
+
+
+def test_the_closure_check_refuses_to_substitute_the_build_machine(tmp_path):
+    """A marker naming a variable the target cannot know is carried, never filled in from here.
+
+    `platform_release`, `platform_version` and `implementation_version` describe the machine the
+    user will run on. `packaging` falls back to this machine's values for any variable it is not
+    given -- the same wrong-machine category as the defect this check exists for -- so a marker
+    that names one has to be answered conservatively and said out loud.
+    """
+    import tools.build_mcpb as packer
+
+    tree = tmp_path / "cp312"
+    _write_dist(tree, "consumer", "1.0",
+                requires=('kernel>=1; platform_release == "not-this-build-machine"',))
+
+    missing = packer.unsatisfied_requirements(tree, "3.12")
+    print(missing)
+
+    assert [item.name for item in missing] == ["kernel"], (
+        "the marker was evaluated against this machine's `platform_release`: " + repr(missing)
+    )
+    assert "platform_release" in missing[0].complaint, (
+        "the complaint has to say which unknown it carried rather than judged: "
+        + missing[0].complaint
+    )
+
+
+def test_the_closure_check_unfolds_a_continued_requirement(tmp_path):
+    """A folded `Requires-Dist` parses as a truncated one, and a truncated one reads as met.
+
+    `baz>=1,` continued on the next line as ` <2` is `baz>=1,<2`. Unfolded it is `baz>=1`, which
+    `baz 2.5` satisfies -- so without the unfolding the tree would be reported clean while its
+    own metadata says otherwise.
+    """
+    import tools.build_mcpb as packer
+
+    tree = tmp_path / "cp312"
+    info = _write_dist(tree, "consumer", "1.0")
+    (info / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: consumer\nVersion: 1.0\n"
+        "Requires-Dist: baz>=1,\n <2\n\n",
+        encoding="utf-8",
+    )
+    _write_dist(tree, "baz", "2.5")
+
+    missing = packer.unsatisfied_requirements(tree, "3.12")
+    print(missing, [str(item.specifier) for item in missing])
+
+    assert [item.name for item in missing] == ["baz"], (
+        "the continuation line was dropped, so `baz 2.5` looked like it satisfied `baz>=1`: "
+        + repr(missing)
+    )
+    assert missing[0].specifier == "<2,>=1", missing[0].specifier
+
+
+def test_the_packer_refuses_an_empty_python_version_list(tmp_path):
+    """`--python-versions ,` used to build a bundle with no vendored trees at all."""
+    dist = tmp_path / "dist"
+    _stub_wheel(dist)
+
+    result = subprocess.run(
+        [sys.executable, str(PACKER), "--dist", str(dist), "--out", str(tmp_path / "out"),
+         "--python-versions", ",", "--skip-dependencies"],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=600,
+    )
+    output = result.stdout + result.stderr
+
+    assert result.returncode != 0, f"a bundle with no dependency trees was built:\n{output}"
+    assert "NO PYTHON VERSIONS" in output, output
+    if (tmp_path / "out").exists():
+        assert not list((tmp_path / "out").glob("*.mcpb")), (
+            "a refusal that still leaves a bundle behind is not a refusal"
+        )
+
+
 def test_the_packer_fills_a_tree_the_target_markers_left_short(tmp_path, monkeypatch):
     """The fix, offline: the check drives an explicit install and the build then passes.
 
@@ -703,16 +856,22 @@ def test_the_packer_fills_a_tree_the_target_markers_left_short(tmp_path, monkeyp
     def fake_pip(target, version, platform, requirements, offline=False):
         asked.extend(str(name) for name in requirements)
         for name in requirements:
-            _write_dist(target, str(name), "1.3.0")
+            # pip is given `name>=spec`, and what it installs is `name`.
+            _write_dist(target, re.match(r"[A-Za-z0-9._-]+", str(name)).group(0), "1.3.0")
 
     monkeypatch.setattr(packer, "install_tree", fake_tree)
     monkeypatch.setattr(packer, "pip_install", fake_pip)
 
     bundle = packer.build(dist, tmp_path / "out", ["3.10"], dependencies=True)
 
-    assert asked == ["exceptiongroup"], (
-        "the packer did not install the dependency the target's markers require, so a 3.10 user "
-        f"would get a bundle that cannot import it: it asked pip for {asked!r}"
+    assert asked == ["exceptiongroup>=1.0.2"], (
+        "the packer did not install the dependency the target's markers require, with the "
+        "specifier the requirement carries. It asked pip for "
+        f"{asked!r}"
+    )
+    assert ";" not in asked[0], (
+        "the marker was passed to pip, which answers \"markers ... don't match your environment\" "
+        "and installs nothing -- the wrong-machine behaviour this whole check exists to repair"
     )
     assert bundle.is_file(), "the build did not finish after filling the tree"
 

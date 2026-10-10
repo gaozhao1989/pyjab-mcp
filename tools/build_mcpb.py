@@ -78,6 +78,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # run" impossible: a missing `packaging` is a refusal, not a skipped step.
 try:
     from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.version import InvalidVersion, Version
 except ImportError as missing:  # pragma: no cover - the environment is wrong
     raise SystemExit(
         f"MISSING TOOL: the dependency closure check needs `packaging` ({missing}).\n"
@@ -497,7 +498,11 @@ def interpreter_tag(version: str) -> str:
 # and `test_the_closure_check_reads_the_target_interpreter_not_the_build_one` pins it in both
 # directions on whatever interpreter happens to run the tests.
 
-#: The Windows/AMD64 values a marker can ask about, for the runtime the bundle targets.
+#: The Windows/AMD64 values a marker can ask about, for the runtime the bundle targets. These are
+#: the ones a bundle can answer: the OS family, the machine, the implementation. Anything else a
+#: marker names -- see :data:`UNMEASURABLE_MARKERS` -- describes the machine the *user* will run
+#: on, and substituting this one would be the same wrong-machine mistake the whole check exists
+#: for, so those requirements are carried rather than judged.
 TARGET_MARKER_VALUES = {
     "implementation_name": "cpython",
     "os_name": "nt",
@@ -507,22 +512,40 @@ TARGET_MARKER_VALUES = {
     "sys_platform": "win32",
 }
 
+#: Marker variables this check refuses to answer for.
+#:
+#: ``platform_release`` and ``platform_version`` describe the OS build the user runs; the bundle
+#: is installed years after it is built and cannot know them. ``implementation_version`` is the
+#: interpreter's patch level, which is the same problem `python_full_version` has -- and that one
+#: is answered over the whole minor range below. A requirement guarded by any of these is
+#: *carried*: an extra distribution costs a few megabytes, and a missing one is the failure this
+#: check exists for. What must not happen is what did happen -- `packaging` silently filling the
+#: value in from the build machine.
+UNMEASURABLE_MARKERS = ("implementation_version", "platform_release", "platform_version")
+
 
 class Missing(NamedTuple):
-    """One dependency a tree needs and does not contain, and the line that says so."""
+    """One requirement a tree does not satisfy, and the line that says so."""
 
-    #: The canonical name pip has to be asked for.
+    #: The canonical name, so the fill loop can group two dists asking for the same thing.
     name: str
+    #: ``str(requirement.specifier)`` -- what the fill has to ask for, without the marker.
+    specifier: str
+    #: The extras the requirement asks for, which the fill has to keep.
+    extras: "tuple[str, ...]"
     #: The complaint: the tree, the distribution that asked, and the requirement as written.
     complaint: str
 
 
 def marker_environment(minor: str) -> Dict[str, str]:
-    """The marker environment of a 64-bit CPython *minor* on Windows."""
+    """The marker environment of a 64-bit CPython *minor* on Windows.
+
+    ``python_full_version`` is the floor of the minor. A marker that compares it is answered for
+    the whole minor by :func:`_applies`, because the patch level belongs to the user: this value
+    alone would say ``3.10.2`` is not satisfied by ``3.10``.
+    """
     environment = dict(TARGET_MARKER_VALUES)
     environment["python_version"] = minor
-    # A marker may compare `python_full_version`; the patch level is not something a vendored
-    # tree can be built for, so the `.0` is a statement about the minor and nothing more.
     environment["python_full_version"] = minor + ".0"
     return environment
 
@@ -532,20 +555,41 @@ def canonical(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def _metadata_requirements(dist_info: Path) -> "tuple[str, List[Requirement]]":
-    """The distribution's name and its parsed ``Requires-Dist`` lines."""
-    name = dist_info.parent.name
-    requires: List[str] = []
-    for line in (dist_info / "METADATA").read_text(encoding="utf-8", errors="replace").splitlines():
+def _unfolded_headers(text: str) -> List[str]:
+    """The metadata headers, with RFC 822 continuation lines joined onto what they continue.
+
+    A ``Requires-Dist`` may be folded across lines, and an unfolded ``baz>=1,`` followed by
+    `` <2`` parses happily as ``baz>=1`` -- a truncated requirement reads as satisfied, which is
+    the exact failure mode this section exists to prevent.
+    """
+    headers: List[str] = []
+    for line in text.splitlines():
         if not line.strip():
             break  # the headers end at the first blank line; the body is the description
-        field, _, value = line.partition(":")
-        if field.strip().lower() == "name":
+        if line[:1] in (" ", "\t") and headers:
+            headers[-1] += " " + line.strip()
+        else:
+            headers.append(line)
+    return headers
+
+
+def _metadata(dist_info: Path) -> "tuple[str, str, List[Requirement]]":
+    """The distribution's name, version, and parsed ``Requires-Dist`` lines."""
+    name, version = dist_info.parent.name, ""
+    requires: List[str] = []
+    for header in _unfolded_headers(
+        (dist_info / "METADATA").read_text(encoding="utf-8", errors="replace")
+    ):
+        field, _, value = header.partition(":")
+        field = field.strip().lower()
+        if field == "name":
             name = value.strip()
-        elif field.strip().lower() == "requires-dist":
+        elif field == "version":
+            version = value.strip()
+        elif field == "requires-dist":
             requires.append(value.strip())
     try:
-        return name, [Requirement(text) for text in requires]
+        return name, version, [Requirement(text) for text in requires]
     except InvalidRequirement as error:
         raise SystemExit(
             f"UNREADABLE METADATA: {dist_info} declares a requirement that is not PEP 508 "
@@ -553,72 +597,182 @@ def _metadata_requirements(dist_info: Path) -> "tuple[str, List[Requirement]]":
         )
 
 
+def _unmeasurable(marker: str) -> str:
+    """The marker variable the target cannot answer for, or an empty string."""
+    for name in UNMEASURABLE_MARKERS:
+        if re.search(r"\b%s\b" % name, marker):
+            return name
+    return ""
+
+
 def _applies(requirement: Requirement, environment: Dict[str, str], extra: Optional[str]) -> bool:
-    """True when this requirement is part of the closure for *environment*, with *extra* asked."""
+    """True when this requirement is part of the closure for *environment*, with *extra* asked.
+
+    Two things are answered conservatively rather than by substitution:
+
+    * a marker naming a variable the target cannot know is treated as *applying*, so the
+      distribution is carried -- see :data:`UNMEASURABLE_MARKERS`;
+    * ``python_full_version`` is evaluated at every patch level the marker mentions (and at the
+      ends of the minor), and the answer is true if it is true at any of them. A bundle is built
+      once and installed by whoever turns up, so "3.10" has to mean every 3.10.x.
+    """
     if requirement.marker is None:
+        return True
+    marker = str(requirement.marker)
+    if _unmeasurable(marker):
         return True
     local = dict(environment)
     # `extra` defaults to the empty string in a PEP 508 evaluation; a requirement guarded by
     # `extra == "crypto"` is not part of the base closure, which is why the caller runs twice.
     local["extra"] = extra or ""
-    return requirement.marker.evaluate(local)
+    if "python_full_version" not in marker:
+        return requirement.marker.evaluate(local)
+
+    patches = {0, 99}
+    for _major, _minor, patch in re.findall(r"\b(\d+)\.(\d+)\.(\d+)\b", marker):
+        number = int(patch)
+        patches.update({number, number + 1, max(number - 1, 0)})
+    return any(
+        requirement.marker.evaluate(
+            dict(local, python_full_version="%s.%d" % (environment["python_version"], patch))
+        )
+        for patch in sorted(patches)
+    )
+
+
+def _asked_extras(
+    installed: Dict[str, "tuple[str, str, List[Requirement]]"], environment: Dict[str, str]
+) -> Dict[str, Set[str]]:
+    """Which extras each distribution is asked for, to a fixed point.
+
+    One pass is not enough: ``B[F]; extra == "E"`` is false until something asks for ``E`` on
+    ``B``, so ``mcp -> pyjwt[crypto] -> sqlalchemy[asyncio] -> greenlet`` loses ``greenlet`` at
+    depth two. Each round re-reads every distribution with the extras known so far and stops when
+    another round adds nothing -- which it must, because a metadata graph is finite.
+    """
+    asked: Dict[str, Set[str]] = {}
+    while True:
+        grew = False
+        for key, (_name, _version, requires) in installed.items():
+            for requirement in requires:
+                if not requirement.extras:
+                    continue
+                target = canonical(requirement.name)
+                # The extras that make this requirement apply are the ones asked of the
+                # distribution whose metadata it is (`key`), not of the one it points at.
+                for extra in [None, *sorted(asked.get(key, ()))]:
+                    if not _applies(requirement, environment, extra):
+                        continue
+                    if not requirement.extras <= asked.get(target, set()):
+                        asked.setdefault(target, set()).update(requirement.extras)
+                        grew = True
+        if not grew:
+            return asked
 
 
 def unsatisfied_requirements(tree: Path, minor: str) -> List[Missing]:
-    """Every requirement the distributions in *tree* declare for *minor* and the tree lacks.
+    """Every requirement the distributions in *tree* declare for *minor* and the tree violates.
 
-    *tree* is a directory as ``pip install --target`` leaves it: one ``*.dist-info`` per
-    distribution. The answer is about the interpreter the tree was vendored for, not the one
-    running this script, which is the defect this exists to catch.
+    A *satisfaction* predicate, not a presence one: a tree carrying ``dep 2.9`` while its own
+    metadata says ``dep>=2.0,<2.5`` is reported, because that tree contradicts itself exactly as
+    a missing distribution does. The answer is about the interpreter the tree was vendored for,
+    not the one running this script, which is the defect this exists to catch.
     """
-    installed: Dict[str, "tuple[str, List[Requirement]]"] = {}
+    installed: Dict[str, "tuple[str, str, List[Requirement]]"] = {}
     for dist_info in sorted(tree.glob("*.dist-info")):
         if (dist_info / "METADATA").is_file():
-            name, requires = _metadata_requirements(dist_info)
-            installed[canonical(name)] = (name, requires)
+            name, version, requires = _metadata(dist_info)
+            installed[canonical(name)] = (name, version, requires)
 
     environment = marker_environment(minor)
-
-    # Which extras are asked of which distribution is a static fact on the requirement that asks
-    # for it, so one pass collects them: `mcp` requires `pyjwt[crypto]`, and `cryptography` -- a
-    # requirement of that extra -- is otherwise invisible to this check.
-    asked: Dict[str, Set[str]] = {}
-    for _, requires in installed.values():
-        for requirement in requires:
-            if requirement.extras and _applies(requirement, environment, None):
-                asked.setdefault(canonical(requirement.name), set()).update(requirement.extras)
+    asked = _asked_extras(installed, environment)
 
     missing: List[Missing] = []
-    for key, (name, requires) in sorted(installed.items()):
+    for key, (name, version, requires) in sorted(installed.items()):
         for extra in [None, *sorted(asked.get(key, ()))]:
             for requirement in requires:
                 if not _applies(requirement, environment, extra):
                     continue
-                if canonical(requirement.name) in installed:
-                    continue
                 where = f" (the {extra!r} extra)" if extra else ""
+                unknown = _unmeasurable(str(requirement.marker or ""))
+                because = (
+                    f" -- {unknown} is not knowable for the target, so it is carried rather "
+                    "than judged"
+                    if unknown else ""
+                )
+                install_free = canonical(requirement.name)
+                problem = _violation(installed, requirement, name, environment)
+                if problem is None:
+                    continue
                 missing.append(Missing(
-                    canonical(requirement.name),
-                    f"{tree.name}: {name} requires {requirement}{where}, and the tree has no "
-                    f"{canonical(requirement.name)}",
+                    install_free,
+                    str(requirement.specifier),
+                    tuple(sorted(requirement.extras)),
+                    f"{tree.name}: {name} requires {requirement}{where}, and {problem}{because}",
                 ))
     return missing
 
 
-def fill_closure(tree: Path, minor: str, platform: str) -> None:
-    """Install, by name, whatever this tree's own target requires and the tree does not have.
+def _violation(
+    installed: Dict[str, "tuple[str, str, List[Requirement]]"],
+    requirement: Requirement,
+    asked_by: str,
+    environment: Dict[str, str],
+) -> Optional[str]:
+    """What is wrong with this requirement in *installed*, or None when it is satisfied."""
+    key = canonical(requirement.name)
+    carried = installed.get(key)
+    if carried is None:
+        return f"the tree has no {key}"
+    _name, version, _requires = carried
+    if not requirement.specifier:
+        return None
+    try:
+        parsed = Version(version)
+    except InvalidVersion:
+        raise SystemExit(
+            f"UNREADABLE VERSION: {asked_by} in the tree reports {version!r}, which is not a "
+            "PEP 440 version, so whether it satisfies "
+            f"{requirement} cannot be decided. The tree is not built on a guess."
+        )
+    if parsed in requirement.specifier:
+        return None
+    return f"the tree carries {key} {version}, and the requirement is {requirement.specifier}"
 
-    This is the fix for what the check detects, and it is why the check *drives* the build
-    rather than only reporting: pip cannot be asked to evaluate markers for another interpreter,
-    so the distributions its resolver dropped are installed explicitly instead.
+
+def fill_closure(tree: Path, minor: str, platform: str) -> None:
+    """Install what this tree's own target requires and the tree does not satisfy.
+
+    This is the fix for what the check detects, and it is why the check *drives* the build rather
+    than only reporting: pip cannot be asked to evaluate markers for another interpreter, so the
+    distributions its resolver dropped are installed explicitly.
+
+    Two details are deliberate. The **specifiers** travel with the request, so a tree carrying
+    ``dep 2.9`` against ``dep<2.5`` is repaired by installing something below 2.5 rather than by
+    reinstalling the newest one. The **marker does not**: `pip install "exceptiongroup>=1.0.2;
+    python_version < '3.11'"` on a 3.12 build machine answers *"Ignoring exceptiongroup: markers
+    ... don't match your environment"* and installs nothing -- the same wrong-machine behaviour
+    this section exists to repair.
     """
     remaining = unsatisfied_requirements(tree, minor)
     for _ in range(FILL_ROUNDS):
         if not remaining:
             return
-        names = sorted({item.name for item in remaining})
-        print(f"  {tree.name}: CPython {minor} needs {names}; installing them by name")
-        pip_install(tree, minor, platform, names)
+        specifiers: Dict[str, Set[str]] = {}
+        extras: Dict[str, Set[str]] = {}
+        for item in remaining:
+            specifiers.setdefault(item.name, set()).update(
+                part for part in item.specifier.split(",") if part
+            )
+            extras.setdefault(item.name, set()).update(item.extras)
+        requirements = [
+            name
+            + ("[%s]" % ",".join(sorted(extras[name])) if extras[name] else "")
+            + ",".join(sorted(specifiers[name]))
+            for name in sorted(specifiers)
+        ]
+        print(f"  {tree.name}: CPython {minor} needs {requirements}; installing them by name")
+        pip_install(tree, minor, platform, requirements)
         remaining = unsatisfied_requirements(tree, minor)
     raise SystemExit(
         f"UNSATISFIED DEPENDENCIES in {tree.name} for CPython {minor}:\n"
@@ -772,6 +926,13 @@ def build(
     with_mcpb: bool = False,
 ) -> Path:
     """Build the bundle from the wheel in *dist* and return the file it wrote."""
+    if not list(versions):
+        raise SystemExit(
+            "NO PYTHON VERSIONS: nothing to vendor for. `--python-versions` was empty -- a bare "
+            "comma parses to no minors -- and the project declares none either, so the bundle "
+            "would carry no dependency tree at all and its own prose would read \"The minors are "
+            "()\". Name at least one minor, or leave the flag off to use pyproject.toml."
+        )
     if platform != TARGET_PLATFORM:
         raise SystemExit(
             f"UNSUPPORTED TARGET: --platform {platform!r}. This packer builds {TARGET_PLATFORM!r} "

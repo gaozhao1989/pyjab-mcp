@@ -1396,6 +1396,22 @@ MCPB_BUILD_COMMAND = "python tools/build_mcpb.py --dist dist --out dist --valida
 MCPB_UPLOAD_COMMAND = 'gh release upload "${{ github.ref_name }}" dist/*.mcpb'
 MCPB_ARTIFACT_PATH = "dist/*.mcpb"
 
+#: The job's steps, whole and in order, as `name` or `uses`. Pinning the *named* steps alone was
+#: not enough: a second step named `Re-attach the bundle` carrying the same `gh release upload`
+#: with `--clobber`, and a whole additional job doing the same, both left every pin green --
+#: because those pins asked whether *the* attach step had been disarmed, never whether another
+#: one had been added. `uses` stands in where a step has no name, so the two unnamed action steps
+#: are told apart.
+MCPB_STEPS = (
+    "actions/checkout@v4",
+    "actions/setup-python@v5",
+    "Install the build tooling",
+    "actions/download-artifact@v4",
+    MCPB_BUILD_STEP,
+    "actions/upload-artifact@v4",
+    MCPB_UPLOAD_STEP,
+)
+
 
 def release_jobs():
     path = REPO_ROOT / ".github" / "workflows" / "release.yml"
@@ -1442,6 +1458,35 @@ def test_the_mcpb_job_builds_on_every_trigger_and_attaches_only_on_a_tag():
     jobs = release_jobs()
     assert MCPB_JOB in jobs, "the mcpb job was renamed or removed"
     job = jobs[MCPB_JOB]
+
+    # The step set itself, before any of its contents: an *added* step or an added job is the way
+    # every content pin above is bypassed, and none of them can see it.
+    steps = job.get("steps") or []
+    assert tuple(step.get("name") or step.get("uses") for step in steps) == MCPB_STEPS, (
+        f"`{MCPB_JOB}`'s steps are "
+        f"{tuple(step.get('name') or step.get('uses') for step in steps)!r}, and this pin requires "
+        f"exactly {MCPB_STEPS!r}. A step added here can attach the bundle without going through "
+        "the step whose every argument is pinned above -- by name, that is `Re-attach the bundle` "
+        "with the same `gh release upload` and a `--clobber` on it."
+    )
+
+    workflow_text = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text("utf-8")
+    workflow_code = "\n".join(
+        line for line in workflow_text.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert "--clobber" not in workflow_code, (
+        "`release.yml` contains `--clobber` in something that is not a comment. The attach step "
+        "forbids it -- a released asset must not be replaced, because two builds of this bundle "
+        "are not byte-identical -- and a whole-file assertion is the only kind that sees a "
+        "*second* place doing the uploading, whether that is a step or a job. A comment saying "
+        "why not is not a place, which is why the comments are stripped first."
+    )
+    assert workflow_code.count("gh release upload") == 1, (
+        f"`release.yml` attaches the bundle with `gh release upload` "
+        f"{workflow_code.count('gh release upload')} times. There has to be exactly one place "
+        "that does it: a second job after the release is created would bypass every pin that is "
+        "about the step."
+    )
 
     assert flat(job.get("if")) == MCPB_JOB_IF, (
         f"`{MCPB_JOB}` has if: {job.get('if')!r}, and this pin requires exactly {MCPB_JOB_IF!r}. "
