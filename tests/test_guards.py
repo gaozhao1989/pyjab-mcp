@@ -12,6 +12,7 @@ and once against an input that is deliberately wrong, where it must complain.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tarfile
@@ -26,6 +27,7 @@ import tools.check_documented_surface as docs_guard
 import tools.check_local_only_files as local_guard
 import tools.check_pyjab_api_surface as surface_guard
 import tools.check_pyjab_readiness as readiness_guard
+import tools.check_changelog_immutable as immutable_guard
 import tools.check_release_version as release_guard
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -549,3 +551,105 @@ def test_the_release_notes_come_from_the_changelog_section(tmp_path, monkeypatch
     assert "the new thing" in notes
     assert "the old thing" not in notes, "a section ends at the next heading"
     assert "in flight" not in notes, "Unreleased is not a release's notes"
+
+
+# ---------------------------------------------------------------------------------
+# tools/check_changelog_immutable.py
+# ---------------------------------------------------------------------------------
+
+CHANGELOG_FIXTURE = """# Changelog
+
+## Unreleased
+
+- in flight, and not a released section
+
+## [0.2.0] - 2026-11-01
+
+### Added
+
+- the new thing
+
+## [0.1.0] - 2026-10-10
+
+### Added
+
+- the old thing
+"""
+
+
+def immutable_tree(tmp_path, monkeypatch, record: dict, changelog: str = CHANGELOG_FIXTURE):
+    """A repository whose changelog and record are the ones a test wants."""
+    (tmp_path / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+    record_path = tmp_path / "released_changelog_sections.json"
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+    monkeypatch.setattr(immutable_guard, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(immutable_guard, "CHANGELOG", tmp_path / "CHANGELOG.md")
+    monkeypatch.setattr(immutable_guard, "RECORD", record_path)
+    return record_path
+
+
+def test_unreleased_is_not_a_released_section():
+    """The place new entries belong must never be mistaken for one that shipped."""
+    found = immutable_guard.sections(CHANGELOG_FIXTURE)
+
+    assert sorted(found) == ["0.1.0", "0.2.0"]
+    assert "in flight" not in found["0.2.0"], "a section ends at the next level-two heading"
+    assert "the new thing" in found["0.2.0"]
+    assert "the old thing" not in found["0.2.0"]
+
+
+def test_a_recorded_section_that_changed_fails(tmp_path, monkeypatch):
+    """The pyjab 1.6.3 incident: the repository claimed what the sdist did not contain."""
+    immutable_tree(tmp_path, monkeypatch, {"0.1.0": "sha256:0000"})
+
+    assert immutable_guard.check() == 1
+
+
+def test_a_recorded_section_that_vanished_fails(tmp_path, monkeypatch):
+    immutable_tree(tmp_path, monkeypatch, {"9.9.9": "sha256:0000"})
+
+    assert immutable_guard.check() == 1
+
+
+def test_an_unchanged_record_passes(tmp_path, monkeypatch):
+    section = immutable_guard.sections(CHANGELOG_FIXTURE)["0.1.0"]
+    immutable_tree(tmp_path, monkeypatch, {"0.1.0": immutable_guard.digest(section)})
+
+    assert immutable_guard.check() == 0
+
+
+def test_recording_refuses_a_version_with_no_tag(tmp_path, monkeypatch):
+    immutable_tree(tmp_path, monkeypatch, {})
+
+    with pytest.raises(SystemExit) as caught:
+        immutable_guard.record("0.1.0")
+
+    assert "no tag v0.1.0" in str(caught.value)
+
+
+def test_recording_refuses_to_replace_a_different_hash(tmp_path, monkeypatch):
+    """A released section is not supposed to change, so --record is not a way to bless it."""
+    section = immutable_guard.sections(CHANGELOG_FIXTURE)["0.1.0"]
+    record_path = immutable_tree(
+        tmp_path, monkeypatch, {"0.1.0": immutable_guard.digest(section)}
+    )
+    monkeypatch.setattr(
+        immutable_guard, "tag_section", lambda version: section + "\n- and a lie"
+    )
+
+    with pytest.raises(SystemExit) as caught:
+        immutable_guard.record("0.1.0")
+
+    assert "refusing to replace" in str(caught.value)
+    assert json.loads(record_path.read_text())["0.1.0"] == immutable_guard.digest(section)
+
+
+def test_recording_freezes_what_the_tag_says(tmp_path, monkeypatch):
+    section = immutable_guard.sections(CHANGELOG_FIXTURE)["0.1.0"]
+    record_path = immutable_tree(tmp_path, monkeypatch, {})
+    monkeypatch.setattr(immutable_guard, "tag_section", lambda version: section)
+
+    assert immutable_guard.record("0.1.0") == 0
+
+    assert json.loads(record_path.read_text()) == {"0.1.0": immutable_guard.digest(section)}
+    assert immutable_guard.check() == 0

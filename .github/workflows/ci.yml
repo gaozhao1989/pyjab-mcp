@@ -77,6 +77,12 @@ jobs:
       - name: Maintainer notes stay out of git and out of the sdist
         run: python tools/check_local_only_files.py
 
+      # A released section is published inside its sdist, so editing one afterwards makes
+      # this repository describe a release that never happened. Needs no history and no
+      # network: the expected value is in the tree.
+      - name: Released changelog sections are frozen
+        run: python tools/check_changelog_immutable.py
+
       # The release pipeline only ever runs on a tag, which is the worst place to discover a
       # workflow syntax error: nothing has been published yet, and the fix needs a new tag.
       # Pinned rather than `latest`, because a tool version that floats turns CI red for
