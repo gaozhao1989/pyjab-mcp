@@ -18,7 +18,7 @@ hundreds of thousands of tokens into a model's context. So the view is bounded t
 
 And because a bounded view that does not say it was bounded is indistinguishable from a
 window that genuinely has less in it, the result carries ``truncated`` plus the reason.
-That is this project's AGENTS.md §2.4, applied to a snapshot: the caller must be able to
+That is this project's rule about measurements, applied to a snapshot: the caller must be able to
 tell "the window is like this" from "I stopped reading".
 
 What "interactive only" means here
@@ -62,7 +62,8 @@ DEFAULT_FIELDS = ("states",)
 #: Estimated tokens per line, used only for the snapshot's own reporting.  The real
 #: tokeniser is the client's, so this is a deliberately conservative character-based
 #: estimate; the hard budget assertion in the tests uses the same number, and the default
-#: budgets leave headroom for a label-heavy window (see docs/PLAN.md §3.3).
+#: budgets leave headroom for a label-heavy window. Staying under 4k tokens by default is
+#: a release criterion, not a preference.
 CHARS_PER_TOKEN = 4
 
 

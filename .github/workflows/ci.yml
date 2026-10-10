@@ -5,7 +5,7 @@ name: CI
 #   * `tests` -- the portable suite on three platforms. It installs the real pyjab and the
 #     real mcp SDK, so a broken import, a bad pin or a package that only works in a
 #     checkout fails here.
-#   * `guards` -- the rules from AGENTS.md that were being kept by hand. Each guard is a
+#   * `guards` -- the rules that would otherwise be kept by hand. Each guard is a
 #     separate step so a failure names the rule it broke.
 #   * `package` -- builds the sdist and wheel and checks the *artifact*: what is inside it,
 #     and whether the console script survives.
@@ -83,10 +83,15 @@ jobs:
       - name: Released changelog sections are frozen
         run: python tools/check_changelog_immutable.py
 
+      # Found by reading the published README: it pointed at maintainer notes that are not in
+      # the repository and not in the sdist, and a tool's error message did too.
+      - name: Nothing shipped sends a reader to a file that does not ship
+        run: python tools/check_published_references.py
+
       # The release pipeline only ever runs on a tag, which is the worst place to discover a
       # workflow syntax error: nothing has been published yet, and the fix needs a new tag.
       # Pinned rather than `latest`, because a tool version that floats turns CI red for
-      # reasons that have nothing to do with the change (AGENTS.md 4).
+      # reasons that have nothing to do with the change.
       - name: The workflows are valid
         run: |
           curl -sL "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz" | tar xz actionlint

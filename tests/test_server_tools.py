@@ -140,7 +140,7 @@ async def test_the_missing_pyjab_api_reaches_the_model_as_its_requirement_text()
     message = str(caught.value)
     assert "pyjab does not provide" in message
     assert "expected in:" in message
-    assert "AGENTS.md" in message
+    assert "gaozhao1989/pyjab#168" in message
 
 
 async def test_attach_window_binds_through_the_backend_and_returns_a_session_id():
@@ -688,7 +688,7 @@ async def test_send_keys_answers_with_the_requirement_it_is_waiting_on():
     message = str(caught.value)
     assert "pyjab does not provide" in message
     assert "key sequence or shortcut" in message
-    assert "AGENTS.md" in message
+    assert "gaozhao1989/pyjab#168" in message, "the reply says where it is tracked"
     assert "java_set_text" in message, "it should also say what to do instead"
 
 

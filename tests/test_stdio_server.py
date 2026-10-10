@@ -23,6 +23,52 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 pytestmark = pytest.mark.asyncio
 
 
+# ---------------------------------------------------------------------------------
+# The command line, which is for a person rather than a client
+# ---------------------------------------------------------------------------------
+
+
+def run_cli(*arguments: str):
+    """The console script as a user gets it: a subprocess, with stdout and stderr apart."""
+    import subprocess
+
+    return subprocess.run(
+        [sys.executable, "-m", "pyjab_mcp", *arguments],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=60,
+    )
+
+
+def test_version_prints_the_version_and_exits_cleanly():
+    """The first line of every useful bug report, and it did not exist before 0.1.2."""
+    import pyjab_mcp
+
+    result = run_cli("--version")
+
+    assert result.returncode == 0
+    assert pyjab_mcp.__version__ in result.stdout
+    assert result.stdout.startswith("pyjab-mcp ")
+
+
+def test_help_says_what_it_is_and_what_it_needs():
+    result = run_cli("--help")
+
+    assert result.returncode == 0
+    # The three things a person needs before anything can work.
+    assert "stdio" in result.stdout
+    assert "Java Access Bridge" in result.stdout
+    assert "mcpServers" in result.stdout, "and how a client is supposed to start it"
+
+
+def test_an_argument_nobody_reads_is_refused_rather_than_ignored():
+    """`--help` used to print nothing and exit 0, which reads as a broken install."""
+    result = run_cli("--serve")
+
+    assert result.returncode == 2
+    assert "--serve" in result.stderr
+    assert "takes no arguments" in result.stderr
+    assert result.stdout == "", "stdout belongs to the transport, even here"
+
+
 async def test_the_console_script_answers_a_real_mcp_handshake():
     params = StdioServerParameters(
         command=sys.executable, args=["-m", "pyjab_mcp"], cwd=REPO_ROOT

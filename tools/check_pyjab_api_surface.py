@@ -7,11 +7,11 @@ Why this exists
 The working agreement has two rules that are easy to keep by hand right up until someone is
 in a hurry, and both have already been tested once in this project's short life:
 
-* **the only interface to pyjab is its published API** (AGENTS.md §1.1). Reaching into a
+* **the only interface to pyjab is its published API**. Reaching into a
   private name is always the shortest path when something is in the way, and there is no
   moment at which it *looks* wrong — it works, on the developer's machine, until a pyjab
   release changes it.
-* **nothing may depend on an unreleased pyjab change** (AGENTS.md §1.2). The sibling pyjab
+* **nothing may depend on an unreleased pyjab change**. The sibling pyjab
   checkout is 62 commits past the `v1.8.0` tag, so `JABElement.walk`, `pyjab.inspector` and
   `java_process_image_paths` all exist and none of them is in the released wheel. Reading
   the checkout is how you conclude "pyjab has it"; installing the wheel is how you find out
@@ -129,7 +129,7 @@ SURFACE: Dict[Touchpoint, Entry] = {
         "Public and documented: its own docstring states that COM events are delivered to "
         "the thread that called Windows_run() and that this thread must service the queue. "
         "Non-blocking and cheap when the queue is empty. Called only from BridgeThread's "
-        "owning thread -- see .agents/skills/pyjab-mcp-bridge-threading/SKILL.md.",
+        "owning thread: the pump and every JAB call have to happen on it.",
     ),
     ("pyjab.config", "*"): Entry(
         PUBLIC, "1.8.0",
@@ -179,7 +179,7 @@ SURFACE: Dict[Touchpoint, Entry] = {
         "Constructed to bind a window, and that construction is also what arms the bridge: "
         "it loads the DLL, calls Windows_run() on the calling thread and registers the JAB "
         "prototypes. Imported inside two functions; never used as a context manager, "
-        "because __exit__ terminates the bound process by pid (AGENTS.md 6.2 R2).",
+        "because __exit__ terminates the bound process by pid.",
     ),
     ("pyjab.jabdriver", "JABDriver.find_element_by_xpath"): Entry(
         PUBLIC, "1.8.0",
@@ -616,13 +616,13 @@ def check(
         if entry.status not in {PUBLIC, UNRELEASED}:
             problems.append(
                 f"PRIVATE: {label} is recorded as {entry.status!r}. There is no acceptable "
-                "private status: ask pyjab for a public API instead (AGENTS.md 1.1)."
+                "private status: ask pyjab for a public API instead."
             )
             continue
         if any(name.startswith(PRIVATE_MARKERS) for name in point[1].split(".")):
             problems.append(
                 f"PRIVATE: {label} has a private name. Reaching into pyjab is the one thing "
-                "the separate repository exists to prevent -- see AGENTS.md 6.2."
+                "the separate repository exists to prevent."
             )
             continue
         if entry.status == PUBLIC and not entry.released_in:
@@ -636,7 +636,7 @@ def check(
                 f"UNRELEASED DEPENDENCY: {label} is imported, and it is recorded as "
                 "unreleased. Probe it (hasattr/getattr) and report the gap, or wait for the "
                 "release and bump the pin -- do not start a milestone on an unreleased "
-                "change (AGENTS.md 1.2)."
+                "unreleased change."
             )
         if (
             entry.status == PUBLIC

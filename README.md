@@ -46,7 +46,8 @@ It needs `pyjab>=1.10.0`, which brought the two APIs this project spent M1 and M
 pyjab's CLI, and `JABDriver.detach()`, so a session can be released **without terminating the
 application** — the only teardown before it killed the bound process.
 
-One gap is still recorded rather than worked around (`AGENTS.md` §6.2): **there is no public
+One gap is still recorded rather than worked around (tracked as
+[gaozhao1989/pyjab#168](https://github.com/gaozhao1989/pyjab/issues/168)): **there is no public
 way to send a key sequence**, so `java_send_keys` reports that requirement instead of
 pretending `send_text` can express `alt+y`.
 
@@ -64,17 +65,21 @@ automation uses:
 | pyjab, the same window | **601** | 513 | 12 |
 | *control: UI Automation, the whole desktop* | *147* | *99* | *finished* |
 
-See `docs/PLAN.md` §2.3.2. The control is what makes the six mean anything.
+The control is what makes the six mean anything: the *same* measurement over the whole
+desktop finishes, so the measurement works and the Java window is the hard case.
 
 ## Where to read first
 
 | file | what |
 |---|---|
-| `AGENTS.md` | the working agreement — read before changing anything |
-| `docs/PLAN.md` | the full plan: product, architecture, milestones, risks |
-| `docs/DESIGN.md` | the three decisions that shape M1, with the arguments |
-| `docs/ARCHITECTURE.md` | how the server is put together, and the constraints that shape it |
+| `docs/ARCHITECTURE.md` | how the server is put together, the constraints that shape it, and what each guard enforces |
+| `docs/CLIENTS.md` | connecting Claude Desktop, Claude Code, Cursor and VS Code |
+| `docs/RELEASING.md` | how a release happens, and what has to exist before one |
 | `CHANGELOG.md` | what changed, and why |
+
+Maintainer working notes are kept out of this repository deliberately. Everything a user or a
+contributor needs is above, and the rules that are not prose are enforced by the guards in
+`tools/` — which run in CI on every push.
 
 ## Requirements
 
@@ -159,7 +164,8 @@ Also worth knowing:
 
 * **Free support** — bugs, questions and feature requests go to
   [GitHub issues](https://github.com/gaozhao1989/pyjab-mcp/issues). Include the output of
-  `java_diagnostics`: it answers most environmental questions before they are asked.
+  `pyjab-mcp --version` and of the `java_diagnostics` tool: between them they answer most
+  environmental questions before they are asked.
 * **Commercial and enterprise support** — deployment inside a restricted network, adaptation
   to a particular application, or an SLA: **gaozhao89@qq.com** (the address in this package's
   metadata). The open-source package is complete and unrestricted; there is no licence key, no
@@ -203,5 +209,5 @@ python -m build && python tools/check_dist_contents.py --dist dist
 
 The guards are the project's rules made mechanical, in the same shape pyjab uses for its own:
 a registry of what is allowed, checked in both directions, so adding a call site fails until
-somebody writes down why it is acceptable. `AGENTS.md` §8 lists them and what each one
-enforces.
+somebody writes down why it is acceptable. `docs/ARCHITECTURE.md` lists them and what each
+one enforces.

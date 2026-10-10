@@ -8,7 +8,7 @@ contained the DPI fix, the xpath leak fix and the rest, while the sdist on PyPI 
 the tree at the tag -- did not. Nothing failed. It was noticed by hand at the next release,
 which is not a mechanism.
 
-`AGENTS.md` §2.3 says released versions are immutable. That had been read as being about PyPI,
+Released versions are immutable -- pyjab's rule, and this project's. That had been read as being about PyPI,
 which it is -- but the changelog is published too, inside the sdist, and the repository copy is
 the one a reader sees. The two can disagree, and only one of them is on PyPI.
 

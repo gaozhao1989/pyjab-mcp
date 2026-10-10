@@ -3,7 +3,7 @@
 The rule under test is this project's first constraint (``docs/ARCHITECTURE.md``): never
 return the whole tree, and never let a bounded view look like a complete one. A snapshot that
 silently omits half a window is indistinguishable from a window that has half as much in it,
-and the caller will act on it -- which is AGENTS.md §2.4 applied to a tool result.
+and the caller will act on it -- a measurement that could not be taken is not a zero, applied to a tool result.
 
 Everything here is pure: a fake tree in, text and measurements out.
 """
@@ -149,7 +149,7 @@ def test_the_default_budget_stays_under_the_token_target():
     assert rendered.truncated is True
     assert rendered.estimated_tokens < 4000, (
         f"the default snapshot costs about {rendered.estimated_tokens} tokens; "
-        "docs/PLAN.md 3.3 makes < 4k a release criterion"
+        "staying under 4k tokens by default is a release criterion"
     )
 
 

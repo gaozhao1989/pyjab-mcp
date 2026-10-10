@@ -6,7 +6,7 @@ sentence rather than a traceback -- so a module-scope import here would make thi
 unimportable everywhere else, including on the machines that only run the test suite.
 ``tests/test_packaging.py`` enforces that with ``ast``.
 
-The rule that shapes this file is pyjab's own (§1.1 of this project's AGENTS.md): the only
+The rule that shapes this file is pyjab's own, and this project's: the only
 interface is pyjab's **published** API.  When something needed is not public, the answer is
 not to reach in -- it is to record the requirement (:data:`REQUIREMENTS`), add the API to
 pyjab, release it, and bump the pin.  So the gap is a **reported state** here, never a
@@ -57,7 +57,7 @@ class Requirement:
     """A pyjab-side change this project waits on.
 
     Kept as data rather than as prose in an error message so that the message a user sees,
-    the diagnostics report and ``AGENTS.md`` §6 cannot drift apart.
+    the diagnostics report and this tuple cannot drift apart.
     """
 
     key: str
@@ -72,7 +72,8 @@ class Requirement:
             f"  needed by:      {self.blocks}\n"
             f"  why not a workaround: {self.why}\n"
             f"  expected in:    {self.expected_in}\n"
-            "  See AGENTS.md §6 in this repository for the audit this came from."
+            "  This is a gap in the dependency rather than in this server: the tool has\n"
+            "  nothing to call. See the issue above for its state."
         )
 
 
@@ -158,7 +159,7 @@ class Fact:
     """One API question and its answer.
 
     ``UNKNOWN`` exists because "I could not check" is not "it is not there" -- the failure
-    mode this project's AGENTS.md §2.4 is about.  On a non-Windows machine, for instance,
+    mode this project's rule about measurements is about -- a measurement that could not be\n    taken is not a zero.  On a non-Windows machine, for instance,
     ``pyjab.jabelement`` cannot be imported, so whether it has ``walk`` is genuinely
     unknown rather than absent.
     """
@@ -372,7 +373,7 @@ class TableReading:
     cell that is text and empty -- two different answers, and pyjab's own ``text`` property
     keeps them apart. A cell that could not be *read* is neither: it is listed by position in
     ``unreadable``, because "I could not read it" is a third state and not a value, and
-    collapsing it into either of the others would invent an empty table (AGENTS.md §2.4).
+    collapsing it into either of the others would invent an empty table.
 
     ``from_name`` lists the cells whose value came from the cell's accessible **name** rather
     than from AccessibleText. That fallback is not a guess: Swing's ``AccessibleJTableCell``
@@ -1010,7 +1011,7 @@ def _cli_java_windows(run: Callable[[Sequence[str]], Any]) -> "List[JavaWindow]"
     Raises:
         PyjabUnavailable: When the CLI cannot be run or does not answer with JSON. Never
             returns an empty list to mean "I could not tell" -- an empty list means JAB can
-            see no Java windows, which is a measurement (AGENTS.md §2.4).
+            see no Java windows, which is a measurement rather than a failure.
     """
     command = [sys.executable, "-m", "pyjab.inspector", "windows", "--json"]
     try:
