@@ -1,16 +1,60 @@
 # Releasing pyjab-mcp
 
-A release is: **bump the version, move the changelog, tag, and let
+A release is: **bump the version, move the changelog, tag, approve the publish, and let
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) do the rest.** The workflow
-is tag-driven, so a tag is the only thing that publishes anything.
+is tag-driven, so a tag is the only thing that starts a release — and the approval click below is
+the only step in it a person performs.
 
 Released versions are immutable — PyPI will not let a version be replaced or removed.
 That is why every check runs **before** the first upload, and why the
 version guard exists.
 
+## Who confirms what
+
+A release has exactly one human decision in it, and it is not a review of the checks — those are
+the pipeline's, and it refuses the release on any of them.
+
+**The pipeline checks, and stops the release if any of these fail:**
+
+* **the four places the version lives agree** — `__version__`, both `server.json` versions and the
+  `CHANGELOG.md` section — via `tools/check_release_version.py`;
+* **the six guards**, which refuse rather than warn; the seventh script in the same step,
+  `tools/check_pyjab_readiness.py`, reports only;
+* **the artifact, not the rules** — `python -m build`, `tools/check_dist_contents.py --dist dist`
+  and `twine check`;
+* **the changelog-immutability record**, so a released section cannot be edited afterwards;
+* **the pre-flight that nothing is published** under this version: PyPI, the GitHub release, the tag;
+* **a green L3 run on the tagged commit** — the pipeline requires it: `verify` fails when no
+  successful `windows-gui.yml` run exists for the commit the tag points at. A green L3 run is
+  checked by the pipeline, not by memory.
+
+**The human decides, once: whether this version, at this moment, with this content, should be
+published.** The approval click on the `pypi` environment is the *enforcement* of that decision,
+not a second review — everything checkable has already been checked, so the click answers only
+"ship it".
+
+**The maintainer's agent prepares the release**: the bump, the changelog section, the artifact,
+the pre-flight, the L3 dispatch, the evidence. It never needs a person for a checkable step, and
+it cannot approve the publish.
+
+### The click, and why nothing can stand in for it
+
+The `pypi` environment on `gaozhao1989/pyjab-mcp` has **required reviewers = `gaozhao1989`** and
+**`can_admins_bypass: false`**, set 2026-10-10. The `publish to PyPI` job therefore stops and
+waits for a human review before it runs `pypa/gh-action-pypi-publish`, and there is no bypass to
+reach for. **No agent can satisfy it, including one running with the maintainer's credentials** —
+which is the point, because that is exactly what a delegate has.
+
+The other platform gate is deliberately the weaker one. The ruleset `v* tags are never moved or
+deleted` (id 24842486, rules `deletion` + `update`) stops a published tag from being moved or
+deleted. It does **not** block creation: the release procedure needs to create the tag, and a
+delegate shares the maintainer's credentials, so a gate a shared token can bypass would be
+decoration. The tag rule is protection for immutability, not a delegation control.
+
 ## One-time setup
 
-Two things have to exist before the first tag. Only the first needs a person.
+Two things had to exist before the first tag, and both do. What a person does *per* release is
+not setup but the approval click — see "Who confirms what".
 
 **1. A PyPI pending publisher (trusted publishing).** There is no API token in this repository
 and there should never be one. On PyPI, add a *pending* publisher for the project name
@@ -24,8 +68,9 @@ and there should never be one. On PyPI, add a *pending* publisher for the projec
 | Environment | `pypi` |
 
 The environment name is part of what PyPI checks, which is why the publish job declares
-`environment: pypi`. The same environment can be given required reviewers, which turns "someone
-tagged it" into "someone approved it" without changing anything here.
+`environment: pypi`. That environment now **has required reviewers** — `gaozhao1989`, with
+`can_admins_bypass: false` — which turns "someone tagged it" into "someone approved it". See
+"Who confirms what".
 
 **2. The MCP Registry's GitHub namespace — nothing to do.** The registry derives the namespace
 from the authentication method: GitHub authentication means the name **must** be
@@ -94,23 +139,43 @@ python tools/check_changelog_immutable.py
 ```
 
 The other guards need Windows, a JDK or the network, so CI is the authority for them; the L3 job
-is the only one that can say a live window still works, and it is dispatched by hand — see
+is the only one that can say a live window still works. It is dispatched by hand, and the pipeline
+requires its result: no green `windows-gui.yml` run on the tagged commit, no release — see
 "What is deliberately not automated" below.
 
 ## Then
 
 1. **Bump the version, write the changelog entry, and open a pull request.** The bump is
    reviewed like anything else, and **CI has to be green before it merges**.
-2. **Tag the merged commit and push the tag.** Annotated, with the version in the message — the
+2. **Dispatch L3 on the merged commit, and wait for it to be green.** It is the only layer that
+   can say a live window still works, the job is `workflow_dispatch`-only, and the pipeline now
+   requires a successful run on the commit being tagged:
+
+   ```console
+   gh workflow run windows-gui.yml -f java=17
+   gh run watch
+   ```
+3. **Tag the merged commit and push the tag.** Annotated, with the version in the message — the
    tag is what the sdist was built from, and the message is what `git show` prints for it:
 
    ```console
    git tag -a v0.1.0 -m "pyjab-mcp 0.1.0"
    git push origin v0.1.0
    ```
+4. **Approve the publish — the release's one human step.** After `verify` is green, the
+   `publish to PyPI` job stops and waits. The review appears on that Actions run's page and
+   GitHub emails the reviewer. Approving it resumes the run where it stopped: **nothing has to be
+   re-tagged or re-run.** The `registry` job needs both `verify` and `pypi`, so it waits too.
+5. **If the review is never approved, the release is half-published by construction.**
+   `github-release` needs only `verify`, so it completes on its own: the GitHub release exists
+   with the changelog as its notes while PyPI and the registry do not have the version. That is a
+   delay, not a loss — approving the pending deployment later resumes the same run. **Rejecting**
+   it is different: the run fails at that job, and the way forward is to re-run the failed jobs
+   (a new tag would mean a new *version*, because the `v*` ruleset will not let this one be moved
+   or deleted).
 
-`release.yml` then verifies that the tag matches `__version__`, `server.json` and the changelog,
-runs the suite and the guards, builds and checks the artifact, publishes to PyPI through
+`release.yml` does the rest: it verifies that the tag matches `__version__`, `server.json` and the
+changelog, runs the suite and the guards, builds and checks the artifact, publishes to PyPI through
 Trusted Publishing, publishes the metadata to the MCP Registry, and creates the GitHub release
 with the changelog section as its notes.
 
@@ -253,16 +318,22 @@ Anything submitted should copy the description from `server.json` verbatim — i
 to the registry's rules — and should state the two facts a reviewer asks for: Windows with Java
 Access Bridge enabled, and that the server attaches to an application that is already running.
 
-## What is deliberately not automated## What is deliberately not automated## What is deliberately not automated
+## What is deliberately not automated
 
 * **Choosing the version.** Semantic versioning is a judgement about what changed.
 * **Aggregator listings** (LobeHub, PulseMCP, Smithery, mcp.so). They pull from the official
   registry; a submission is a form on somebody else's site.
-* **The decision to publish.** `tests/e2e` and the `windows-gui.yml` job are the only things
-  that can prove a live window still works, and `windows-gui.yml` is dispatched by hand. A
-  release should follow a green one:
+* **Dispatching L3.** `tests/e2e` and the `windows-gui.yml` job are the only things that can
+  prove a live window still works, and the job is `workflow_dispatch`-only — it runs when
+  somebody asks, and never by itself. The pipeline then *requires* the result: `verify` fails when
+  the tagged commit has no successful `windows-gui.yml` run, so a forgotten dispatch is a refused
+  release rather than an unverified one:
 
   ```console
   gh workflow run windows-gui.yml -f java=17
   gh run watch
   ```
+
+* **Approving the publish.** Whether this version ships is a judgement no rule can make, so it is
+  the one step a person performs — and the `pypi` environment's required review is where they
+  perform it. No agent can click it, by design. See "Who confirms what".
