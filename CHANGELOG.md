@@ -16,6 +16,17 @@ Nothing yet.
 
 ### Added
 
+* **The foreground gap is tracked as data rather than as a note (R5).** `java_send_keys` sends a
+  chord to whatever has the keyboard focus, and the only supported way to give a window focus
+  today is an interactive call — a click, which activates whatever it lands on. That is the side
+  effect a shortcut exists to avoid, so "click something harmless first" is a workaround, and
+  `java_diagnostics` now reports the gap itself: a probe for a public foreground API, the
+  requirement behind it, and the upstream issue ([pyjab#180](https://github.com/gaozhao1989/pyjab/issues/180))
+  it is waiting on. The day pyjab ships one, the readiness check says READY and a
+  `java_focus_window` tool takes an hour.
+
+### Added
+
 * **`--help` says where to get help, and what the free version includes.** The plan's F1 asked
   for a commercial-support line inside `java_diagnostics`'s output; that output is structured
   findings an agent reads to work out what is wrong with an environment, and a support address

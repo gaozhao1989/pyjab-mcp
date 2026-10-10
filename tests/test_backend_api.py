@@ -355,3 +355,29 @@ def test_a_chord_pyjab_does_not_recognise_is_an_error_rather_than_a_no_op():
 
     assert "banana" in str(caught.value)
     assert driver.keys_sent == [], "nothing was sent"
+
+
+def test_the_foreground_requirement_names_the_upstream_issue_and_the_gap():
+    """R5 exists so the workaround in java_send_keys's reply is not mistaken for a feature."""
+    message = requirement("bring_to_foreground").message()
+
+    assert "bring an attached window to the foreground" in message
+    assert "_set_window_foreground" in message, "the private helper is the reason it is a gap"
+    assert "gaozhao1989/pyjab#180" in message, "and where it is tracked"
+    assert "interactive call" in message, "the measured workaround is part of the reason"
+
+
+def test_the_probe_reports_the_foreground_gap():
+    """`java_diagnostics` has to say it, or the gap lives only in a docstring."""
+    facts = {fact.name: fact for fact in probe_public_api().facts}
+
+    fact = facts["public way to bring a window to the foreground"]
+    from pyjab_mcp import backend as backend_module
+
+    assert fact.status in {
+        backend_module.AVAILABLE, backend_module.MISSING, backend_module.UNKNOWN
+    }
+    if fact.status == MISSING:
+        assert "gaozhao1989/pyjab#180" in fact.detail, (
+            "the fact an operator reads has to say where the gap is tracked"
+        )

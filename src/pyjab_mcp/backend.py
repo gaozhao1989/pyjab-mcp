@@ -79,6 +79,27 @@ class Requirement:
 
 REQUIREMENTS: "tuple[Requirement, ...]" = (
     Requirement(
+        key="bring_to_foreground",
+        blocks=(
+            "java_focus_window, and every flow where a chord has to reach a window that is "
+            "not the focused one"
+        ),
+        wanted=(
+            "a public way to bring an attached window to the foreground: "
+            "Win32Utils._set_window_foreground(hwnd) is private and used from twelve places "
+            "inside jabelement.py"
+        ),
+        why=(
+            "java_send_keys sends to whatever has the keyboard focus, and the only supported "
+            "way to give a window focus today is an interactive call -- a click -- which "
+            "activates whatever it lands on. That is precisely the side effect a shortcut "
+            "exists to avoid, so 'click something harmless first' is a workaround and not a "
+            "feature. Measured upstream in gaozhao1989/pyjab#180: attaching a window does not "
+            "focus it, and an interactive call does."
+        ),
+        expected_in="a pyjab release after 1.10.0; tracked as gaozhao1989/pyjab#180",
+    ),
+    Requirement(
         key="send_keys",
         blocks="java_send_keys, and therefore any shortcut that is not plain text",
         wanted="a public way to send a key sequence or shortcut (e.g. alt+y) to a window",
@@ -215,6 +236,7 @@ def probe_public_api() -> PyjabApiReport:
         ),
         _probe_walk(),
         _probe_keys(),
+        _probe_foreground(),
         _probe_detach(),
         Fact(
             "pyjab.inspector (CLI fallback)",
@@ -275,6 +297,43 @@ def _probe_keys() -> Fact:
         "every key helper pyjab has is private (Win32Utils._press_key, _send_keys, ...), and "
         "send_text() types text rather than a modifier chord; "
         + requirement("send_keys").expected_in,
+    )
+
+
+def _probe_foreground() -> Fact:
+    """Whether an attached window can be brought to the foreground through public API.
+
+    The candidate names are guesses at the shape it would take, and the fact says so when it
+    finds none -- the same shape as the key probe. pyjab#180 is where the gap is recorded
+    upstream; what this project needs from it is a supported way to do what
+    ``_set_window_foreground`` does, without reaching into the private helper.
+    """
+    name = "public way to bring a window to the foreground"
+    try:
+        from pyjab.common.win32utils import Win32Utils  # noqa: PLC0415 - Windows only
+        from pyjab.jabdriver import JABDriver  # noqa: PLC0415 - Windows only
+        from pyjab.jabelement import JABElement  # noqa: PLC0415 - Windows only
+    except ImportError as exc:
+        return Fact(name, UNKNOWN, f"cannot be imported here: {exc}")
+    candidates = (
+        (Win32Utils, "set_window_foreground"),
+        (Win32Utils, "bring_to_foreground"),
+        (Win32Utils, "foreground_window"),
+        (JABDriver, "bring_to_foreground"),
+        (JABDriver, "set_foreground"),
+        (JABDriver, "activate"),
+        (JABElement, "bring_to_foreground"),
+        (JABElement, "set_foreground"),
+    )
+    for owner, candidate in candidates:
+        if hasattr(owner, candidate):
+            return Fact(name, AVAILABLE, f"{owner.__name__}.{candidate}()")
+    return Fact(
+        name,
+        MISSING,
+        "every foreground helper pyjab has is private (Win32Utils._set_window_foreground), and "
+        "the supported way to give a window focus is an interactive call -- which activates "
+        "what it lands on; " + requirement("bring_to_foreground").expected_in,
     )
 
 

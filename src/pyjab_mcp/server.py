@@ -1117,8 +1117,9 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
             f"Sent {keys!r}. The chord goes to whichever window has the keyboard focus, and "
             "nothing focused one for you: if the application did not react, click something "
             "harmless in it first — an interactive call is what brings a window forward in "
-            "pyjab (there is no public way to focus one yet: pyjab#180). Then check the "
-            "result with java_get_text, java_snapshot or java_wait_for."
+            f"pyjab. There is no public way to focus one yet "
+            f"({requirement('bring_to_foreground').expected_in}). Then check the result with "
+            "java_get_text, java_snapshot or java_wait_for."
         )
 
     # -----------------------------------------------------------------------------
