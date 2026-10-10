@@ -214,20 +214,21 @@ download for the same reason.
 
 ## Aggregator listings
 
-The official registry is the source the aggregators read, so this comes **after** a release is
-registered — there is nothing to submit before that. The order below is cheapest first, and none
-of it can be automated: each is a form on somebody else's site, and two of them want an account.
+**Verified on 2026-10-10** against each site, because the mechanism is not what it looks like:
+the official Registry's own documentation says aggregators are *downstream consumers* that
+**scrape its read-only REST API on an infrequent schedule (about hourly)**. So the listing is
+driven by the registry entry, not by a form — a form is an accelerant for the sites that have
+one, and for others it is a different thing entirely.
 
-| site | what it asks for | notes |
+The order is therefore: **the registry entry first** (done: `io.github.gaozhao1989/pyjab-mcp`,
+`status: active`), then check each site, then submit only where there is something to submit.
+
+| site | mechanism, as measured | what to do |
 |---|---|---|
-| **LobeHub** | the registry entry or the GitHub repository | Usually finds a registered server on its own; a submission is a form with the name and a one-line description. |
-| **PulseMCP** | the server name and repository URL | Also crawls the registry; usually appears without a submission shortly after registration. |
-| **Smithery** | the package and how to run it | Wants a runnable command: `uvx pyjab-mcp` is what `server.json` already declares as the runtime hint. It may ask for a Windows/Java note — this server cannot run anywhere else. |
-| **mcp.so** | name, description, repository, category | A plain directory listing with no verification. |
-
-Copy the description from `server.json` verbatim. It is already written to the registry's rules
-(one line, capabilities rather than implementation, under 100 characters), so paraphrasing it for
-each site is how the listings end up disagreeing with the registry about what this is.
+| **LobeHub** | A GitHub issue in [`lobehub/lobehub`](https://github.com/lobehub/lobehub/issues), titled `[Server Submission]: <name>`. Its template asks for name, repository, publisher, licence, **transport**, and the **official Registry name** — which is the part worth having registered first. | Open the issue with the fields in the template. Nothing else is needed; the crawler may also find it on its own. |
+| **PulseMCP** | Crawls the registry, and its own site said on 2026-10-10: *"New server submissions and listing changes are still paused while we rework how we ingest and manage listings."* | **Nothing to submit right now.** Check `/servers?q=pyjab-mcp` after the crawler has run; re-check `/submit` when they reopen. |
+| **Smithery** | **Not a form.** Two publishing paths: a public **Streamable HTTP** URL (the gateway proxies to your server), or a local **MCPB bundle**. | The URL path is blocked by a deliberate decision here — this server is stdio-only (`README`, "Deliberately not in scope"). The MCPB path is real work: a bundle manifest plus the Windows/JDK requirement stated where a user will see it. Decide whether it is worth it; skipping it is a legitimate answer. |
+| **mcp.so** | A submission form at <https://mcp.so/submit>, plus its own crawl. | Submit with the registry name, repository and the `server.json` description. It asks for an account. |
 
 Two things to say in every submission, because they are the questions a reviewer asks:
 
@@ -236,10 +237,15 @@ Two things to say in every submission, because they are the questions a reviewer
   questions;
 * it **attaches to an application that is already running** and never launches or restarts one.
 
-After submitting, the plan's criterion is met at **three** listings; the count is in the project's
-readiness notes rather than here, because it is a fact about accounts rather than about code.
+**Copy the description from `server.json` verbatim.** It is already written to the registry's
+rules (one line, capabilities rather than implementation, under 100 characters), so paraphrasing
+it per site is how the listings end up disagreeing about what this is.
 
-## What is deliberately not automated
+**The plan's list is a starting point, not a contract.** Two of the four are paused or
+inapplicable as measured above, so reaching three listings may mean a different three; the
+registry's own aggregator documentation is where to look for what consumes it today.
+
+## What is deliberately not automated## What is deliberately not automated
 
 * **Choosing the version.** Semantic versioning is a judgement about what changed.
 * **Aggregator listings** (LobeHub, PulseMCP, Smithery, mcp.so). They pull from the official
