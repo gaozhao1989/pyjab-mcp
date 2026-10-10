@@ -254,6 +254,15 @@ jobs:
         with:
           python-version: "3.12"
 
+      # The packer checks each vendored tree against the *target* interpreter's PEP 508 markers
+      # -- `pip --python-version` changes which wheels are eligible and nothing else -- and that
+      # needs `packaging`. It is a declared dependency of `build` and `twine`, so it arrives
+      # through the project's own dev extra rather than being named a second time here.
+      - name: Install the build tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
       - uses: actions/download-artifact@v4
         with:
           name: dist
@@ -262,8 +271,8 @@ jobs:
       # The packaging logic is `tools/build_mcpb.py` and not a `run:` block, for the same
       # reason the L3 verdict and the pre-flight are scripts: it is pinned offline by
       # tests/test_packaging.py, which a shell snippet inside YAML cannot be. What stays here
-      # is the invocation and nothing else -- including `--validate-with-mcpb`, which runs
-      # Anthropic's own schema check over the manifest on top of the script's field validation.
+      # is the invocation and nothing else -- including `--validate-with-mcpb`, which has the
+      # packer hand Anthropic's CLI the manifest read back *out of the built archive*.
       - name: Build the MCPB bundle
         run: python tools/build_mcpb.py --dist dist --out dist --validate-with-mcpb
 
@@ -274,12 +283,16 @@ jobs:
           name: mcpb
           path: dist/*.mcpb
 
-      # The only step whose subject is the release, and the only conditional one. No
-      # `--clobber`: a released asset is not replaced, so a re-run that finds the bundle
+      # The only step whose subject is the release, and the only conditional one. It is gated on
+      # the release *existing*: `always()` lets this job run when `github-release` failed on a
+      # tag, and without the second half of this condition the failure would surface here as a
+      # secondary "release not found", hiding the cause. Not running is the honest outcome.
+      #
+      # No `--clobber`: a released asset is not replaced, so a re-run that finds the bundle
       # already attached fails and says so rather than quietly publishing a different file --
       # the dependencies are resolved fresh on every run, so two builds are not byte-identical.
       - name: Attach the bundle to the release
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && needs.github-release.result == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "${{ github.ref_name }}" dist/*.mcpb

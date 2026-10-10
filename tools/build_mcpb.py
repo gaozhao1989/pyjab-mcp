@@ -66,9 +66,25 @@ import sys
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, NamedTuple, Optional, Sequence, Set
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# `packaging` is what evaluates a PEP 508 marker, and the closure check below cannot be written
+# without it. It is a declared dependency of `build` and `twine`, both of which are in
+# `[project.optional-dependencies].dev`, so the job that runs this script installs `".[dev]"`
+# rather than naming it a second time -- see the `mcpb` job in `.github/workflows/release.yml`.
+# Asserting that here, rather than at the first use, is what makes "the check silently did not
+# run" impossible: a missing `packaging` is a refusal, not a skipped step.
+try:
+    from packaging.requirements import InvalidRequirement, Requirement
+except ImportError as missing:  # pragma: no cover - the environment is wrong
+    raise SystemExit(
+        f"MISSING TOOL: the dependency closure check needs `packaging` ({missing}).\n"
+        "  It comes in with the project's dev extra:  python -m pip install -e \".[dev]\"\n"
+        "  Without it a vendored tree can be missing a dependency its own target requires, "
+        "and the bundle fails at import on the user's machine."
+    )
 
 # The local-only list is defined once, in the guard that keeps those files out of the sdist,
 # and imported here so the bundle cannot drift from it. Running this file as a script puts
@@ -82,15 +98,29 @@ except ImportError:  # pragma: no cover - the script path
 #: The tracked entry script, copied into the bundle verbatim.
 ENTRY_SCRIPT = REPO_ROOT / "mcpb" / "entry.py"
 
+#: The file the host reads first, and the one this script writes and checks.
+MANIFEST_NAME = "manifest.json"
+
 #: Where the vendored dependency trees go inside the bundle, and what the entry script looks
 #: for. The two are one fact: `mcpb/entry.py` computes ``vendor/cp3XX`` from ``sys.version_info``.
 SERVER_DIR = "server"
 VENDOR_DIR = "server/vendor"
 ENTRY_IN_BUNDLE = "server/entry.py"
 
-#: The wheel platform the bundle targets. The bundle is for Windows, and a wheel tagged
-#: ``win_amd64`` is what a 64-bit Python on Windows loads.
-DEFAULT_PLATFORM = "win_amd64"
+#: The wheel platform this packer builds for, and the *only* one it will.
+#:
+#: Not a default that a flag may change: the manifest declares `"platforms": ["win32"]`, the
+#: prose says 64-bit, and `mcpb/entry.py` refuses a 32-bit interpreter. So a 32-bit target would
+#: ship wheels no 64-bit interpreter can load while declaring win32 -- a bundle that every one
+#: of its refusals rejects, for a reason nothing in it names. A second target is a second bundle
+#: design (its manifest claim, its prose, its refusal), not a flag, and `build()` refuses
+#: anything else rather than producing one.
+TARGET_PLATFORM = "win_amd64"
+
+#: How many times the closure check may send the packer back to pip. One round is enough for the
+#: markers `pip --python-version` cannot honour; a second covers a dependency of one of those.
+#: The bound exists so that a distribution nothing can satisfy fails the build instead of looping.
+FILL_ROUNDS = 4
 
 #: Dependencies pip cannot see when it is asked for another platform.
 #:
@@ -101,16 +131,24 @@ DEFAULT_PLATFORM = "win_amd64"
 #: inventory this script prints is what makes a missing one visible.
 #:
 #: The same wart has a milder form for ``python_version`` markers: they are evaluated for the
-#: interpreter running the build, so a dependency whose marker says ``python_version >=
-#: "3.11"`` resolves for the *newest* vendored tree and not for the older ones. The wheels
-#: themselves are still fetched by ``--python-version``/``--abi``, which is what decides
-#: whether a native module loads; this only affects which *version* of a pure-Python
-#: dependency each tree gets.
+#: Environment markers are evaluated against the *build* machine, and ``--platform`` does not
+#: change that: ``pywin32>=302; sys_platform == "win32"`` is skipped on Linux even when the
+#: target is ``win_amd64``. Both ``pyjab`` and ``mcp`` depend on pywin32 on Windows, so it is
+#: named explicitly. This is the one place a Windows-only dependency has to be listed, and the
+#: closure check below is what makes a future one visible rather than shipped.
+#:
+#: The same wart decides more than a version: a marker such as ``python_version < "3.11"`` is
+#: false on a newer build machine, so the *dependency itself* never reaches the older tree.
+#: ``anyio`` requires ``exceptiongroup`` that way, and a 3.10 tree without it cannot import
+#: ``anyio`` at all -- which is what the closure check exists to catch, and what
+#: ``FILL_ROUNDS`` below repairs by installing the missing distributions by name.
 TARGET_EXTRAS: Sequence[str] = ("pywin32",)
 
-#: ``references/manifest-schema.md`` is the field reference this is written against. The schema
-#: is ``additionalProperties: false``, so this set is the whole vocabulary: a field that is not
-#: in it is rejected rather than guessed at.
+#: The manifest field vocabulary this packer writes, from the MCPB manifest schema. The schema is
+#: ``additionalProperties: false``, so this set is the whole vocabulary: a field that is not in
+#: it is rejected rather than guessed at. (The field reference this was read from is a
+#: maintainer document that is deliberately not published, so it is not cited here: this file
+#: ships in the sdist, and a reader of the sdist cannot open it.)
 MANIFEST_FIELDS = frozenset({
     "$schema", "manifest_version", "name", "version", "description", "author", "server",
     "display_name", "long_description", "icon", "icons", "homepage", "repository",
@@ -206,8 +244,8 @@ def package_version() -> str:
 def manifest(version: str, minors: Sequence[str]) -> Dict[str, object]:
     """The manifest the bundle carries, for the *minors* it is being vendored for.
 
-    Only fields ``references/manifest-schema.md`` documents appear here. Three documented
-    fields are deliberately absent, because inventing a value for them would be a guess:
+    Only fields the MCPB manifest schema documents appear here. Three documented fields are
+    deliberately absent, because inventing a value for them would be a guess:
 
     * ``compatibility.claude_desktop`` -- no floor has been measured against any host;
     * ``compatibility.runtimes`` -- the honest requirement is a set of Python *minors* whose
@@ -263,10 +301,10 @@ def manifest(version: str, minors: Sequence[str]) -> Dict[str, object]:
 def check_manifest(document: Dict[str, object]) -> List[str]:
     """Every reason this manifest does not match the documented field reference.
 
-    ``references/manifest-schema.md`` documents the schema as ``additionalProperties: false``,
-    so an unknown key is a rejection and not a warning -- the host would refuse the bundle.
-    This is the offline half of the validation; ``--validate-with-mcpb`` runs Anthropic's own
-    CLI over the file as well when the network allows it.
+    The MCPB schema is ``additionalProperties: false``, so an unknown key is a rejection and not
+    a warning -- the host would refuse the bundle. This is the offline half of the validation;
+    ``--validate-with-mcpb`` runs Anthropic's own CLI over the manifest *inside the built
+    archive* as well, when the network allows it.
     """
     problems: List[str] = []
 
@@ -442,17 +480,166 @@ def interpreter_tag(version: str) -> str:
 
 
 # ---------------------------------------------------------------------------------
+# The closure a vendored tree must satisfy, for the interpreter it is vendored for
+# ---------------------------------------------------------------------------------
+#
+# `pip --platform/--python-version/--abi` changes which *wheels* are eligible and which
+# `Requires-Python` values are accepted. It does **not** change environment markers: those are
+# evaluated against the interpreter running the build. So a tree vendored for 3.10 on a 3.12
+# machine is missing every dependency whose requirement is guarded by a marker that is true only
+# on 3.10 -- `anyio` requires `exceptiongroup>=1.0.2; python_version < "3.11"`, and the tree the
+# 3.10 user gets has no `exceptiongroup` in it. `anyio` imports it at module scope under that
+# version check, so the server dies at startup, and the entry script's refusal cannot help: a
+# 3.10 tree *is* present. The check below is the predicate, and the loop in `build()` is the
+# fix -- pip cannot express it, so the distributions it names are installed explicitly.
+#
+# The environment is built for the target, never for the build machine. That is the whole point,
+# and `test_the_closure_check_reads_the_target_interpreter_not_the_build_one` pins it in both
+# directions on whatever interpreter happens to run the tests.
+
+#: The Windows/AMD64 values a marker can ask about, for the runtime the bundle targets.
+TARGET_MARKER_VALUES = {
+    "implementation_name": "cpython",
+    "os_name": "nt",
+    "platform_machine": "AMD64",
+    "platform_python_implementation": "CPython",
+    "platform_system": "Windows",
+    "sys_platform": "win32",
+}
+
+
+class Missing(NamedTuple):
+    """One dependency a tree needs and does not contain, and the line that says so."""
+
+    #: The canonical name pip has to be asked for.
+    name: str
+    #: The complaint: the tree, the distribution that asked, and the requirement as written.
+    complaint: str
+
+
+def marker_environment(minor: str) -> Dict[str, str]:
+    """The marker environment of a 64-bit CPython *minor* on Windows."""
+    environment = dict(TARGET_MARKER_VALUES)
+    environment["python_version"] = minor
+    # A marker may compare `python_full_version`; the patch level is not something a vendored
+    # tree can be built for, so the `.0` is a statement about the minor and nothing more.
+    environment["python_full_version"] = minor + ".0"
+    return environment
+
+
+def canonical(name: str) -> str:
+    """A distribution name in the form the metadata uses to compare two of them."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _metadata_requirements(dist_info: Path) -> "tuple[str, List[Requirement]]":
+    """The distribution's name and its parsed ``Requires-Dist`` lines."""
+    name = dist_info.parent.name
+    requires: List[str] = []
+    for line in (dist_info / "METADATA").read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.strip():
+            break  # the headers end at the first blank line; the body is the description
+        field, _, value = line.partition(":")
+        if field.strip().lower() == "name":
+            name = value.strip()
+        elif field.strip().lower() == "requires-dist":
+            requires.append(value.strip())
+    try:
+        return name, [Requirement(text) for text in requires]
+    except InvalidRequirement as error:
+        raise SystemExit(
+            f"UNREADABLE METADATA: {dist_info} declares a requirement that is not PEP 508 "
+            f"({error}). The tree cannot be checked, so the bundle is not built."
+        )
+
+
+def _applies(requirement: Requirement, environment: Dict[str, str], extra: Optional[str]) -> bool:
+    """True when this requirement is part of the closure for *environment*, with *extra* asked."""
+    if requirement.marker is None:
+        return True
+    local = dict(environment)
+    # `extra` defaults to the empty string in a PEP 508 evaluation; a requirement guarded by
+    # `extra == "crypto"` is not part of the base closure, which is why the caller runs twice.
+    local["extra"] = extra or ""
+    return requirement.marker.evaluate(local)
+
+
+def unsatisfied_requirements(tree: Path, minor: str) -> List[Missing]:
+    """Every requirement the distributions in *tree* declare for *minor* and the tree lacks.
+
+    *tree* is a directory as ``pip install --target`` leaves it: one ``*.dist-info`` per
+    distribution. The answer is about the interpreter the tree was vendored for, not the one
+    running this script, which is the defect this exists to catch.
+    """
+    installed: Dict[str, "tuple[str, List[Requirement]]"] = {}
+    for dist_info in sorted(tree.glob("*.dist-info")):
+        if (dist_info / "METADATA").is_file():
+            name, requires = _metadata_requirements(dist_info)
+            installed[canonical(name)] = (name, requires)
+
+    environment = marker_environment(minor)
+
+    # Which extras are asked of which distribution is a static fact on the requirement that asks
+    # for it, so one pass collects them: `mcp` requires `pyjwt[crypto]`, and `cryptography` -- a
+    # requirement of that extra -- is otherwise invisible to this check.
+    asked: Dict[str, Set[str]] = {}
+    for _, requires in installed.values():
+        for requirement in requires:
+            if requirement.extras and _applies(requirement, environment, None):
+                asked.setdefault(canonical(requirement.name), set()).update(requirement.extras)
+
+    missing: List[Missing] = []
+    for key, (name, requires) in sorted(installed.items()):
+        for extra in [None, *sorted(asked.get(key, ()))]:
+            for requirement in requires:
+                if not _applies(requirement, environment, extra):
+                    continue
+                if canonical(requirement.name) in installed:
+                    continue
+                where = f" (the {extra!r} extra)" if extra else ""
+                missing.append(Missing(
+                    canonical(requirement.name),
+                    f"{tree.name}: {name} requires {requirement}{where}, and the tree has no "
+                    f"{canonical(requirement.name)}",
+                ))
+    return missing
+
+
+def fill_closure(tree: Path, minor: str, platform: str) -> None:
+    """Install, by name, whatever this tree's own target requires and the tree does not have.
+
+    This is the fix for what the check detects, and it is why the check *drives* the build
+    rather than only reporting: pip cannot be asked to evaluate markers for another interpreter,
+    so the distributions its resolver dropped are installed explicitly instead.
+    """
+    remaining = unsatisfied_requirements(tree, minor)
+    for _ in range(FILL_ROUNDS):
+        if not remaining:
+            return
+        names = sorted({item.name for item in remaining})
+        print(f"  {tree.name}: CPython {minor} needs {names}; installing them by name")
+        pip_install(tree, minor, platform, names)
+        remaining = unsatisfied_requirements(tree, minor)
+    raise SystemExit(
+        f"UNSATISFIED DEPENDENCIES in {tree.name} for CPython {minor}:\n"
+        + "\n".join(f"  {item.complaint}" for item in remaining)
+        + f"\n  {FILL_ROUNDS} rounds of installing what the target's markers asked for did not "
+        "satisfy the tree, so the bundle is not built: it would fail at import on a machine it "
+        "claims to support."
+    )
+
+
+# ---------------------------------------------------------------------------------
 # Building
 # ---------------------------------------------------------------------------------
 
 
-def install(target: Path, wheel: Path, version: str, platform: str, dependencies: bool) -> None:
-    """Install the wheel, and its closure, into *target* for one interpreter.
+def pip_install(target: Path, version: str, platform: str, requirements: Sequence[str],
+                offline: bool = False) -> None:
+    """One ``pip install --target``, for the *target* interpreter and platform.
 
-    With ``dependencies`` the closure is resolved for ``platform``/``version`` instead of for
-    the machine running the build, which is what makes the bundle a Windows bundle even when
-    it is built on Linux. Without it -- the path the tests take -- pip is asked for the wheel
-    alone and no index is consulted, so the whole run is offline.
+    ``offline`` is the path the tests take: the wheel alone, with no index consulted, so a stub
+    ``dist/`` builds a bundle without a network.
     """
     command = [
         sys.executable, "-m", "pip", "install",
@@ -464,10 +651,9 @@ def install(target: Path, wheel: Path, version: str, platform: str, dependencies
         "--implementation", "cp",
         "--abi", interpreter_tag(version),
     ]
-    if dependencies:
-        command += [str(wheel), *TARGET_EXTRAS]
-    else:
-        command += ["--no-deps", "--no-index", str(wheel)]
+    if offline:
+        command += ["--no-deps", "--no-index"]
+    command += [str(requirement) for requirement in requirements]
 
     # PYTHONDONTWRITEBYTECODE is belt to `--no-compile`'s braces: a __pycache__ that appears
     # anyway fails the build rather than being shipped, so it is worth not creating one.
@@ -483,15 +669,30 @@ def install(target: Path, wheel: Path, version: str, platform: str, dependencies
         )
 
 
-def validate_with_mcpb(manifest_path: Path) -> List[str]:
-    """Run Anthropic's own ``mcpb validate`` over the manifest, and fail if it rejects it.
+def install_tree(target: Path, wheel: Path, version: str, platform: str,
+                 dependencies: bool) -> None:
+    """Put our wheel, and its closure, into *target*.
 
-    The CLI ships as an npm package, so reaching it is a network operation and it is asked for
-    explicitly (``--validate-with-mcpb``). It is an *extra* check over the offline field
-    validation above, never a replacement: the offline one is the one that can run in a unit
-    test. A non-zero exit fails the build, because a check the build ignores is decoration --
-    and "the CLI could not be reached" is reported as its own outcome rather than being
-    mistaken for a pass.
+    With ``dependencies`` pip resolves the closure for ``platform``/``version`` -- which is what
+    makes the bundle a Windows bundle even when it is built on Linux -- and that is where the
+    resolver stops being able to help: see :func:`unsatisfied_requirements`.
+    """
+    if dependencies:
+        pip_install(target, version, platform, [wheel, *TARGET_EXTRAS])
+    else:
+        pip_install(target, version, platform, [wheel], offline=True)
+
+
+def validate_with_mcpb(bundle: Path, run=subprocess.run) -> List[str]:
+    """Check the *artifact* with Anthropic's CLI: the manifest inside it, and the archive.
+
+    The manifest is read back out of the ``.mcpb`` rather than validated from the staging copy,
+    which is deleted when the build ends: the archive is what the host installs, so the archive
+    is what is asked about. ``mcpb info`` runs as well, and it is described as what it is --
+    measured, it exits 0 for a bundle whose manifest carries an undeclared field, so it shows
+    the archive is readable by the tool and proves nothing about the manifest. ``validate`` is
+    the check that can refuse, and a refusal fails the build: a check the build ignores is
+    decoration.
     """
     executable = shutil.which("npx") or shutil.which("mcpb")
     if not executable:
@@ -502,20 +703,37 @@ def validate_with_mcpb(manifest_path: Path) -> List[str]:
     base = [executable] if executable.endswith("mcpb") else [
         executable, "--yes", "@anthropic-ai/mcpb"
     ]
-    version = subprocess.run(base + ["--version"], capture_output=True, text=True)
-    result = subprocess.run(base + ["validate", str(manifest_path)], capture_output=True,
-                            text=True)
-    output = (result.stdout + result.stderr).strip()
-    if result.returncode != 0:
+    version = run(base + ["--version"], capture_output=True, text=True)
+    with zipfile.ZipFile(bundle) as archive:
+        extracted = archive.read(MANIFEST_NAME)
+
+    lines: List[str] = []
+    with tempfile.TemporaryDirectory(prefix="pyjab-mcp-validate-") as scratch:
+        path = Path(scratch) / MANIFEST_NAME
+        path.write_bytes(extracted)
+        validate = run(base + ["validate", str(path)], capture_output=True, text=True)
+    output = (validate.stdout + validate.stderr).strip()
+    lines.append(
+        f"  mcpb {version.stdout.strip() or '?'} validate (the manifest inside the archive): "
+        f"exit {validate.returncode}"
+        + (f" -- {output.splitlines()[-1]}" if output else "")
+    )
+    if validate.returncode != 0:
         raise SystemExit(
-            f"MCPB CLI REJECTED THE MANIFEST: `{' '.join(base)} validate` exited "
-            f"{result.returncode}.\n{output[-2000:]}\n"
-            "  This is the schema the host will apply, so the bundle is not built."
+            f"MCPB CLI REJECTED THE MANIFEST IN THE ARCHIVE: `{' '.join(base)} validate` exited "
+            f"{validate.returncode}.\n{output[-2000:]}\n"
+            "  This is the schema the host will apply to the file it installs, so the bundle is "
+            "not built."
         )
-    return [
-        f"  mcpb {version.stdout.strip() or '?'} validate {manifest_path.name}: exit 0",
-        "  " + output.splitlines()[-1] if output else "",
-    ]
+
+    info = run(base + ["info", str(bundle)], capture_output=True, text=True)
+    lines.append(f"  mcpb info {bundle.name}: exit {info.returncode}")
+    if info.returncode != 0:
+        raise SystemExit(
+            f"MCPB CLI COULD NOT READ THE ARCHIVE: `{' '.join(base)} info` exited "
+            f"{info.returncode}.\n{(info.stdout + info.stderr).strip()[-2000:]}"
+        )
+    return lines
 
 
 def _inventory(root: Path) -> List[str]:
@@ -549,11 +767,19 @@ def build(
     dist: Path,
     out: Path,
     versions: Sequence[str],
-    platform: str = DEFAULT_PLATFORM,
+    platform: str = TARGET_PLATFORM,
     dependencies: bool = True,
     with_mcpb: bool = False,
 ) -> Path:
     """Build the bundle from the wheel in *dist* and return the file it wrote."""
+    if platform != TARGET_PLATFORM:
+        raise SystemExit(
+            f"UNSUPPORTED TARGET: --platform {platform!r}. This packer builds {TARGET_PLATFORM!r} "
+            "and nothing else, because everything else about the bundle is already committed to "
+            "it: the manifest declares win32, the prose says 64-bit, and `mcpb/entry.py` refuses "
+            "a 32-bit interpreter. A different target would declare one thing and ship another, "
+            "so it needs its own manifest claim, its own prose and its own refusal -- not a flag."
+        )
     version = package_version()
     wheel = find_wheel(dist)
     declared = wheel_version(wheel)
@@ -598,20 +824,22 @@ def build(
             raise SystemExit("INVALID MANIFEST:\n" + "\n".join(f"  {p}" for p in problems))
 
         for minor in versions:
-            install(staging / VENDOR_DIR / interpreter_tag(minor), wheel, minor, platform,
-                    dependencies)
+            tree = staging / VENDOR_DIR / interpreter_tag(minor)
+            install_tree(tree, wheel, minor, platform, dependencies)
+            if dependencies:
+                fill_closure(tree, minor, platform)
 
         problems = staged_problems(staging)
         if problems:
             raise SystemExit("REFUSING TO PACK:\n" + "\n".join(f"  {p}" for p in problems))
 
         _inventory_lines = _inventory(staging)
-        if with_mcpb:
-            print("\n".join(validate_with_mcpb(manifest_path)))
-
         _zip(staging, bundle)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
+
+    if with_mcpb:
+        print("\n".join(validate_with_mcpb(bundle)))
 
     size = bundle.stat().st_size / (1024 * 1024)
     print(f"  manifest.json  version {version}, from pyjab_mcp.__version__")
@@ -640,8 +868,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--python-versions", default=None,
                         help="comma-separated CPython minors to vendor for "
                              "(default: the classifiers in pyproject.toml)")
-    parser.add_argument("--platform", default=DEFAULT_PLATFORM,
-                        help=f"the wheel platform to vendor for (default: {DEFAULT_PLATFORM})")
+    parser.add_argument("--platform", default=TARGET_PLATFORM,
+                        help=f"the wheel platform to vendor for; only {TARGET_PLATFORM!r} is "
+                             "supported, and anything else is refused rather than built")
     parser.add_argument("--skip-dependencies", action="store_true",
                         help="install the wheel alone, offline: the path the tests take, and "
                              "not a bundle anybody should ship")

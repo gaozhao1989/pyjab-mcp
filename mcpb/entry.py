@@ -69,9 +69,21 @@ def vendored_interpreters() -> "list[str]":
 
 
 def minor(tag: str) -> str:
-    """``cp310`` -> ``3.10``: how a person writes the interpreter a tree is for."""
+    """``cp310`` -> ``3.10``: how a person writes the interpreter a tree is for.
+
+    A CPython ABI tag is ``cp`` followed by the version digits without padding -- ``cp39`` for
+    3.9, ``cp310`` for 3.10 -- so three digits mean a two-digit minor, and a two-digit minor
+    never begins with a zero. A tag that does not fit those shapes is not something this project
+    can have built, and it is reported as the tag it is rather than as a version it is not.
+    """
     digits = tag[2:]
-    return "%s.%s" % (digits[0], digits[1:])
+    if not digits.isdigit():
+        return tag
+    if len(digits) == 3 and digits[1] != "0":
+        return "%s.%s" % (digits[0], digits[1:])
+    if len(digits) == 2:
+        return "%s.%s" % (digits[0], digits[1])
+    return tag
 
 
 def unsupported(present: "list[str]", running=None) -> str:

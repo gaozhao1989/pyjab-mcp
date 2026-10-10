@@ -16,7 +16,7 @@ follows is each client's own way of saying that.
 | **A JDK, Java 8 or later** | The bridge DLL ships with it. Install one and set `JAVA_HOME`. |
 | **JAB enabled** | `"%JAVA_HOME%\bin\jabswitch" -enable`, then **restart the Java application**. |
 | **A Java application already running** | This server only ever **attaches** to applications it did not launch. Nothing here starts your app. |
-| **Python 3.10+** | `pyjab-mcp` supports 3.10–3.13. |
+| **Python 3.10 or newer** | `pip install pyjab-mcp` has no upper bound. The **bundle** is narrower — see "The `.mcpb` bundle" under Claude Desktop — because it carries one compiled dependency tree per minor, and it states the range it carries (`3.10-3.13`) in its own manifest. |
 
 ```console
 pip install pyjab-mcp

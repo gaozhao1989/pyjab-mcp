@@ -245,22 +245,24 @@ def test_the_readme_carries_the_registry_ownership_line():
 # asserted by *executing the file that is in the bundle*, not the file in the repository.
 
 
-def _stub_wheel(dist: Path) -> Path:
+def _stub_wheel(dist: Path, requires=()):
     """A wheel pip installs offline with no dependencies: what `python -m build` would leave.
 
     Real enough for pip (``METADATA``, ``WHEEL``, ``RECORD``), and it declares the package's
     own version, so the packer's "the bundle's contents and its manifest agree" check is
-    exercised rather than bypassed.
+    exercised rather than bypassed. ``requires`` writes ``Requires-Dist`` lines, which is how a
+    test gives the closure check something to read.
     """
     version = pyjab_mcp.__version__
     dist.mkdir(parents=True, exist_ok=True)
     wheel = dist / f"pyjab_mcp-{version}-py3-none-any.whl"
     info = f"pyjab_mcp-{version}.dist-info"
+    declared = "".join(f"Requires-Dist: {text}\n" for text in requires)
     with zipfile.ZipFile(wheel, "w") as archive:
         archive.writestr("pyjab_mcp/__init__.py", f'__version__ = "{version}"\n')
         archive.writestr(
             f"{info}/METADATA",
-            f"Metadata-Version: 2.1\nName: pyjab-mcp\nVersion: {version}\n\n",
+            f"Metadata-Version: 2.1\nName: pyjab-mcp\nVersion: {version}\n{declared}\n",
         )
         archive.writestr(
             f"{info}/WHEEL",
@@ -269,6 +271,19 @@ def _stub_wheel(dist: Path) -> Path:
         )
         archive.writestr(f"{info}/RECORD", "")
     return wheel
+
+
+def _write_dist(root: Path, name: str, version: str, requires=()) -> Path:
+    """An installed distribution as `pip install --target` leaves one: a `*.dist-info`."""
+    root.mkdir(parents=True, exist_ok=True)
+    info = root / f"{name.replace('-', '_')}-{version}.dist-info"
+    info.mkdir(parents=True, exist_ok=True)
+    declared = "".join(f"Requires-Dist: {text}\n" for text in requires)
+    (info / "METADATA").write_text(
+        f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n{declared}\n",
+        encoding="utf-8",
+    )
+    return info
 
 
 #: The interpreter the stub bundle is vendored for. It is the one running the tests, so the
@@ -335,6 +350,17 @@ def unpacked_entry_script(bundle: Path, tmp_path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def unpacked_tree(bundle: Path, tmp_path, tag: str) -> Path:
+    """One ``server/vendor/cp3XX`` tree of the bundle, on disk as the host unpacks it."""
+    root = tmp_path / "bundles" / tag
+    with zipfile.ZipFile(bundle) as archive:
+        for member in archive.namelist():
+            prefix = f"server/vendor/{tag}/"
+            if member.startswith(prefix):
+                archive.extract(member, root)
+    return root / "server" / "vendor" / tag
 
 
 def test_the_bundle_manifest_carries_the_package_version(bundle):
@@ -512,8 +538,9 @@ def test_the_manifest_validator_refuses_a_manifest_missing_a_required_field():
 # artefact, in both directions -- rather than with anything the packer says about itself.
 
 #: The manifest's list of the minors it carries: a parenthesised, comma-separated run of version
-#: numbers. Anchored on that shape rather than on a sentence, so the prose around it is free.
-DECLARED_MINORS = re.compile(r"\((\d+\.\d+(?:,\s*\d+\.\d+)+)\)")
+#: numbers -- one entry is a list too. Anchored on that shape rather than on a sentence, so the
+#: prose around it is free.
+DECLARED_MINORS = re.compile(r"\((\d+\.\d+(?:,\s*\d+\.\d+)*)\)")
 
 
 @pytest.fixture(scope="module")
@@ -545,8 +572,15 @@ def declared_bundle(tmp_path_factory):
     return out / f"pyjab-mcp-{pyjab_mcp.__version__}.mcpb"
 
 
-def test_the_bundles_declared_python_support_is_what_it_vendors(declared_bundle):
-    """The manifest's range and the zip's trees are one fact, and the docs agree with both."""
+def test_the_bundles_declared_python_support_is_what_it_vendors(declared_bundle, tmp_path):
+    """The declared range, the trees, the closure they satisfy, and the prose: one fact.
+
+    Directory *names* alone were not enough. A tree can be present under the right name and be
+    unable to import its own closure -- `exceptiongroup` never reached the 3.10 tree, because
+    `pip --python-version` does not move environment markers -- and that is the state this
+    compares against now, tree by tree. The prose is checked in the three places a user reads
+    it, so a tree added or dropped cannot leave the claim behind.
+    """
     import tools.build_mcpb as packer
 
     document = bundle_manifest(declared_bundle)
@@ -569,15 +603,172 @@ def test_the_bundles_declared_python_support_is_what_it_vendors(declared_bundle)
         "one of the two has to move"
     )
 
+    # The trees themselves, unpacked: a name is not a closure. The fixture's stub distribution
+    # declares no requirements, so what this catches end to end is a tree the check cannot read;
+    # the substantive evidence for the closure is
+    # `test_the_packer_fills_a_tree_the_target_markers_left_short` and the real build.
+    for tag in carried:
+        tree = unpacked_tree(declared_bundle, tmp_path, tag)
+        remaining = packer.unsatisfied_requirements(tree, tag)
+        assert remaining == [], (
+            f"{tag} does not satisfy its own target's requirements: "
+            + "; ".join(item.complaint for item in remaining)
+        )
+
     stated = packer.python_range(declared)
     assert stated in described, (
         f"the manifest's prose does not state the range it carries ({stated!r}): {described!r}"
     )
-    for page in ("README.md", "docs/CLIENTS.md"):
+    for page in ("README.md", "docs/CLIENTS.md", "CHANGELOG.md"):
         text = (REPO_ROOT / page).read_text(encoding="utf-8")
         assert stated in text, (
             f"{page} does not state the range the bundle covers ({stated!r}). The bundle's "
             "prerequisites are given there, so the prose has to move with the trees."
+        )
+    # ...and the range is about the *bundle*: the install path is not bounded by it, which is
+    # what the en-dash claim in docs/CLIENTS.md used to contradict.
+    for page in ("README.md", "docs/CLIENTS.md"):
+        text = (REPO_ROOT / page).read_text(encoding="utf-8")
+        assert "3.10 or newer" in text, (
+            f"{page} no longer says the `pip install` path is `3.10 or newer`, so the only "
+            f"range it states is the bundle's ({stated!r}) and the two read as the same claim."
+        )
+
+
+def test_the_closure_check_reads_the_target_interpreter_not_the_build_one(tmp_path):
+    """The check that closes the 3.10 defect, proved to look at the target's markers.
+
+    `anyio` requires `exceptiongroup` under `python_version < "3.11"`, and the tree below does
+    not contain it. One tree, two targets: what the *build machine* thinks the marker says is
+    irrelevant -- and the pair of assertions fails on a builder of any version, because the
+    machine's own answer would be the same for both minors.
+    """
+    import tools.build_mcpb as packer
+
+    tree = tmp_path / "cp310"
+    _write_dist(tree, "anyio", "4.15.1",
+                requires=('exceptiongroup>=1.0.2; python_version < "3.11"',))
+
+    missing = packer.unsatisfied_requirements(tree, "3.10")
+    print(missing)
+
+    assert [item.name for item in missing] == ["exceptiongroup"], (
+        "the check did not report the dependency a 3.10 interpreter needs, so it is reading the "
+        "build interpreter's markers: " + repr(missing)
+    )
+    assert "anyio" in missing[0].complaint and "exceptiongroup>=1.0.2" in missing[0].complaint, (
+        "the complaint has to name the distribution that asked and the requirement as written"
+    )
+    assert packer.unsatisfied_requirements(tree, "3.12") == [], (
+        "the same tree must satisfy 3.12's markers, or the check is not reading the target at "
+        "all -- it is applying one interpreter's answer to every tree"
+    )
+
+
+def test_the_closure_check_follows_an_extra_to_its_requirements(tmp_path):
+    """`mcp` requires `pyjwt[crypto]`; `cryptography` is only reachable through that extra."""
+    import tools.build_mcpb as packer
+
+    tree = tmp_path / "cp312"
+    _write_dist(tree, "mcp", "2.3.0", requires=("pyjwt[crypto]>=2.10.1",))
+    _write_dist(tree, "pyjwt", "2.15.1",
+                requires=('cryptography>=3.4.0; extra == "crypto"',))
+
+    missing = packer.unsatisfied_requirements(tree, "3.12")
+    print(missing)
+
+    assert [item.name for item in missing] == ["cryptography"], (
+        "a requirement behind an extra the tree asks for is part of the closure: " + repr(missing)
+    )
+
+
+def test_the_packer_fills_a_tree_the_target_markers_left_short(tmp_path, monkeypatch):
+    """The fix, offline: the check drives an explicit install and the build then passes.
+
+    `pip --python-version` cannot be told to evaluate markers for another interpreter, so the
+    distributions its resolver drops are installed *by name* -- and if a tree is still short
+    after the rounds, the build refuses rather than shipping it. Both installers are replaced
+    here, so this is the loop and the check, not the network.
+    """
+    import tools.build_mcpb as packer
+
+    requirement = 'exceptiongroup>=1.0.2; python_version < "3.11"'
+    dist = tmp_path / "dist"
+    _stub_wheel(dist, requires=(requirement,))
+    asked: "list[str]" = []
+
+    def fake_tree(target, wheel, version, platform, dependencies):
+        _write_dist(target, "pyjab-mcp", pyjab_mcp.__version__, requires=(requirement,))
+
+    def fake_pip(target, version, platform, requirements, offline=False):
+        asked.extend(str(name) for name in requirements)
+        for name in requirements:
+            _write_dist(target, str(name), "1.3.0")
+
+    monkeypatch.setattr(packer, "install_tree", fake_tree)
+    monkeypatch.setattr(packer, "pip_install", fake_pip)
+
+    bundle = packer.build(dist, tmp_path / "out", ["3.10"], dependencies=True)
+
+    assert asked == ["exceptiongroup"], (
+        "the packer did not install the dependency the target's markers require, so a 3.10 user "
+        f"would get a bundle that cannot import it: it asked pip for {asked!r}"
+    )
+    assert bundle.is_file(), "the build did not finish after filling the tree"
+
+
+def test_the_packer_refuses_a_tree_it_cannot_satisfy(tmp_path, monkeypatch):
+    """And when filling cannot succeed, the build stops -- an unsatisfied tree is not shipped."""
+    import tools.build_mcpb as packer
+
+    requirement = 'exceptiongroup>=1.0.2; python_version < "3.11"'
+    dist = tmp_path / "dist"
+    _stub_wheel(dist, requires=(requirement,))
+
+    def fake_tree(target, wheel, version, platform, dependencies):
+        _write_dist(target, "pyjab-mcp", pyjab_mcp.__version__, requires=(requirement,))
+
+    def fake_pip(target, version, platform, requirements, offline=False):
+        pass  # pip "succeeds" and installs nothing, which is the failure being pinned
+
+    monkeypatch.setattr(packer, "install_tree", fake_tree)
+    monkeypatch.setattr(packer, "pip_install", fake_pip)
+
+    with pytest.raises(SystemExit) as caught:
+        packer.build(dist, tmp_path / "out", ["3.10"], dependencies=True)
+
+    message = str(caught.value)
+    print(message)
+    assert "UNSATISFIED DEPENDENCIES" in message
+    assert "exceptiongroup" in message, "the refusal has to name what is missing"
+    assert not list((tmp_path / "out").glob("*.mcpb")), (
+        "a refusal that still leaves a bundle behind is not a refusal"
+    )
+
+
+def test_the_packer_refuses_a_target_platform_the_bundle_cannot_honour(tmp_path):
+    """The target is not a free choice: the manifest, the prose and the refusal all assume it.
+
+    `--platform win32` used to build: the manifest declared win32, the prose said 64-bit, and
+    the zip carried 32-bit wheels that every declared interpreter refuses -- a bundle that
+    contradicts itself and says so nowhere. Only `win_amd64` is supported, and the refusal says
+    why rather than silently shipping something else.
+    """
+    dist = tmp_path / "dist"
+    _stub_wheel(dist)
+
+    result = subprocess.run(
+        [sys.executable, str(PACKER), "--dist", str(dist), "--out", str(tmp_path / "out"),
+         "--python-versions", RUNNING_MINOR, "--skip-dependencies", "--platform", "win32"],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=600,
+    )
+    output = result.stdout + result.stderr
+
+    assert result.returncode != 0, f"a 32-bit bundle was built anyway:\n{output}"
+    assert "UNSUPPORTED TARGET" in output and "win_amd64" in output, output
+    if (tmp_path / "out").exists():
+        assert not list((tmp_path / "out").glob("*.mcpb")), (
+            "a refusal that still leaves a bundle behind is not a refusal"
         )
 
 
@@ -602,7 +793,7 @@ def test_the_entry_script_refuses_an_interpreter_the_bundle_does_not_carry(
     assert code == 2, f"the entry script did not refuse an unsupported interpreter:\n{message}"
     assert "2.7.18" in message, "the message has to name the interpreter it found"
     for tag in tags:
-        assert "%s.%s" % (tag[2], tag[3:]) in message, (
+        assert entry.minor(tag) in message, (
             f"the message does not name {tag}, which the bundle does carry:\n{message}"
         )
     assert "pip install pyjab-mcp" in message, (
@@ -612,4 +803,64 @@ def test_the_entry_script_refuses_an_interpreter_the_bundle_does_not_carry(
         "the refusal is longer than a refusal; it belongs on stderr in front of a person "
         "whose server just did not start"
     )
+
+
+def test_the_entry_script_turns_a_tree_name_into_a_version_and_nothing_else():
+    """A tag this project cannot produce is printed as itself, not as an invented version.
+
+    The supported trees are all ``cp3XX``, so 3.10 is three digits and 3.9 would be two. A tree
+    named anything else is not something the packer can have built, and the refusal says so
+    rather than rendering `cp400` as `4.00`.
+    """
+    spec = importlib.util.spec_from_file_location("entry_module", ENTRY_SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.minor("cp310") == "3.10"
+    assert module.minor("cp39") == "3.9"
+    assert module.minor("cp400") == "cp400", (
+        "a tag outside the shapes this project builds is reported as the tag, not as a version"
+    )
+
+
+def test_the_declared_minor_pattern_accepts_one_minor_as_well_as_many():
+    """The pattern is about the *shape* of the claim, and one supported minor is a shape.
+
+    A one-minor list would otherwise fail the comparison for the wrong reason -- "no list" --
+    which reads as a missing sentence rather than as a range with one entry.
+    """
+    assert DECLARED_MINORS.findall("The minors are (3.10).") == ["3.10"]
+    assert DECLARED_MINORS.findall("The minors are (3.10, 3.13).") == ["3.10, 3.13"]
+    assert DECLARED_MINORS.findall("no version list here") == []
+
+
+def test_the_cli_is_handed_the_manifest_inside_the_archive(bundle, monkeypatch):
+    """The artifact is what gets checked, not the staging copy that the build deletes.
+
+    `--validate-with-mcpb` used to be given the staging `manifest.json`, which is gone by the
+    time the build ends -- so the file a host installs was never the file that was validated.
+    The CLI is replaced here: what is asserted is *which bytes* it would be handed, which is the
+    part of this that a test can hold on to.
+    """
+    import tools.build_mcpb as packer
+
+    monkeypatch.setattr(packer.shutil, "which", lambda name: "/fake/" + name)
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        if "validate" in command:
+            seen["command"] = command
+            seen["bytes"] = Path(command[-1]).read_bytes()
+        return subprocess.CompletedProcess(command, 0, "Manifest schema validation passes!", "")
+
+    lines = packer.validate_with_mcpb(bundle, run=fake_run)
+    print(lines)
+
+    with zipfile.ZipFile(bundle) as archive:
+        inside = archive.read("manifest.json")
+    assert seen.get("bytes") == inside, (
+        "the CLI was not handed the manifest that is inside the archive, so the bundle a host "
+        "installs is not the bundle whose manifest was validated"
+    )
+    assert any("validate (the manifest inside the archive)" in line for line in lines), lines
 

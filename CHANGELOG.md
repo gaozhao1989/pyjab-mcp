@@ -78,7 +78,14 @@ under **Unreleased** until it is tagged.
   of the user who installed it. `README.md`, `docs/CLIENTS.md` and `docs/RELEASING.md` say so
   where a user reads it, and on an interpreter the bundle carries nothing for, `mcpb/entry.py`
   stops with a sentence naming what it found and what the file holds instead of letting an
-  `ImportError` out of a native module name a DLL.
+  `ImportError` out of a native module name a DLL. Each vendored tree is also checked against the
+  **target** interpreter's PEP 508 markers before the bundle is written — `pip --python-version`
+  picks eligible wheels and leaves environment markers alone, so `anyio`'s
+  `exceptiongroup; python_version < "3.11"` was missing from the 3.10 tree entirely and the server
+  would have died at startup on the one interpreter that tree exists for. The check names the
+  tree, the distribution that asked and the requirement as written; the packer installs what it
+  reports by name until every tree is satisfied, and a tree it cannot satisfy fails the build
+  rather than shipping.
 
 
 ## [0.1.2] - 2026-10-10
