@@ -30,6 +30,20 @@ under **Unreleased** until it is tagged.
 
 ### Changed
 
+* **Aggregator directories are no longer a release step.** They were a criterion in the plan; the
+  plan now records why they were dropped, because the reasons were measured rather than assumed.
+  Installation never depended on them — `pip install pyjab-mcp` (verified in a clean venv) and
+  `pip install "git+https://github.com/gaozhao1989/pyjab-mcp"` (verified, 15 tools) are the two
+  channels, and both are in the README. The directories are *downstream consumers* that scrape
+  the official Registry's API, and that entry is live — so the one channel that costs nothing is
+  already open. Of the four the plan named, one had **paused submissions**, one is **not a form
+  at all** (a Streamable HTTP endpoint this project deliberately does not have, or a local MCPB
+  bundle), and two ask for an account or a third-party issue. `docs/RELEASING.md` keeps the
+  measured state of each in a new *Discovery* section, so revisiting is a decision rather than a
+  rediscovery.
+
+### Changed
+
 * **The aggregator guidance was wrong in two places, measured rather than remembered.** The
   Registry's own documentation says aggregators *scrape* its read-only API on an infrequent
   schedule — so the listing follows from the registry entry rather than from a form. Checked
