@@ -88,7 +88,10 @@ REQUIREMENTS: "tuple[Requirement, ...]" = (
             "depending on method names nobody promised, in the one area where a wrong key "
             "does something irreversible to the application."
         ),
-        expected_in="a pyjab minor after 1.10.0; 1.10.0 has no public key API",
+        expected_in=(
+            "a pyjab minor after 1.10.0; 1.10.0 has no public key API. Tracked as "
+            "gaozhao1989/pyjab#168"
+        ),
     ),
 )
 
