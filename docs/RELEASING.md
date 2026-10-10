@@ -55,6 +55,19 @@ read something else.
 **`CHANGELOG.md` has an entry for it, dated in UTC.** A local date can be a day ahead of the tag
 for anyone east of UTC, and the date is part of what gets frozen below.
 
+**The README carries the registry's ownership line.** The registry proves that whoever
+publishes the metadata owns the PyPI package by looking for this exact line *in the published
+package's README*:
+
+```
+mcp-name: io.github.gaozhao1989/pyjab-mcp
+```
+
+It has to be in the README **before** the tag. 0.1.0 published to PyPI and was refused by the
+registry — `PyPI package 'pyjab-mcp' ownership validation failed` — and a published PyPI version
+cannot have its metadata edited, so registering it needed a patch release. `tests/test_packaging.py`
+checks the line against `server.json`'s name so the two cannot drift apart.
+
 **The released sections are untouched:**
 
 ```console
