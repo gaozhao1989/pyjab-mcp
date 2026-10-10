@@ -15,6 +15,10 @@ on:
 
 permissions:
   contents: read
+  # The verify job asks the Actions API whether this commit was ever driven end to end
+  # (windows-gui.yml). Listing workflow runs needs this, and it is the only thing added for
+  # it: read, nothing else.
+  actions: read
 
 jobs:
   verify:
@@ -57,6 +61,92 @@ jobs:
               exit 1
             fi
           }
+
+      # L3 is the only layer that can say a tool call worked against a live window, and
+      # `windows-gui.yml` is dispatch-only, so a green default CI run says nothing about it.
+      # "A green L3 run on the tagged commit" is a step in the release procedure
+      # (docs/RELEASING.md) that a human had to remember; this is that rule expressed where the
+      # other "is the tag true" checks live. A tag whose commit was never driven end to end
+      # publishes a live path nothing exercised, and PyPI cannot take it back.
+      #
+      # Two answers that must not be confused: no run of windows-gui.yml at this commit, and
+      # the Actions API could not be read at all. An unread answer is not zero -- a check that
+      # cannot tell "no green run" from "could not read" has to fail, not pass. A dry run
+      # (`workflow_dispatch`) is dispatched on main's HEAD, which normally has no L3 run yet, so
+      # -- like the version guard above -- it reports the finding and does not fail the job.
+      - name: L3 was green on this commit (windows-gui.yml)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERDICT="error"
+          else
+            VERDICT="warning"
+          fi
+
+          # `windows-gui.yml` is accepted as the workflow id. head_sha is the commit a run was
+          # dispatched for, and on a tag push github.sha is the tagged commit itself.
+          RUNS="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/windows-gui.yml/runs?head_sha=${GITHUB_SHA}&per_page=100"
+          echo "asking the Actions API for windows-gui.yml runs at ${GITHUB_SHA}"
+
+          BODY="$(mktemp)"
+          CODE="$(curl -sS -o "$BODY" -w '%{http_code}' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$RUNS")" || CODE="000"  # 000: no HTTP response at all (DNS, TLS, timeout)
+
+          if [ "${CODE}" != "200" ]; then
+            # Not a verdict about L3: the gate could not be read.
+            echo "::${VERDICT}::the Actions API could not be read for windows-gui.yml at ${GITHUB_SHA} (HTTP ${CODE}) -- this gate is unverified, which is not the same as satisfied"
+            head -c 2000 "${BODY}" || true
+            echo
+            if [ "${VERDICT}" = "error" ]; then exit 1; fi
+            exit 0
+          fi
+
+          python3 - "${BODY}" "${VERDICT}" "${GITHUB_SHA}" <<'PY'
+          import json
+          import sys
+
+          path, verdict, sha = sys.argv[1], sys.argv[2], sys.argv[3]
+          try:
+              with open(path) as handle:
+                  payload = json.load(handle)
+              runs = payload["workflow_runs"]
+              total = payload["total_count"]
+              if not isinstance(runs, list) or not isinstance(total, int):
+                  raise ValueError("workflow_runs/total_count have an unexpected shape")
+          except (OSError, ValueError, KeyError) as exc:
+              print(f"::{verdict}::the Actions API answer could not be read ({exc!r}) -- unverified, which is not the same as satisfied")
+              raise SystemExit(1 if verdict == "error" else 0)
+
+          print(f"windows-gui.yml at {sha}: {total} run(s) match, {len(runs)} read")
+          for run in runs:
+              print(f"  run {run.get('id')}: event={run.get('event')} status={run.get('status')} "
+                    f"conclusion={run.get('conclusion')} {run.get('html_url')}")
+
+          green = [run for run in runs if run.get("conclusion") == "success"]
+          if green:
+              print(f"PASSED: run {green[0].get('id')} of windows-gui.yml succeeded at {sha} -- "
+                    f"{green[0].get('html_url')}")
+              raise SystemExit(0)
+
+          if total > len(runs):
+              # A run whose conclusion could not be read is not a green run, and candidates
+              # that were never read are not "no green run" either.
+              reason = (f"{total} runs match {sha} but only {len(runs)} were read, so a green "
+                        f"one cannot be ruled out")
+          elif runs:
+              rejected = ", ".join(f"{run.get('id')} ({run.get('status')}/{run.get('conclusion')})"
+                                   for run in runs)
+              reason = f"no run of windows-gui.yml at {sha} succeeded; rejected: {rejected}"
+          else:
+              reason = (f"no windows-gui.yml run exists at {sha}: this commit was never driven "
+                        f"end to end -- dispatch it and let it pass before tagging")
+          print(f"::{verdict}::{reason}")
+          raise SystemExit(1 if verdict == "error" else 0)
+          PY
 
       - name: The portable suite
         run: python -m pytest tests/ -q
