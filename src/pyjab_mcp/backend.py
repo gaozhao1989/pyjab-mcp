@@ -446,6 +446,16 @@ class PyjabBackend:
                     f"the Java Access Bridge is Windows-only, so it cannot list windows "
                     f"here: {exc}"
                 ) from exc
+            except PyjabUnavailable:
+                raise
+            except Exception as exc:  # noqa: BLE001 - any failure here is the environment
+                # On Windows without a usable JDK this is a FileNotFoundError for the bridge
+                # DLL, with pyjab's own probing report inside it -- which is exactly an
+                # environment answer, so it is typed as one and pyjab's text is kept: it says
+                # which directories were searched, and that is worth more than a summary.
+                raise PyjabUnavailable(
+                    f"the Java Access Bridge could not list windows: {exc}"
+                ) from exc
         # Reached only when the installed pyjab is older than this project's pin (or someone
         # has vendored one). Kept because the CLI is a public interface rather than a private
         # one, and because a floor can be worked around -- not because it is expected.

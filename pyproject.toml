@@ -64,6 +64,8 @@ dev = [
 Homepage = "https://github.com/gaozhao1989/pyjab-mcp"
 Repository = "https://github.com/gaozhao1989/pyjab-mcp"
 Issues = "https://github.com/gaozhao1989/pyjab-mcp/issues"
+Changelog = "https://github.com/gaozhao1989/pyjab-mcp/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/gaozhao1989/pyjab-mcp/blob/main/docs/CLIENTS.md"
 
 [project.scripts]
 # The name the MCP client config will use. Not a guess: it is what docs/PLAN.md 4 fixes

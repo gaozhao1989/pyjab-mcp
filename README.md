@@ -87,7 +87,7 @@ pip install -e ".[dev]"
 
 ## Use
 
-Not published yet, so the client config is a path rather than a package name:
+Not published yet, so the client config is a command rather than a package name:
 
 ```json
 {
@@ -97,9 +97,67 @@ Not published yet, so the client config is a path rather than a package name:
 }
 ```
 
+Claude Desktop reads `%APPDATA%\Claude\claude_desktop_config.json`, and takes this (double
+the backslashes — JSON needs it):
+
+```json
+{
+  "mcpServers": {
+    "pyjab-mcp": { "command": "C:\\Users\\you\\.venv\\Scripts\\pyjab-mcp.exe", "args": [] }
+  }
+}
+```
+
+Claude Code writes the same entry for you: `claude mcp add pyjab-mcp -- pyjab-mcp`.
+
+**[docs/CLIENTS.md](docs/CLIENTS.md)** has Cursor and VS Code as well, the config file each
+one reads, the Windows path problem that makes most setups fail, and what to do when a tool
+answers with an error.
+
 Start with `java_diagnostics`. It reports which part of the environment is missing —
 Java Access Bridge not enabled, no bridge DLL, a 32-bit interpreter against a 64-bit JVM —
 instead of leaving a tool call to fail with a locator error.
+
+## What it does, and what it cannot
+
+Java Access Bridge exposes what an application **declares** about itself: a tree of roles,
+names, values, states and the actions a control supports. That is what this server drives, and
+it sets the boundary of what it can reach.
+
+**It works on** Java applications that expose accessibility — Swing and AWT applications and
+applets **running as desktop applications**, and JavaFX where the accessibility bridge is
+present. Buttons, menus, tables, trees, lists, text fields and their values are all readable
+and actionable, and `java_get_table` reads a table's cells through the table's own interface
+rather than the pixels.
+
+**It cannot reach**, because the information is not there to read:
+
+| Not supported | Why |
+|---|---|
+| **Canvas-drawn interfaces** — a `JPanel` painting its own widgets | There are no accessible children, so there is nothing to find, click or read. `java_screenshot` will show you a picture, and a picture is not something you can act on. If a panel like this needs to be driven, the application has to expose the controls. |
+| **Java inside a browser** (an embedded JVM, a Java Web Start descendant) | The browser owns the window and does not publish the applet's Java accessibility tree through JAB. |
+| **Applets in a plugin host** | Same reason: no JAB tree reaches the desktop. |
+| **Non-Java Windows applications** | Nothing here speaks UIA. A UIA-based MCP server is the right tool. |
+| **Anything pixel-based** — reading a screenshot to guess at layout, clicking coordinates | Deliberately out of scope. Guessing at pixels is what this project exists to replace. |
+
+Also worth knowing:
+
+* **The application must be JAB-enabled before it starts.** Enabling JAB afterwards does not
+  add the tree to a process already running; restart it.
+* **This server only attaches.** It never launches an application, and it never terminates one
+  — `JABDriver.detach()` releases the binding and leaves the process running.
+* **A picture is not structure.** `java_screenshot` is for looking; anything you want to
+  *act* on has to be found in the tree, because that is where handles and names live.
+
+## Support
+
+* **Free support** — bugs, questions and feature requests go to
+  [GitHub issues](https://github.com/gaozhao1989/pyjab-mcp/issues). Include the output of
+  `java_diagnostics`: it answers most environmental questions before they are asked.
+* **Commercial and enterprise support** — deployment inside a restricted network, adaptation
+  to a particular application, or an SLA: **gaozhao89@qq.com** (the address in this package's
+  metadata). The open-source package is complete and unrestricted; there is no licence key, no
+  quota and no feature held back for it.
 
 ## Verifying it
 
@@ -122,7 +180,7 @@ green default CI run still says nothing about a live window.
 ```console
 python -m pytest tests/                    # the portable suite, any platform
 python tools/check_pyjab_api_surface.py    # every pyjab call is public, released, recorded
-python tools/check_documented_surface.py   # this README's tool list and the code agree
+python tools/check_documented_surface.py   # docs/ARCHITECTURE.md's tool table and the code agree
 python tools/check_local_only_files.py     # maintainer notes stay unpublished
 python tools/check_pyjab_readiness.py      # what pyjab still owes this project
 python tools/check_pyjab_changelog.py      # every marked pyjab change has an answer here

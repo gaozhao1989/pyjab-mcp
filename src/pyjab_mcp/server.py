@@ -193,7 +193,16 @@ def _tool_error(exc: BaseException) -> ToolError:
         return ToolError(f"the accessibility bridge is not usable: {exc}")
     if isinstance(exc, WindowLookupError):
         return ToolError(str(exc))
-    return ToolError(f"{type(exc).__name__}: {exc}")
+    # Anything else is a failure this server did not anticipate -- and it still gets a next
+    # step, because an error a model cannot act on is only marginally better than a crash.
+    # This is not hypothetical: switching java_list_windows to pyjab 1.10.0's public API let
+    # pyjab's own FileNotFoundError (bridge DLL missing) through with nothing to do about it,
+    # and the L2 test that asks every tool for a next step is what caught it.
+    return ToolError(
+        f"{type(exc).__name__}: {exc}\n"
+        "Run java_diagnostics: it reports whether the bridge DLL, the JAB-enabled setting, "
+        "the pump thread and a Java window are all in place."
+    )
 
 
 def create_server(*, state: Optional[ServerState] = None) -> MCPServer:

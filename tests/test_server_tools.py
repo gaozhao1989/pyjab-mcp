@@ -12,7 +12,7 @@ import pytest
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 
 from pyjab_mcp.backend import PyjabApiGap, PyjabUnavailable, requirement
-from pyjab_mcp.server import ServerState, create_server
+from pyjab_mcp.server import _tool_error, ServerState, create_server
 from pyjab_mcp.backend import ElementChanged, TableReading
 from pyjab_mcp.tree import Record
 from tests._fakebackend import FakeBackend, FakeFactory, window
@@ -690,3 +690,16 @@ async def test_send_keys_answers_with_the_requirement_it_is_waiting_on():
     assert "key sequence or shortcut" in message
     assert "AGENTS.md" in message
     assert "java_set_text" in message, "it should also say what to do instead"
+
+
+async def test_an_unexpected_failure_still_tells_the_model_what_to_do():
+    """The invariant every tool error has to keep, including the ones nobody predicted.
+
+    It was not hypothetical: moving the window listing onto pyjab 1.10.0's public API let a
+    FileNotFoundError for the bridge DLL (Windows, no JDK) reach the model with no next step,
+    and the L2 test that asks every JAB tool for one caught it. This is the L1 half.
+    """
+    error = _tool_error(FileNotFoundError("WindowsAccessBridge-64.dll could not be located"))
+
+    assert "FileNotFoundError" in str(error), "the original failure is not hidden"
+    assert "java_diagnostics" in str(error), "and the model is told where to look next"

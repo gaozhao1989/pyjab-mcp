@@ -12,6 +12,9 @@ machine -- including the ones that only run the tests.
 from __future__ import annotations
 
 import ast
+import json
+import re
+from importlib import metadata
 from pathlib import Path
 
 import pytest
@@ -93,3 +96,58 @@ def test_local_only_files_are_kept_out_of_git_and_out_of_the_sdist():
         "a maintainer note would be published -- run "
         "`python tools/check_local_only_files.py` for the detail"
     )
+
+
+# ---------------------------------------------------------------------------------
+# server.json -- the MCP Registry metadata (M8)
+# ---------------------------------------------------------------------------------
+
+
+def test_server_json_satisfies_the_registry_schema_it_names():
+    """Validated against the fields the registry's own schema requires, not from memory.
+
+    The schema is preview and its field names have changed before -- it uses
+    ``registry_type``/``runtime_hint`` in snake_case, where an earlier draft was camelCase --
+    so the required keys and the name pattern are checked against the URL the file names.
+    """
+    server = json.loads((REPO_ROOT / "server.json").read_text(encoding="utf-8"))
+
+    assert server["$schema"].endswith("server.schema.json")
+    # ServerDetail -> Server: required
+    for key in ("name", "description", "version"):
+        assert server.get(key), f"the registry requires {key!r}"
+    assert re.fullmatch(r"[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+", server["name"]), (
+        "the name is reverse-DNS with exactly one slash"
+    )
+    assert len(server["description"]) <= 100, "the schema caps the description at 100 characters"
+
+    package = server["packages"][0]
+    # Package: required registry_type, identifier, version, transport
+    for key in ("registry_type", "identifier", "version", "transport"):
+        assert package.get(key), f"the registry requires packages[].{key!r}"
+    assert package["registry_type"] == "pypi"
+    assert package["identifier"] == "pyjab-mcp"
+    assert package["transport"] == {"type": "stdio"}, "this server is stdio only"
+
+
+def test_server_json_names_the_release_the_package_builds():
+    """A registry entry pointing at a version that does not exist is worse than none."""
+    server = json.loads((REPO_ROOT / "server.json").read_text(encoding="utf-8"))
+    package_version = metadata.version("pyjab_mcp")
+
+    release = re.match(r"\d+\.\d+\.\d+", package_version)
+    assert release, f"cannot read a release out of {package_version!r}"
+    assert server["version"] == release.group(0), (
+        "server.json names the release, not the development version: it must be "
+        f"{release.group(0)}, not {server['version']!r}"
+    )
+    assert server["packages"][0]["version"] == server["version"], (
+        "the server and its package are the same release"
+    )
+
+
+def test_server_json_points_at_this_repository():
+    server = json.loads((REPO_ROOT / "server.json").read_text(encoding="utf-8"))
+
+    assert server["repository"]["source"] == "github"
+    assert server["repository"]["url"].endswith("gaozhao1989/pyjab-mcp")

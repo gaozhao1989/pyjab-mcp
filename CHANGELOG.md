@@ -226,6 +226,31 @@ under **Unreleased** until it is tagged.
   requirement **and** the way round it: `java_set_text` for text, or the menu item that
   exposes the same action, found with `java_find(role="menu item")` and clicked.
 
+### Added
+
+* **M8: client setup and the boundary of what this can do.** `docs/CLIENTS.md` has the
+  configuration for Claude Desktop, Claude Code, Cursor and VS Code — the file each one reads,
+  the JSON shape, and the two calls to make first. It leads with the failure that accounts for
+  most setups: a client starts the server without your `PATH`, so a virtual environment's
+  `pyjab-mcp` is "not found" until the absolute path is used.
+
+  A README section states what this **cannot** do, because that is the half people discover
+  the hard way: canvas-drawn interfaces (no accessible children at all), Java inside a browser,
+  applets in a plugin host, non-Java applications, and anything pixel-based. `java_screenshot`
+  will show a picture of a canvas; a picture is not something you can act on, and the section
+  says so.
+
+  **`server.json`** for the MCP Registry, with a test that checks it against the fields the
+  registry's schema actually requires — it uses snake_case (`registry_type`, `runtime_hint`),
+  which is not what an earlier draft of that schema said, so it was read rather than
+  remembered — and that the version it names is the release the package builds. A registry
+  entry pointing at a version that does not exist is worse than no entry.
+
+  A **Support** section, as `docs/PLAN.md` F2/F5 planned: free support through GitHub issues,
+  commercial and enterprise support through the address this package already publishes in its
+  metadata. The open-source package stays complete — no licence key, no quota, nothing held
+  back — which the section says outright.
+
 ### Changed
 
 * **The pin is `pyjab>=1.10.0`, and R1 and R2 are retired.** 1.10.0 added

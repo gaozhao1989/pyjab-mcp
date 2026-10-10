@@ -237,3 +237,39 @@ def test_a_detach_that_raises_does_not_stop_the_others(caplog):
     backend.close()
 
     assert backend._drivers == {}
+
+
+def test_a_bridge_that_cannot_be_used_is_an_environment_answer(monkeypatch):
+    """Windows without a JDK: pyjab raises FileNotFoundError for the DLL.
+
+    It is an environment fact, not an unexpected crash, and pyjab's own text says which
+    directories were searched -- so it is kept rather than summarised away.
+    """
+    def listing():
+        raise FileNotFoundError(
+            "Java Access Bridge DLL (WindowsAccessBridge-64.dll) could not be located.\n"
+            "  Install a JDK and set JAVA_HOME"
+        )
+
+    monkeypatch.setattr("pyjab_mcp.backend._public_window_listing", lambda: listing)
+
+    with pytest.raises(PyjabUnavailable) as caught:
+        PyjabBackend().java_windows()
+
+    assert "could not list windows" in str(caught.value)
+    assert "WindowsAccessBridge-64.dll" in str(caught.value), (
+        "pyjab's probing detail is the useful part of this message"
+    )
+    assert "JAVA_HOME" in str(caught.value)
+
+
+def test_a_windows_only_api_off_windows_is_an_environment_answer(monkeypatch):
+    def listing():
+        raise ImportError("pyjab drives the Windows Java Access Bridge and only runs on Windows.")
+
+    monkeypatch.setattr("pyjab_mcp.backend._public_window_listing", lambda: listing)
+
+    with pytest.raises(PyjabUnavailable) as caught:
+        PyjabBackend().java_windows()
+
+    assert "Windows-only" in str(caught.value)
