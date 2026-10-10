@@ -20,6 +20,7 @@ API this file starts working before anyone edits it.
 
 from __future__ import annotations
 
+import importlib.metadata
 import importlib.util
 import sys
 from dataclasses import dataclass
@@ -159,7 +160,11 @@ def probe_public_api() -> PyjabApiReport:
     except Exception as exc:  # noqa: BLE001 - any import failure is the same answer here
         return PyjabApiReport(None, f"{type(exc).__name__}: {exc}", ())
 
-    version = getattr(pyjab, "__version__", None)
+    # The version comes from the installed distribution metadata rather than from
+    # ``pyjab.__version__``.  The dunder is an implementation detail of somebody else's
+    # package, and reading it was a touchpoint the API-surface guard refused to record --
+    # which is the guard doing its job on its first run.
+    version = _installed_version()
     facts = [
         Fact(
             "public java-window listing",
@@ -168,6 +173,7 @@ def probe_public_api() -> PyjabApiReport:
             else requirement("list_java_windows").expected_in,
         ),
         _probe_walk(),
+        _probe_detach(),
         Fact(
             "pyjab.inspector",
             AVAILABLE if importlib.util.find_spec("pyjab.inspector") else MISSING,
@@ -175,6 +181,14 @@ def probe_public_api() -> PyjabApiReport:
         ),
     ]
     return PyjabApiReport(version, None, tuple(facts))
+
+
+def _installed_version() -> Optional[str]:
+    """pyjab's version from distribution metadata, or None when it is not installed."""
+    try:
+        return importlib.metadata.version("pyjab")
+    except importlib.metadata.PackageNotFoundError:
+        return None
 
 
 def _probe_walk() -> Fact:
@@ -186,6 +200,30 @@ def _probe_walk() -> Fact:
     if hasattr(JABElement, "walk"):
         return Fact(name, AVAILABLE, "JABElement.walk -> JABTree (.truncated)")
     return Fact(name, MISSING, "expected in the pyjab minor that carries PR #156")
+
+
+def _probe_detach() -> Fact:
+    """Whether a bound window can be released without terminating its process.
+
+    ``JABDriver.__exit__`` sends ``SIGTERM`` to the bound pid, so it is not a detach.  The
+    names checked are a guess at the shape the public API would take -- the requirement is
+    recorded in :data:`REQUIREMENTS` as ``detach`` -- and the fact says so when it is
+    missing, rather than implying pyjab has nothing.
+    """
+    name = "non-destructive detach"
+    try:
+        from pyjab.jabdriver import JABDriver  # noqa: PLC0415 - Windows only
+    except ImportError as exc:
+        return Fact(name, UNKNOWN, f"cannot be imported here: {exc}")
+    for candidate in ("close", "quit", "detach"):
+        if hasattr(JABDriver, candidate):
+            return Fact(name, AVAILABLE, f"JABDriver.{candidate}()")
+    return Fact(
+        name,
+        MISSING,
+        "only __exit__, which terminates the bound process by pid; "
+        + requirement("detach").expected_in,
+    )
 
 
 # ---------------------------------------------------------------------------------

@@ -47,7 +47,13 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
+    # 1.x in strict mode: the marker on the test is what turns a coroutine into a test.
     "pytest-asyncio>=0.21",
+    # `python -m build` and `python -m twine check`, used by the CI `package` job. Listed
+    # here rather than installed in a workflow `run:` step, because hand-listing is exactly
+    # how pyjab's ci.yml and release.yml drifted and a release failed after its tag.
+    "build>=1.2",
+    "twine>=5.0",
 ]
 
 [project.urls]

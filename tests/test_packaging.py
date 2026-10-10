@@ -82,13 +82,14 @@ def test_local_only_files_are_kept_out_of_git_and_out_of_the_sdist():
     ``.gitignore`` does not protect an sdist, so a note that is ignored by git and not
     pruned by ``MANIFEST.in`` is published by the next ``python -m build``. That is pyjab's
     reasoning, and it has already gone wrong there once.
+
+    The list of local files lives in the guard, once, and this delegates to it rather than
+    repeating the names: ``tools/check_local_only_files.py`` is also what CI runs and what
+    ``tests/test_guards.py`` proves can fail.
     """
-    gitignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
-    manifest = (REPO_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+    from tools.check_local_only_files import check
 
-    for ignored in ("AGENTS.md", "docs/PLAN.md", "docs/DESIGN.md"):
-        assert ignored in gitignore, f"{ignored} is a maintainer note and must stay local"
-        assert f"exclude {ignored}" in manifest, f"{ignored} is not excluded from the sdist"
-
-    assert "/.agents/" in gitignore, "the local skills must not be versioned"
-    assert "prune .agents" in manifest, "the local skills must not be published in an sdist"
+    assert check() == [], (
+        "a maintainer note would be published -- run "
+        "`python tools/check_local_only_files.py` for the detail"
+    )

@@ -10,6 +10,47 @@ under **Unreleased** until it is tagged.
 
 ### Added
 
+* **Guards — five checks that make the project's rules mechanical instead of remembered.**
+  Modelled on pyjab's `tools/check_*.py`, and on its reasoning: a rule kept by hand is kept
+  until somebody is in a hurry. Each prints a report, exits non-zero on a violation, and is
+  pinned by `tests/test_guards.py`, which proves it **can** fail — a checker whose failure
+  path has never run will not run the day it matters.
+
+  * `tools/check_pyjab_api_surface.py` — every pyjab name this package touches must be
+    recorded in `SURFACE` with its status and the release that has it. An unrecorded
+    touchpoint, a private name, a stale entry, a public entry with no version, and above all
+    **an import of an unreleased API** each fail the build. This is the M1 precheck's lesson
+    (the checkout is not the wheel) made a build failure. It found three things on its first
+    run, one of which was this project reading `pyjab.__version__`: the version now comes
+    from distribution metadata, because the dunder was a touchpoint no rule allowed.
+  * `tools/check_documented_surface.py` — the tool table and the module map in
+    `docs/ARCHITECTURE.md` must match what `create_server()` registers and what is on disk.
+    The page gained a module map and a `ships` column so that both directions are checkable:
+    a tool documented as available but not registered, one registered but documented as a
+    later milestone, or a module missing from the map all fail.
+  * `tools/check_local_only_files.py` — one list of local-only paths checked against both
+    mechanisms that keep them out, with `git check-ignore` as the behaviour rather than
+    `.gitignore` as the claim.
+  * `tools/check_dist_contents.py` — the artifact rather than the rules: a built sdist must
+    contain no local-only file and must contain the package, the tests and the guards; the
+    wheel must contain only the package, no stale `build/` copies, and an `entry_points.txt`
+    naming the console script.
+  * `tools/check_pyjab_readiness.py` — the wait for a pyjab release, made re-checkable. It
+    asks the installed pyjab the same questions the code asks, reports `READY` /
+    `NOT READY` per requirement, and exits non-zero under `--require` while something is
+    missing. `UNKNOWN` counts as not ready: "I could not measure it" is not "it is there".
+
+* **A `guards` job and a `package` job in CI.** The guards run as separate steps so a
+  failure names the rule it broke; the package job builds the sdist and wheel, runs
+  `twine check`, checks the artifact with `check_dist_contents.py`, and installs the wheel
+  into a clean environment to prove the console script reaches real code. `build` and
+  `twine` are declared in `[project.optional-dependencies].dev` rather than installed in a
+  workflow step, which is how pyjab's own workflows drifted apart once.
+
+* **`java_diagnostics` now reports a fourth pyjab API fact, `non-destructive detach`.** The
+  R2 gap was recorded in prose and then in `REQUIREMENTS`; the report now also measures it,
+  so "what is pyjab still missing" has one answer in one place.
+
 * **The M1 precheck, run against the installed wheel rather than the sibling checkout.**
   Plan §11 gated M1 on answering "is pyjab's public API enough?", and the answer needed
   care: the sibling checkout is 62 commits past the `v1.8.0` tag, so `JABElement.walk`,
@@ -71,3 +112,12 @@ under **Unreleased** until it is tagged.
 * **`README.md` state is now "M1 shipped, blocked on a pyjab release"** rather than
   "pre-alpha skeleton", and the honest boundary is stated: no tool here has yet driven a
   live Java application.
+
+* **`backend.probe_public_api()` reads pyjab's version from distribution metadata.** It used
+  `pyjab.__version__`, a dunder in somebody else's package — which the API-surface guard
+  refused to record, which is the guard doing its job on its first run. The version it
+  reports is therefore the *installed* one, which is the question diagnostics is asking.
+
+* **`docs/ARCHITECTURE.md` gained a module map and a `ships` column** in the tool table, so
+  that both directions of "the page and the code agree" are checkable, and `README.md`
+  gained a "Working on it" section listing the guards.

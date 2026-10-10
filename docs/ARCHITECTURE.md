@@ -97,18 +97,41 @@ calling it from another *appears to work* — until a dialog opens later and is 
 found. Only an end-to-end test on a real desktop can catch it, and the test is "start the
 executor, wait, open a dialog, then find it".
 
+## Where the code lives
+
+Every module in `src/pyjab_mcp/` is listed here. That is not decoration: a new module
+missing from this table is a signal rather than an oversight, and
+`tools/check_documented_surface.py` fails the build until it is added. pyjab keeps the same
+rule for its own module list.
+
+| file | what |
+|---|---|
+| `src/pyjab_mcp/__init__.py` | the version, and the rule that nothing here imports pyjab at module scope |
+| `src/pyjab_mcp/__main__.py` | the console script: stdio only, and stdout belongs to the protocol |
+| `src/pyjab_mcp/server.py` | the MCP surface — server state, the tool functions, failure messages |
+| `src/pyjab_mcp/bridge.py` | `BridgeThread`: the one thread that owns the bridge, its pump and its work queue |
+| `src/pyjab_mcp/backend.py` | the only module that imports pyjab, plus the recorded requirements it is waiting on |
+| `src/pyjab_mcp/diagnostics.py` | the environment report, where `UNAVAILABLE` is never `0` |
+| `src/pyjab_mcp/windows.py` | plain window records, and turning a title or hwnd into exactly one of them |
+
+`tools/` holds the guards and verification scripts. They ship in the sdist and not in the
+wheel — the same split pyjab uses, and for the same reason: they are maintainer tools, and
+a wheel contains only the package.
+
 ## Tool surface
 
 Deliberately small. Mapping pyjab's sixty-odd methods onto sixty-odd tools would dilute
-the model's tool selection for no gain.
+the model's tool selection for no gain. The `ships` column is checked against what
+`create_server()` actually registers, so a tool cannot be documented as available when it
+is not, or registered without being documented.
 
-| group | tools |
-|---|---|
-| diagnostics | `java_diagnostics` |
-| session | `java_list_windows`, `java_attach_window` |
-| observe | `java_snapshot`, `java_find`, `java_get_element`, `java_get_text`, `java_get_table`, `java_screenshot` |
-| act | `java_click`, `java_set_text`, `java_select`, `java_send_keys`, `java_fill_form` |
-| wait | `java_wait_for` |
+| group | tools | ships |
+|---|---|---|
+| diagnostics | `java_diagnostics` | M1 |
+| session | `java_list_windows`, `java_attach_window` | M1 (blocked on a pyjab release — see the note below) |
+| observe | `java_snapshot`, `java_find`, `java_get_element`, `java_get_text`, `java_get_table`, `java_screenshot` | M2–M6 |
+| act | `java_click`, `java_set_text`, `java_select`, `java_send_keys`, `java_fill_form` | M5 |
+| wait | `java_wait_for` | M6 |
 
 `java_get_table` is where the substrate matters most: it reads a `JTable`'s rows and cells
 through the JVM's own `AccessibleTable` interface, with paging, rather than through a

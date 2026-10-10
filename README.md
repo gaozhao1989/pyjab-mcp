@@ -78,3 +78,19 @@ Not published yet, so the client config is a path rather than a package name:
 Start with `java_diagnostics`. It reports which part of the environment is missing —
 Java Access Bridge not enabled, no bridge DLL, a 32-bit interpreter against a 64-bit JVM —
 instead of leaving a tool call to fail with a locator error.
+
+## Working on it
+
+```console
+python -m pytest tests/                    # the portable suite, any platform
+python tools/check_pyjab_api_surface.py    # every pyjab call is public, released, recorded
+python tools/check_documented_surface.py   # this README's tool list and the code agree
+python tools/check_local_only_files.py     # maintainer notes stay unpublished
+python tools/check_pyjab_readiness.py      # what pyjab still owes this project
+python -m build && python tools/check_dist_contents.py --dist dist
+```
+
+The guards are the project's rules made mechanical, in the same shape pyjab uses for its own:
+a registry of what is allowed, checked in both directions, so adding a call site fails until
+somebody writes down why it is acceptable. `AGENTS.md` §8 lists them and what each one
+enforces.

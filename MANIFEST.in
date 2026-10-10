@@ -4,6 +4,10 @@ include CHANGELOG.md
 include pyproject.toml
 recursive-include src *.py
 recursive-include tests *.py
+# The guards and verification scripts. sdist only, like pyjab's tools/: they are maintainer
+# tools, and a wheel contains only the package. tools/check_dist_contents.py enforces both
+# halves of that sentence.
+recursive-include tools *.py
 
 # ARCHITECTURE.md ships; the two notes below do not. Excluded by name rather than by a
 # pattern over docs/, precisely so that adding a third public page is a one-line change
