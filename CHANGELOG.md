@@ -10,6 +10,26 @@ under **Unreleased** until it is tagged.
 
 ### Changed
 
+* **The release pipeline refuses a tag for a version that is already on PyPI.** The pre-flight
+  that nothing is already published was a line the maintainer's agent remembered, and the
+  pipeline never did it — while `github-release` needs only `verify`, so a duplicate version
+  reached that job *before* `pypi` refused it, producing a GitHub release with no matching
+  package: exactly the half-published state the pre-flight exists to prevent. A new `verify` step
+  asks PyPI's JSON API for the version and hands the answer to
+  `tools/check_release_unpublished.py`, which **proceeds** on 404, **refuses** on 200 (naming the
+  version and the project URL, and the version the index reports when it disagrees), and
+  **refuses as unread** on anything else — a network failure during a release is not permission
+  to continue — and an unparsable 200 is still a refusal, but its line leads with what was seen
+  (an HTTP 200 whose body is not PyPI's JSON) rather than claiming the index named the version.
+  The GitHub-release answer is printed but never changes the verdict, because a re-run of a tag
+  whose release already exists is legitimate. A dry run warns instead of failing, as the version
+  guard and the L3 gate already do. The wiring is pinned by `tests/test_guards.py` in both
+  directions: the step's call has to be the last command it runs, and the job graph that makes
+  `github-release` run *before* `pypi` is asserted, so the hazard cannot return by accident.
+  `docs/RELEASING.md` also records the repair for a *legitimate* refusal — a version already on
+  PyPI because a job after `pypi` failed — which is
+  `gh workflow run publish-registry.yml -f version=X.Y.Z`, not a new tag.
+
 * **The release pipeline refuses a tag whose commit has no successful `windows-gui.yml` run.**
   "L3 before the tag" was a step a person remembered, and the GUI job is not a gate on a pull
   request, so nothing noticed when it was skipped — and PyPI cannot take a release back. The
