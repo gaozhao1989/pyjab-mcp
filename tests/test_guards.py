@@ -20,6 +20,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 import tools.check_dist_contents as dist_guard
 import tools.check_pyjab_changelog as changelog_guard
@@ -29,6 +30,7 @@ import tools.check_pyjab_api_surface as surface_guard
 import tools.check_published_references as references_guard
 import tools.check_pyjab_readiness as readiness_guard
 import tools.check_changelog_immutable as immutable_guard
+import tools.check_release_l3 as l3_guard
 import tools.check_release_version as release_guard
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -552,6 +554,240 @@ def test_the_release_notes_come_from_the_changelog_section(tmp_path, monkeypatch
     assert "the new thing" in notes
     assert "the old thing" not in notes, "a section ends at the next heading"
     assert "in flight" not in notes, "Unreleased is not a release's notes"
+
+
+# ---------------------------------------------------------------------------------
+# tools/check_release_l3.py -- the release gate's verdict, and the invariant it trusts
+# ---------------------------------------------------------------------------------
+#
+# The verdict used to be fifteen cases of Python inside release.yml's `run:` block, where
+# nothing could exercise it: a regression would have been noticed by a failed release. These
+# cases are the ones that block a tag, each pinned by its exit status **and** the text that
+# tells its refusal apart from the others -- "no green run" and "could not read the answer"
+# both refuse, and must never swap.
+
+#: The commit the gate is asked about, so the expected text is readable.
+L3_SHA = "5f2a1c9d4e6b8a0c"
+
+
+def l3_body(tmp_path, payload, name="body.json"):
+    """An Actions API answer, or a deliberately wrong stand-in, as the file curl wrote."""
+    path = tmp_path / name
+    path.write_text(
+        payload if isinstance(payload, str) else json.dumps(payload), encoding="utf-8"
+    )
+    return path
+
+
+def l3_verdict(tmp_path, payload, http_code="200", dry_run=False):
+    """The exit status and the lines the step would print, for one answer."""
+    decision = l3_guard.decide(
+        l3_body(tmp_path, payload), http_code, L3_SHA, dry_run=dry_run
+    )
+    return decision.exit_code, "\n".join(decision.lines)
+
+
+def l3_answer(*runs, total=None):
+    """The shape the Actions API returns; *total* models a truncated page."""
+    return {
+        "total_count": len(runs) if total is None else total,
+        "workflow_runs": list(runs),
+    }
+
+
+def a_run(run_id, conclusion, status="completed"):
+    return {
+        "id": run_id,
+        "event": "schedule",
+        "status": status,
+        "conclusion": conclusion,
+        "html_url": f"https://example.test/runs/{run_id}",
+    }
+
+
+def test_the_l3_gate_proceeds_on_a_successful_run_and_names_it(tmp_path):
+    exit_code, text = l3_verdict(tmp_path, l3_answer(a_run(7, "success")))
+
+    assert exit_code == 0
+    assert f"windows-gui.yml at {L3_SHA}: 1 run(s) match, 1 read" in text
+    assert "  run 7: event=schedule status=completed conclusion=success" in text
+    assert f"PASSED: run 7 of windows-gui.yml succeeded at {L3_SHA}" in text
+    assert "https://example.test/runs/7" in text, "the run the release rode on has to be named"
+
+
+def test_the_l3_gate_finds_a_green_run_that_is_not_the_first(tmp_path):
+    """Every candidate is scanned: a later run can be the green one."""
+    exit_code, text = l3_verdict(tmp_path, l3_answer(a_run(1, "failure"), a_run(2, "success")))
+
+    assert exit_code == 0
+    assert "PASSED: run 2" in text
+
+
+def test_the_l3_gate_refuses_candidates_where_none_succeeded(tmp_path):
+    exit_code, text = l3_verdict(
+        tmp_path,
+        l3_answer(a_run(1, "failure"), a_run(2, None, status="in_progress")),
+    )
+
+    assert exit_code == 1
+    assert "::error::" in text
+    assert f"no run of windows-gui.yml at {L3_SHA} succeeded; rejected:" in text
+    assert "1 (completed/failure)" in text
+    assert "2 (in_progress/None)" in text, "a run still going is not a run that passed"
+
+
+def test_the_l3_gate_refuses_a_truncated_page_as_truncated_not_as_no_green_run(tmp_path):
+    """Candidates that were never read are not 'no green run' either."""
+    exit_code, text = l3_verdict(tmp_path, l3_answer(a_run(1, "failure"), total=150))
+
+    assert exit_code == 1
+    assert "150 runs match" in text
+    assert "but only 1 were read, so a green one cannot be ruled out" in text
+    assert "succeeded; rejected" not in text, (
+        "a truncated page must not be reported as 'none of the runs I read was green'"
+    )
+
+
+def test_the_l3_gate_refuses_a_commit_that_was_never_driven_end_to_end(tmp_path):
+    exit_code, text = l3_verdict(tmp_path, l3_answer())
+
+    assert exit_code == 1
+    assert "0 run(s) match, 0 read" in text
+    assert f"no windows-gui.yml run exists at {L3_SHA}: this commit was never driven" in text
+    assert "succeeded; rejected" not in text, "no runs at all is not 'no green run'"
+
+
+@pytest.mark.parametrize("code", ["500", "000"])
+def test_the_l3_gate_refuses_an_unreadable_answer_as_unread(tmp_path, code):
+    """`000` is curl's 'no HTTP response at all'; neither is a verdict about L3."""
+    exit_code, text = l3_verdict(tmp_path, '{"message":"boom"}', http_code=code)
+
+    assert exit_code == 1
+    assert "the Actions API could not be read" in text
+    assert f"(HTTP {code})" in text
+    assert "no run of windows-gui.yml" not in text, (
+        "an answer that could not be read is not evidence that no green run exists"
+    )
+    assert "never driven" not in text
+
+
+@pytest.mark.parametrize("code", ["401", "403"])
+def test_the_l3_gate_keeps_the_actions_read_hint(tmp_path, code):
+    exit_code, text = l3_verdict(tmp_path, '{"message":"nope"}', http_code=code)
+
+    assert exit_code == 1
+    assert f"HTTP {code} from the Actions API usually means this workflow is missing" in text
+    assert "actions: read" in text
+    assert "a green dry run does not prove the permission" in text
+
+
+def test_the_l3_gate_refuses_a_body_it_cannot_parse(tmp_path):
+    exit_code, text = l3_verdict(tmp_path, "{not json")
+
+    assert exit_code == 1
+    assert "the Actions API answer could not be read" in text
+    assert "unverified, which is not the same as satisfied" in text
+    assert "never driven" not in text
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        [1, 2, 3],
+        {"total_count": 1, "workflow_runs": "nope"},
+        {"total_count": 1, "workflow_runs": ["nope"]},
+    ],
+    ids=["a-json-list", "runs-not-a-list", "a-run-that-is-not-an-object"],
+)
+def test_the_l3_gate_refuses_a_wrongly_shaped_body_as_unread(tmp_path, payload):
+    exit_code, text = l3_verdict(tmp_path, payload)
+
+    assert exit_code == 1
+    assert "the Actions API answer could not be read" in text
+    assert "no run of windows-gui.yml" not in text
+
+
+DRY_RUN_REFUSALS = [
+    pytest.param(l3_answer(a_run(1, "failure")), "200", id="none-succeeded"),
+    pytest.param(l3_answer(a_run(1, "failure"), total=150), "200", id="truncated"),
+    pytest.param(l3_answer(), "200", id="no-runs"),
+    pytest.param('{"message":"boom"}', "500", id="http-500"),
+    pytest.param("{not json", "200", id="unparsable"),
+    pytest.param({"total_count": 1, "workflow_runs": "nope"}, "200", id="wrong-shape"),
+]
+
+
+@pytest.mark.parametrize("payload, code", DRY_RUN_REFUSALS)
+def test_a_dry_run_warns_where_a_tag_push_refuses(tmp_path, payload, code):
+    """`workflow_dispatch` runs on main's HEAD, where no L3 run normally exists yet.
+
+    The version guard in the same job already warns instead of failing there, and a green dry
+    run is what makes the `actions: read` permission unprovable from a dispatch -- hence the
+    hint the previous case pins.
+    """
+    tag_exit, _ = l3_verdict(tmp_path, payload, http_code=code)
+    dry_exit, dry_text = l3_verdict(tmp_path, payload, http_code=code, dry_run=True)
+
+    assert tag_exit == 1
+    assert dry_exit == 0
+    assert "::warning::" in dry_text
+    assert "::error::" not in dry_text
+
+
+def test_the_l3_gate_script_is_what_the_workflow_runs(tmp_path):
+    """The function above can pass while the command line -- or the workflow -- is broken."""
+    body = l3_body(tmp_path, l3_answer(a_run(1, "failure")))
+    script = str(REPO_ROOT / "tools" / "check_release_l3.py")
+    argv = [sys.executable, script, "--body", str(body), "--http-code", "200",
+            "--sha", L3_SHA]
+
+    refused = subprocess.run(argv, cwd=REPO_ROOT, capture_output=True, text=True, timeout=180)
+    warned = subprocess.run(argv + ["--dry-run"], cwd=REPO_ROOT, capture_output=True,
+                            text=True, timeout=180)
+
+    assert refused.returncode == 1
+    assert "no run of windows-gui.yml" in refused.stdout
+    assert warned.returncode == 0
+    assert "::warning::" in warned.stdout
+
+
+def test_the_release_workflow_asks_this_tool_rather_than_carrying_its_own_verdict():
+    """A tool the workflow does not call is not the gate that decides a release."""
+    path = REPO_ROOT / ".github" / "workflows" / "release.yml"
+    workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["verify"]["steps"]
+    step = next(
+        (step for step in steps if step.get("name") == "L3 was green on this commit (windows-gui.yml)"),
+        None,
+    )
+
+    assert step is not None, "the L3 gate step was renamed or removed"
+    assert "tools/check_release_l3.py" in step["run"]
+    assert "<<'PY'" not in step["run"], (
+        "the verdict logic is back in the YAML, where tests/test_guards.py cannot reach it"
+    )
+
+
+def test_no_job_in_windows_gui_declares_a_job_level_if():
+    """The gate trusts a run's own `conclusion`, which a skipped job does not change.
+
+    `windows-gui.yml` has no job-level `if:` today -- the `always()` in it is step-level, and a
+    step that is skipped fails its job -- so a green run means every job ran. If that ever
+    changes, a green-but-partly-skipped run would satisfy the release gate. This test is what
+    makes the change visible at the moment it is made, rather than at the next tag.
+    """
+    path = REPO_ROOT / ".github" / "workflows" / "windows-gui.yml"
+    workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+    jobs = workflow.get("jobs") or {}
+
+    assert jobs, "windows-gui.yml declares no jobs, so this test checked nothing"
+    offenders = sorted(name for name, job in jobs.items() if "if" in (job or {}))
+    assert offenders == [], (
+        f"windows-gui.yml declares a job-level `if:` on {offenders}. A skipped job still lets "
+        "the run conclude success, and tools/check_release_l3.py trusts the run conclusion, so "
+        "the release gate would accept a green run in which that job never ran. Revisit the "
+        "gate -- it has to check the job conclusions it is given -- before adding this."
+    )
 
 
 # ---------------------------------------------------------------------------------
