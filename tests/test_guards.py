@@ -679,6 +679,24 @@ def test_the_l3_gate_keeps_the_actions_read_hint(tmp_path, code):
     assert f"HTTP {code} from the Actions API usually means this workflow is missing" in text
     assert "actions: read" in text
     assert "a green dry run does not prove the permission" in text
+    assert "a malformed body warns the same way" in text, (
+        "a dry run is green however the gate refuses, and the hint has to say so"
+    )
+
+
+def test_the_l3_gate_shows_the_head_of_an_answer_it_could_not_use(tmp_path):
+    """For an API error the body is the only evidence a maintainer gets, so it is printed.
+
+    The step used `head -c 2000` before the verdict moved here. `return []` or a shorter slice
+    would leave every verdict above green, and a maintainer staring at an HTTP 403 with no body
+    has nothing to read.
+    """
+    exit_code, text = l3_verdict(tmp_path, "x" * 2000 + "TAIL-MUST-NOT-APPEAR", http_code="500")
+
+    assert l3_guard.BODY_PREVIEW == 2000, "the previous step printed 2000 bytes of the answer"
+    assert exit_code == 1
+    assert "x" * 2000 in text
+    assert "TAIL-MUST-NOT-APPEAR" not in text, "the preview is capped, not the whole body"
 
 
 def test_the_l3_gate_refuses_a_body_it_cannot_parse(tmp_path):
@@ -751,8 +769,15 @@ def test_the_l3_gate_script_is_what_the_workflow_runs(tmp_path):
     assert "::warning::" in warned.stdout
 
 
-def test_the_release_workflow_asks_this_tool_rather_than_carrying_its_own_verdict():
-    """A tool the workflow does not call is not the gate that decides a release."""
+def test_the_release_workflow_wires_the_gate_so_that_it_can_still_refuse():
+    """A tool the workflow does not call -- or cannot fail through -- is not a gate.
+
+    Every one of these mutations left the tool's own tests green: appending `|| true`, dropping
+    the `000` fallback, deleting the `--dry-run` branch, inverting the event test, swapping
+    `--body` for `--http-code`, or making the step conditional. The tool is only worth what its
+    wiring is, so for a release gate the brittle assertion is the point: change the wiring
+    deliberately, and change this test in the same commit.
+    """
     path = REPO_ROOT / ".github" / "workflows" / "release.yml"
     workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
     steps = workflow["jobs"]["verify"]["steps"]
@@ -762,32 +787,125 @@ def test_the_release_workflow_asks_this_tool_rather_than_carrying_its_own_verdic
     )
 
     assert step is not None, "the L3 gate step was renamed or removed"
-    assert "tools/check_release_l3.py" in step["run"]
-    assert "<<'PY'" not in step["run"], (
+    script = step["run"]
+
+    required = (
+        # the event decides it: a push must refuse, a dispatch must warn and pass
+        '[ "${{ github.event_name }}" != "push" ]',
+        "DRY_RUN=(--dry-run)",
+        '"${DRY_RUN[@]}"',
+        # curl's exit status is not the HTTP status; 000 is "no response at all"
+        '|| CODE="000"',
+        # the arguments, in the form the tool reads them
+        '--body "$BODY"',
+        '--http-code "$CODE"',
+        '--sha "$GITHUB_SHA"',
+        "tools/check_release_l3.py",
+    )
+    for fragment in required:
+        assert fragment in script, (
+            f"the L3 step no longer contains {fragment!r}, so the gate can stop refusing a "
+            "release -- or start deciding on the wrong input -- while every test of the tool "
+            "stays green."
+        )
+
+    for fragment in ("|| true", "2>/dev/null"):
+        assert fragment not in script, (
+            f"the L3 step contains {fragment!r}. A gate that cannot fail is decoration, and "
+            "this step's non-zero exit is the only thing that stops a tag."
+        )
+
+    assert "if" not in step, (
+        "the L3 gate step is conditional, so `verify` can go green with the gate never run"
+    )
+    assert not step.get("continue-on-error"), (
+        "the L3 gate step ignores its own failure, so the release proceeds however it decides"
+    )
+    assert "<<'PY'" not in script, (
         "the verdict logic is back in the YAML, where tests/test_guards.py cannot reach it"
     )
 
 
-def test_no_job_in_windows_gui_declares_a_job_level_if():
-    """The gate trusts a run's own `conclusion`, which a skipped job does not change.
-
-    `windows-gui.yml` has no job-level `if:` today -- the `always()` in it is step-level, and a
-    step that is skipped fails its job -- so a green run means every job ran. If that ever
-    changes, a green-but-partly-skipped run would satisfy the release gate. This test is what
-    makes the change visible at the moment it is made, rather than at the next tag.
-    """
+def windows_gui_jobs():
+    """The workflow whose run conclusion the release gate reads, parsed into jobs."""
     path = REPO_ROOT / ".github" / "workflows" / "windows-gui.yml"
     workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
     jobs = workflow.get("jobs") or {}
+    assert jobs, "windows-gui.yml declares no jobs, so these pins checked nothing"
+    return jobs
 
-    assert jobs, "windows-gui.yml declares no jobs, so this test checked nothing"
-    offenders = sorted(name for name, job in jobs.items() if "if" in (job or {}))
-    assert offenders == [], (
-        f"windows-gui.yml declares a job-level `if:` on {offenders}. A skipped job still lets "
-        "the run conclude success, and tools/check_release_l3.py trusts the run conclusion, so "
-        "the release gate would accept a green run in which that job never ran. Revisit the "
-        "gate -- it has to check the job conclusions it is given -- before adding this."
+
+def test_nothing_in_windows_gui_can_leave_the_run_green_without_running():
+    """GitHub's own syntax reference, which is why this rule is not just about jobs:
+
+    * ``jobs.<job_id>.steps[*].if`` -- "prevent a step from running";
+    * ``jobs.<job_id>.steps[*].continue-on-error`` -- "prevents a job from failing when a step
+      fails";
+    * ``jobs.<job_id>.continue-on-error`` -- "prevents a workflow run from failing when a job
+      fails";
+    * ``jobs.<job_id>.if`` -- skips the job entirely.
+
+    None of those turns the *run* red. ``tools/check_release_l3.py`` reads the run's
+    ``conclusion``, so a release gate that trusts it would accept a green run in which nothing
+    was driven -- which is the risk #30 is about. The only exemption is the log upload, whose
+    ``if: always()`` exists so the evidence survives a failure.
+
+    If a legitimate ``if:`` or ``continue-on-error`` is ever wanted elsewhere here, the answer is
+    to revisit the gate -- check the job and step conclusions it is given -- not this pin.
+    """
+    jobs = windows_gui_jobs()
+
+    skipped_jobs = sorted(name for name, job in jobs.items() if "if" in (job or {}))
+    ignored_jobs = sorted(
+        name for name, job in jobs.items() if (job or {}).get("continue-on-error")
     )
+    assert skipped_jobs == [], (
+        f"windows-gui.yml declares a job-level `if:` on {skipped_jobs}. A skipped job leaves the "
+        "run's conclusion at success, so the release gate would accept a green run in which that "
+        "job never ran."
+    )
+    assert ignored_jobs == [], (
+        f"windows-gui.yml declares a job-level `continue-on-error` on {ignored_jobs}. A failing "
+        "job that is ignored leaves the run green, and the release gate reads the run."
+    )
+
+    offenders = []
+    for job_name, job in jobs.items():
+        for step in (job or {}).get("steps") or []:
+            where = f"{job_name}/{step.get('name') or step.get('uses')}"
+            if step.get("continue-on-error"):
+                offenders.append(f"{where} sets continue-on-error")
+            if "if" in step and not str(step.get("uses", "")).startswith(
+                "actions/upload-artifact"
+            ):
+                offenders.append(f"{where} is conditional: {step['if']}")
+    assert offenders == [], (
+        "nothing in windows-gui.yml may be skippable or non-fatal except the log upload, whose "
+        "`if: always()` is how the evidence survives a failure -- and this is a release gate, so "
+        f"the constraint is deliberate: {offenders}"
+    )
+
+
+def test_the_windows_gui_suite_step_exists_and_would_really_drive_a_window():
+    """The step the whole run exists for: present by name, and unable to be skipped or neutered."""
+    e2e = windows_gui_jobs().get("e2e") or {}
+    suite = [step for step in e2e.get("steps") or [] if step.get("name") == "Run the L3 suite"]
+
+    assert len(suite) == 1, (
+        "windows-gui.yml no longer has exactly one step named 'Run the L3 suite'. If it was "
+        "renamed, retarget this pin; if it was deleted, the release gate can accept a green run "
+        "that never drove a window."
+    )
+    step = suite[0]
+    assert "tests/e2e" in step.get("run", ""), (
+        f"the L3 suite step no longer runs tests/e2e: {step.get('run')!r}"
+    )
+    assert str(step.get("env", {}).get("PYJAB_MCP_E2E")) == "1", (
+        "without PYJAB_MCP_E2E=1 every test in tests/e2e is skipped and pytest still exits 0, "
+        "so the run would be green with no window driven -- see tests/e2e/test_live_window.py"
+    )
+    assert "if" not in step, "the step that drives the window is conditional"
+    assert not step.get("continue-on-error"), "the step that drives the window cannot fail the job"
 
 
 # ---------------------------------------------------------------------------------

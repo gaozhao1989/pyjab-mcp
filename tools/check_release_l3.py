@@ -20,8 +20,14 @@ these arguments.
 Usage
 -----
 
-    curl -sS -o "$BODY" -w '%{http_code}' <runs URL> > "$CODE"
-    python tools/check_release_l3.py --body "$BODY" --http-code "$CODE" --sha "$GITHUB_SHA"
+    BODY="$(mktemp)"
+    CODE="$(curl -sS -o "$BODY" -w '%{http_code}' <runs URL>)" || CODE="000"
+    python tools/check_release_l3.py --body "$BODY" --http-code "$CODE" --sha "$GITHUB_SHA" \
+        --dry-run
+
+``--http-code`` is the status curl *reported*, so it has to come from a command substitution.
+A redirect would make ``$CODE`` a path -- ``curl ... > "$CODE"`` -- and the tool would report
+``(HTTP /tmp/tmp.XXXX)`` instead of the status.
 
 The verdicts, and why each is a refusal
 ---------------------------------------
@@ -41,9 +47,9 @@ The verdicts, and why each is a refusal
 
 ``--dry-run`` is for ``workflow_dispatch``, which runs on ``main``'s HEAD where no L3 run
 normally exists yet: every refusal becomes a ``::warning::`` and the exit status stays 0, which
-is the contract the version guard in the same job already has. That is why a green dry run does
-**not** prove the ``actions: read`` permission -- look for ``PASSED: run <id>`` in a run whose
-commit really has an L3 run.
+is the contract the version guard in the same job already has. That is why a green dry run
+proves neither the ``actions: read`` permission nor that the answer was understood -- look for
+``PASSED: run <id>`` in a run whose commit really has an L3 run.
 
 Exit code 0 when the release may proceed, non-zero when it must not.
 """
@@ -119,7 +125,8 @@ def decide(body: Path, http_code: str, sha: str, dry_run: bool = False) -> Decis
                 f"::notice::HTTP {code} from the Actions API usually means this workflow is "
                 "missing 'actions: read'. Note that a dry run downgrades this to a warning, "
                 "so a green dry run does not prove the permission -- look for "
-                "'PASSED: run <id>' instead."
+                "'PASSED: run <id>' instead. Nor does it prove the answer was understood: "
+                "a malformed body warns the same way and the step still passes."
             )
         lines.extend(_body_preview(body))
         return Decision(_refusal(dry_run), lines)
