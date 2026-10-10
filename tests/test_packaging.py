@@ -189,3 +189,25 @@ def test_server_json_points_at_this_repository():
 
     assert server["repository"]["source"] == "github"
     assert server["repository"]["url"].endswith("gaozhao1989/pyjab-mcp")
+
+
+def test_the_readme_carries_the_registry_ownership_line():
+    """The MCP Registry proves ownership of a PyPI package by finding this line in its README.
+
+    Learned by publishing 0.1.0: PyPI succeeded, the registry refused with
+
+        400 registry validation failed for package 0 (pyjab-mcp): PyPI package 'pyjab-mcp'
+        ownership validation failed. The server name 'io.github.gaozhao1989/pyjab-mcp' must
+        appear as 'mcp-name: io.github.gaozhao1989/pyjab-mcp' in the package README
+
+    and a published PyPI version cannot have its metadata edited, so 0.1.1 was the only way to
+    register. This test makes the line's absence a build failure rather than something a release
+    discovers, and it reads the expected value out of server.json so the two cannot drift.
+    """
+    server = json.loads((REPO_ROOT / "server.json").read_text(encoding="utf-8"))
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert f"mcp-name: {server['name']}" in readme, (
+        "the registry reads this line out of the *published* package's README; it has to be "
+        "here before the tag, because it cannot be added afterwards"
+    )

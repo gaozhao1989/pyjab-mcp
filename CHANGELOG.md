@@ -8,6 +8,18 @@ under **Unreleased** until it is tagged.
 
 ## Unreleased
 
+Nothing yet.
+
+## [0.1.1] - 2026-10-10
+
+**A patch release, because the MCP Registry registers a PyPI package by reading a line out of
+its README — and 0.1.0's README did not have it.** PyPI had already published and a published
+version's metadata cannot be edited, so registering 0.1.0 was not possible: the registry
+answered `PyPI package 'pyjab-mcp' ownership validation failed. The server name
+'io.github.gaozhao1989/pyjab-mcp' must appear as 'mcp-name: io.github.gaozhao1989/pyjab-mcp' in
+the package README`. This is pyjab's rule for it: if anything reached PyPI, cut a patch release
+rather than move a tag.
+
 ### Fixed
 
 * **The registry publish failed at 0.1.0, after PyPI had already published.** The `registry`

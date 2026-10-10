@@ -4,16 +4,22 @@ An MCP server that lets an AI agent drive **Java desktop applications** — Swin
 JavaFX — through [pyjab](https://pypi.org/project/pyjab/), which reads the JVM's own
 accessibility tree via Java Access Bridge.
 
+<!-- The MCP Registry proves ownership of the PyPI package by finding this exact line in the
+     README *of the published package*, so it cannot be added after a release. Keep it. -->
+mcp-name: io.github.gaozhao1989/pyjab-mcp
+
 **It never modifies, restarts or injects into the target application.** That constraint is
 the point: launch parameters, classpaths and dependency JARs stay exactly as they are,
 which is what makes this usable against a production Java client that you cannot change.
 
 ## Status
 
-**M1 to M5 are implemented.** `java_diagnostics`, `java_list_windows`, `java_attach_window`,
-`java_snapshot`, `java_find`, `java_get_element`, `java_get_text`, `java_get_table`,
-`java_click`, `java_set_text`, `java_select` and `java_fill_form`. It needs `pyjab>=1.9.0`,
-which is the first release with the tree walk a snapshot is built on.
+**0.1.0 is released** — 15 tools: `java_diagnostics`, `java_list_windows`,
+`java_attach_window`, `java_snapshot`, `java_find`, `java_get_element`, `java_get_text`,
+`java_get_table`, `java_click`, `java_set_text`, `java_select`, `java_fill_form`,
+`java_wait_for`, `java_screenshot`, and `java_send_keys`. It needs `pyjab>=1.10.0`: 1.9.0
+brought the tree walk a snapshot is built on, and 1.10.0 brought the public window listing and
+`JABDriver.detach()`, which is what lets a session end without terminating the application.
 
 `java_send_keys` exists but always reports the requirement it is waiting on: pyjab has no
 public way to send a key sequence, and pretending `send_text` is one would be a lie for
