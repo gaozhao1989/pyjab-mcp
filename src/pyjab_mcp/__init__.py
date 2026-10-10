@@ -13,6 +13,6 @@ says why.
 version because M1 cannot yet list a window on released pyjab -- see ``AGENTS.md`` §6.
 """
 
-__version__ = "0.1.0.dev0"
+__version__ = "0.1.0"
 
 __all__ = ["__version__"]

@@ -8,6 +8,21 @@ under **Unreleased** until it is tagged.
 
 ## Unreleased
 
+Nothing yet. This repository has not shipped anything since 0.1.0.
+
+## [0.1.0] - 2026-10-10
+
+**The first release.** 15 MCP tools that let an agent read and drive a Java desktop
+application through the JVM's own accessibility tree: windows, a bounded snapshot with
+handles, element search and inspection, text, tables, clicking, typing, selection, waiting
+and screenshots — with every action verified against the element the snapshot recorded before
+anything is clicked or typed into.
+
+Requires Windows, a JDK with Java Access Bridge enabled, and `pyjab>=1.10.0`. The one tool
+that cannot work is `java_send_keys`: pyjab has no public API for a key sequence, so it
+reports that requirement and the way round it rather than pretending `send_text` can express
+`alt+y` (tracked as gaozhao1989/pyjab#168).
+
 ### Added
 
 * **M9: the release pipeline, and the registry validator that caught a real mistake.**
@@ -166,7 +181,6 @@ under **Unreleased** until it is tagged.
   from the working tree without being versioned; `.gitignore` keeps them out of git and
   `MANIFEST.in` prunes them from the sdist.
 
-### Added
 
 * **L3 in CI: a real window, on a real desktop, on a schedule.** `tests/e2e/` is skipped
   unless `PYJAB_MCP_E2E=1`; `.github/workflows/windows-gui.yml` sets it on a hosted
@@ -187,7 +201,6 @@ under **Unreleased** until it is tagged.
   `bin`). A mismatched pair fails as "pyjab cannot see my window", which is the hardest
   failure in this project to tell apart from a bridge that is simply not enabled.
 
-### Added
 
 * **M3: `java_find`, `java_get_element` and `java_get_text`.** A snapshot shows the shape of a
   window; these ask questions about it.
@@ -207,7 +220,6 @@ under **Unreleased** until it is tagged.
   text interface says so, which is a different answer from an empty string and is reported as
   one.
 
-### Added
 
 * **M4: `java_get_table`.** A Java table read through the JVM's own `AccessibleTable`
   interface — row and column counts, then cell text — which is the capability a platform
@@ -226,7 +238,6 @@ under **Unreleased** until it is tagged.
   and the per-cell budget check was dead code because the row count had already been reduced
   to fit it.
 
-### Added
 
 * **M5: the actions — `java_click`, `java_set_text`, `java_select`, `java_fill_form`.** Each
   one verifies the element and then acts **on the element it verified**, inside one element
@@ -252,7 +263,6 @@ under **Unreleased** until it is tagged.
   requirement **and** the way round it: `java_set_text` for text, or the menu item that
   exposes the same action, found with `java_find(role="menu item")` and clicked.
 
-### Added
 
 * **M8: client setup and the boundary of what this can do.** `docs/CLIENTS.md` has the
   configuration for Claude Desktop, Claude Code, Cursor and VS Code — the file each one reads,
@@ -301,7 +311,6 @@ under **Unreleased** until it is tagged.
   than letting pyjab's descriptive `ImportError` cross the tool boundary: the library is
   importable everywhere and only *runs* on Windows, and that is an environment answer.
 
-### Changed
 
 * **D2's verification is split into what blocks and what is reported, because a real run showed
   why it has to be.** The first end-to-end run through the tools set a text field to `"hello"`,
@@ -324,39 +333,6 @@ under **Unreleased** until it is tagged.
   it fall back to a name locator, which resolves now but may not survive the next edit. One
   walk serves every result in the call.
 
-### Fixed
-
-* **A real table's cells report no text, and M4 was reading `None` for all of them.** L3
-  found it: the table's shape came through (4 columns, ≥5 rows) and every cell read as
-  `None`. Swing's `AccessibleJTableCell` puts the cell's *value* in its accessible **name**,
-  so `java_get_table` now falls back to the name when there is no AccessibleText — and says
-  which cells came from where, because a value should never be presented as something it is
-  not. Without this, a whole table of real values would have been reported as unknown.
-
-* **The handle path called a method ``JABDriver`` does not have.** `resolve_driver` released
-  the re-resolved element with `driver.release_jabelement(element)`; the method belongs to
-  **`JABElement`**, and `JABDriver` has never had one. It would have raised `AttributeError`
-  inside the `finally` of every resolution on Windows — the first real desktop run was the
-  first time that line executed.
-
-  Two things had to be true for this to survive the L1 suite, and both were: the adapter
-  guessed, and `tests/_fakedriver.py` was shaped like the guess, so the fake agreed with the
-  mistake instead of with pyjab. The fake now puts the release on the element, where pyjab
-  puts it, and `tests/contract/` asserts the API the adapter actually calls — including the
-  signature that lets an element release itself.
-
-* **The diagnostics job treated "no Java windows" as a failure.** `pyjab-inspect windows`
-  exits 1 when JAB sees nothing, and on a bare runner that is the expected answer rather than
-  an error — `UNAVAILABLE` is not `0`, and "nothing is there" is a measurement (AGENTS.md
-  §2.4). The step reported it and failed; it now reports it and carries on, so the assertion
-  behind it actually runs.
-
-* **The L3 snapshot walked three levels and the controls are seven deep.** The first real run
-  found the frame, the layered panes, the menu bar and "Main panel" — and nothing inside it,
-  so the two assertions about a button and a table failed. The test walks 12 now, and says why:
-  a snapshot's default depth is a budget for an agent, not a fact about the tree.
-
-### Changed
 
 * **R3 is retired, R1 and R2 are restated against 1.9.0** (`AGENTS.md` §6, and the
   `REQUIREMENTS` tuple in `backend.py` that the tools' error messages come from). A
@@ -395,3 +371,35 @@ under **Unreleased** until it is tagged.
 * **`docs/ARCHITECTURE.md` gained a module map and a `ships` column** in the tool table, so
   that both directions of "the page and the code agree" are checkable, and `README.md`
   gained a "Working on it" section listing the guards.
+
+### Fixed
+
+* **A real table's cells report no text, and M4 was reading `None` for all of them.** L3
+  found it: the table's shape came through (4 columns, ≥5 rows) and every cell read as
+  `None`. Swing's `AccessibleJTableCell` puts the cell's *value* in its accessible **name**,
+  so `java_get_table` now falls back to the name when there is no AccessibleText — and says
+  which cells came from where, because a value should never be presented as something it is
+  not. Without this, a whole table of real values would have been reported as unknown.
+
+* **The handle path called a method ``JABDriver`` does not have.** `resolve_driver` released
+  the re-resolved element with `driver.release_jabelement(element)`; the method belongs to
+  **`JABElement`**, and `JABDriver` has never had one. It would have raised `AttributeError`
+  inside the `finally` of every resolution on Windows — the first real desktop run was the
+  first time that line executed.
+
+  Two things had to be true for this to survive the L1 suite, and both were: the adapter
+  guessed, and `tests/_fakedriver.py` was shaped like the guess, so the fake agreed with the
+  mistake instead of with pyjab. The fake now puts the release on the element, where pyjab
+  puts it, and `tests/contract/` asserts the API the adapter actually calls — including the
+  signature that lets an element release itself.
+
+* **The diagnostics job treated "no Java windows" as a failure.** `pyjab-inspect windows`
+  exits 1 when JAB sees nothing, and on a bare runner that is the expected answer rather than
+  an error — `UNAVAILABLE` is not `0`, and "nothing is there" is a measurement (AGENTS.md
+  §2.4). The step reported it and failed; it now reports it and carries on, so the assertion
+  behind it actually runs.
+
+* **The L3 snapshot walked three levels and the controls are seven deep.** The first real run
+  found the frame, the layered panes, the menu bar and "Main panel" — and nothing inside it,
+  so the two assertions about a button and a table failed. The test walks 12 now, and says why:
+  a snapshot's default depth is a budget for an agent, not a fact about the tree.
