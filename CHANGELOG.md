@@ -8,12 +8,6 @@ under **Unreleased** until it is tagged.
 
 ## Unreleased
 
-Nothing yet.
-
-## [0.1.2] - 2026-10-10
-
-**A patch release with three things a user can feel**: `java_send_keys` now sends chords where the installed pyjab provides the API rather than refusing unconditionally (so the release that answers R4 makes it work with no change here), `java_snapshot` says why it can show fewer children than an element reports instead of printing an unexplained `children=3`, and the console script gained `--help` and `--version`. The sections below are the detail.
-
 ### Added
 
 * **The foreground gap is tracked as data rather than as a note (R5).** `java_send_keys` sends a
@@ -21,9 +15,15 @@ Nothing yet.
   today is an interactive call — a click, which activates whatever it lands on. That is the side
   effect a shortcut exists to avoid, so "click something harmless first" is a workaround, and
   `java_diagnostics` now reports the gap itself: a probe for a public foreground API, the
-  requirement behind it, and the upstream issue ([pyjab#180](https://github.com/gaozhao1989/pyjab/issues/180))
-  it is waiting on. The day pyjab ships one, the readiness check says READY and a
-  `java_focus_window` tool takes an hour.
+  requirement behind it, and the upstream issue
+  ([pyjab#180](https://github.com/gaozhao1989/pyjab/issues/180)) it is waiting on. The day pyjab
+  ships one, `tools/check_pyjab_readiness.py` says READY and a `java_focus_window` tool is an
+  hour of work.
+
+
+## [0.1.2] - 2026-10-10
+
+**A patch release with three things a user can feel**: `java_send_keys` now sends chords where the installed pyjab provides the API rather than refusing unconditionally (so the release that answers R4 makes it work with no change here), `java_snapshot` says why it can show fewer children than an element reports instead of printing an unexplained `children=3`, and the console script gained `--help` and `--version`. The sections below are the detail.
 
 ### Added
 
