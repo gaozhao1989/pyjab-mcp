@@ -1,8 +1,8 @@
 name: Release
 
-# Tag-driven, and only tag-driven. `main` is the release line (AGENTS.md 4); the tag is the
+# Tag-driven, and only tag-driven. `main` is the release line; the tag is the
 # promise, which is why every check runs *before* anything is uploaded: a PyPI version can
-# never be unpublished or overwritten (AGENTS.md 2.3).
+# never be unpublished or overwritten.
 #
 # `workflow_dispatch` exists to dry-run the verify job -- the version guard, the suite, the
 # guards and a real build -- without publishing anything. Publishing steps are skipped unless
@@ -67,6 +67,7 @@ jobs:
           python tools/check_documented_surface.py
           python tools/check_local_only_files.py
           python tools/check_changelog_immutable.py
+          python tools/check_published_references.py
           python tools/check_pyjab_changelog.py
           python tools/check_pyjab_readiness.py
 

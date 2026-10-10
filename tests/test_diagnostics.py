@@ -1,6 +1,6 @@
 """L1 tests for the environment report.
 
-The rule under test is this project's AGENTS.md §2.4: a measurement that could not be taken
+The rule under test is this: a measurement that could not be taken
 is not a zero and not a "missing".  Each of these pins one of the three answers apart from
 the other two, because collapsing them is how a report starts flattering whoever wrote it.
 """

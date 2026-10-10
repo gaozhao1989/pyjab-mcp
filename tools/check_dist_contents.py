@@ -6,7 +6,8 @@ Why this exists
 
 Two failures here are both silent until a user hits them:
 
-* **a maintainer document ships.** ``AGENTS.md`` and the design notes are local-only,
+* **a maintainer document ships.** The notes this repository keeps for its maintainers are
+  local-only,
   ``.gitignore`` does not protect an sdist, and ``MANIFEST.in`` is the only thing that does.
   ``tools/check_local_only_files.py`` checks the *rules*; this checks the *artifact*, because
   the rules can be right and the build can still be wrong.

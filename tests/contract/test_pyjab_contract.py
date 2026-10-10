@@ -1,6 +1,6 @@
 """What this project depends on pyjab doing, pinned as behaviour rather than as a promise.
 
-AGENTS.md §1a calls this the load-bearing half of the drift mechanism, and the reason is
+This is the load-bearing half of the drift mechanism, and the reason is
 that a marker in somebody else's changelog is a judgement that can be forgotten or wrong.
 These tests are not: they assert the exact shapes the code here reads, so a change that
 breaks this project fails a job whether or not anyone wrote anything down.

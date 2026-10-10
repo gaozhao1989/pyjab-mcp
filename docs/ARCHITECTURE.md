@@ -156,12 +156,14 @@ element has changed, **nothing is done** — the difference is reported instead.
 `java_wait_for` waits for a window to appear or an element's text to change, polling between
 bridge calls rather than inside one: the bridge has a single owning thread, so a wait that ran
 on it would block every other call for its whole duration. A timeout is reported as a result
-rather than an error, because "not yet" is something an agent can act on. Two of pyjab's own gaps are still recorded rather
-than worked around (`AGENTS.md` §6.2): there is no public API that lists Java windows, so
-the listing runs through pyjab's documented `pyjab-inspect windows --json`; and there is no
-non-destructive detach, so a bound window stays bound for the life of the process. Neither
-is a correctness problem for a server driving one application, and both are the reason a
-tool's error message names a requirement instead of a private import.
+rather than an error, because "not yet" is something an agent can act on. The two gaps this project waited on were both answered by pyjab 1.10.0:
+`pyjab.list_java_windows()` returns the windows with their handles, titles and pids — so the
+listing comes from the bridge, with pyjab's documented `pyjab-inspect windows --json` left as
+the fallback for an install below the pin — and `JABDriver.detach()` releases a window
+**without terminating its process**, which is what lets a session end without killing the
+application it was observing. One gap is still recorded rather than worked around: there is no
+public API for a key sequence, so `java_send_keys` answers with the requirement, the version
+expected to close it, and the issue tracking it, instead of reaching for a private helper.
 
 `java_snapshot` reads a bounded part of the tree — pyjab 1.9.0's `JABElement.walk`, which
 releases every JAB reference as it advances — and gives each rendered element a handle.
@@ -194,3 +196,26 @@ A fake that agrees with anything proves nothing.
 **L3 is the only layer that can say a tool call worked against a real window**, and it is
 the only layer nobody runs by default. Anything about live behaviour is unverified until
 it has run there — and a green default CI run says nothing about it.
+
+## Guards
+
+The rules that are enforced rather than remembered. Each prints a report and exits non-zero,
+each runs in CI, and each is pinned by a test that proves it can fail — a checker that cannot
+report a problem is decoration.
+
+| guard | the rule it makes mechanical |
+|---|---|
+| `check_pyjab_api_surface.py` | Every pyjab name this project touches is recorded with its public/released status. A private name, an unrecorded touchpoint, or a dependency on something unreleased fails the build. |
+| `check_documented_surface.py` | The tool table above and the code agree, in both directions: a tool documented as shipping but not registered fails, and so does the reverse. |
+| `check_local_only_files.py` | The maintainer's own notes are excluded from git **and** from the sdist. `git check-ignore` is the behaviour rather than the claim, because `.gitignore` does not protect an sdist — it is built from the working tree. |
+| `check_dist_contents.py` | The artifact, not the rules: a built sdist must contain the package, tests and guards and no maintainer note; a wheel must contain only the package, with a working `entry_points.txt`. |
+| `check_published_references.py` | A shipped file may state a rule or link to a public document, but may not send a reader to a maintainer note they cannot open — in the repository or in an installed sdist. |
+| `check_changelog_immutable.py` | A released changelog section is published inside its sdist, so editing one afterwards makes this repository describe a release that never happened. |
+| `check_release_version.py` | The tag, the package version, `server.json` and the changelog have to agree before anything is uploaded, because a PyPI version cannot be unpublished. It also writes the release notes. |
+| `check_pyjab_changelog.py` | Every pyjab change marked as affecting this project has a written answer here, and no answer outlives its marker. |
+| `check_pyjab_readiness.py` | What pyjab still owes this project, made re-checkable: it reports whether an expected API exists yet and whether the declared version pin resolves it. Report-only, because a job that fails until somebody else publishes is a job people learn to ignore. |
+
+Two are not guards but the other half of the same idea: `tests/contract/` pins the *behaviour*
+this project reads from pyjab, so a break is caught whether or not anybody wrote it down, and
+`.github/workflows/pyjab-drift.yml` runs those tests weekly against pyjab's development branch —
+early enough to fix before a release rather than after one.

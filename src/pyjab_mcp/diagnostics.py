@@ -4,7 +4,7 @@
 (JAB not enabled, no bridge DLL, 32-bit Python against a 64-bit JVM), and "unavailable"
 without the reason is the kind of answer that costs an afternoon.
 
-The rule this module is written to (this project's AGENTS.md §2.4) is that **a measurement
+The rule this module is written to is that **a measurement
 it could not take is not a zero**.  Every row therefore has a status, and the ones that
 matter are distinct:
 

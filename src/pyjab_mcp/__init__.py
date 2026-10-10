@@ -9,8 +9,9 @@ the machines that only ever run the test suite.
 Import it inside functions. ``pyjab/inspector.py`` in the parent project does the same and
 says why.
 
-``0.1.0.dev0`` is M1: the bridge thread, diagnostics, and the session tools. It is a dev
-version because M1 cannot yet list a window on released pyjab -- see ``AGENTS.md`` §6.
+``0.1.1`` is the current release: 15 tools that read and drive a Java desktop application
+through the JVM's own accessibility tree. See the README for what they are and what the
+substrate cannot reach.
 """
 
 __version__ = "0.1.1"

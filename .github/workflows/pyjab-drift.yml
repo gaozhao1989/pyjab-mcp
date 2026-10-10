@@ -1,6 +1,6 @@
 name: pyjab drift
 
-# The load-bearing half of AGENTS.md §1a. A marker in pyjab's changelog is a judgement and
+# The load-bearing half of the drift mechanism. A marker in pyjab's changelog is a judgement and
 # can be forgotten; these tests are not a judgement -- they pin the exact shapes this
 # project reads, so a pyjab change that breaks it fails a job whether or not anyone wrote
 # anything down.

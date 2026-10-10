@@ -117,7 +117,7 @@ jobs:
           python -c "import os; print('JAVA_HOME =', os.environ.get('JAVA_HOME'))"
           # `pyjab-inspect windows` exits 1 when JAB sees no Java window, and on a bare
           # runner that is the expected answer rather than a failure -- "nothing is there"
-          # is a measurement (this project's AGENTS.md 2.4). The first run of this job went
+          # is a measurement. The first run of this job went
           # red on exactly this line, which is a good illustration of the rule: the report
           # said "no Java windows found", and the job treated it as an error.
           if python -m pyjab.inspector windows; then

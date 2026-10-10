@@ -170,7 +170,8 @@ def test_the_gap_message_names_what_is_missing_and_where_to_read_about_it():
 
     assert "key sequence or shortcut" in message
     assert "expected in:" in message
-    assert "AGENTS.md" in message
+    # Where it is tracked, so a reader has somewhere to watch rather than only a workaround.
+    assert "gaozhao1989/pyjab#168" in message
     # The workaround has to be named as unacceptable, not left as an exercise.
     assert "why not a workaround:" in message
 

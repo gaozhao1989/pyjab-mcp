@@ -26,6 +26,7 @@ import tools.check_pyjab_changelog as changelog_guard
 import tools.check_documented_surface as docs_guard
 import tools.check_local_only_files as local_guard
 import tools.check_pyjab_api_surface as surface_guard
+import tools.check_published_references as references_guard
 import tools.check_pyjab_readiness as readiness_guard
 import tools.check_changelog_immutable as immutable_guard
 import tools.check_release_version as release_guard
@@ -653,3 +654,95 @@ def test_recording_freezes_what_the_tag_says(tmp_path, monkeypatch):
 
     assert json.loads(record_path.read_text()) == {"0.1.0": immutable_guard.digest(section)}
     assert immutable_guard.check() == 0
+
+
+# ---------------------------------------------------------------------------------
+# tools/check_published_references.py
+# ---------------------------------------------------------------------------------
+
+
+def reference_tree(tmp_path, monkeypatch, files: "dict[str, str]", record: "dict | None" = None):
+    """A repository whose shipped files are the ones a test wants."""
+    for name, text in files.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    (tmp_path / "tools").mkdir(exist_ok=True)
+    (tmp_path / "tools" / "released_changelog_sections.json").write_text(
+        json.dumps(record or {}), encoding="utf-8"
+    )
+    monkeypatch.setattr(references_guard, "REPO_ROOT", tmp_path)
+    return tmp_path
+
+
+def test_a_shipped_file_citing_a_maintainer_note_is_a_problem(tmp_path, monkeypatch):
+    """The README bug this guard exists for: it presented files a visitor cannot open."""
+    root = reference_tree(tmp_path, monkeypatch, {
+        "README.md": "| `AGENTS.md` | the working agreement |\n",
+    })
+
+    problems = references_guard.check(root)
+
+    assert problems, "a shipped file must not send a reader to a file they cannot open"
+    assert "README.md" in problems[0] and "AGENTS.md" in problems[0]
+
+
+def test_a_shipped_file_that_states_the_rule_is_fine(tmp_path, monkeypatch):
+    root = reference_tree(tmp_path, monkeypatch, {
+        "README.md": "Every guard prints a report and exits non-zero.\n",
+        "src/pyjab_mcp/thing.py": "# a measurement that could not be taken is not a zero\n",
+    })
+
+    assert references_guard.check(root) == []
+
+
+def test_the_exclusion_mechanisms_and_their_tests_may_name_the_paths(tmp_path, monkeypatch):
+    """`.gitignore` exists to name them, and so does the test that proves the exclusion works."""
+    root = reference_tree(tmp_path, monkeypatch, {
+        ".gitignore": "AGENTS.md\n",
+        "MANIFEST.in": "exclude docs/DESIGN.md\n",
+        "pyproject.toml": "# prunes docs/PLAN.md from the sdist\n",
+        "tools/check_local_only_files.py": "LOCAL_ONLY = ('AGENTS.md',)\n",
+        "tests/test_guards.py": 'text = "AGENTS.md"\n',
+    })
+
+    assert references_guard.check(root) == []
+
+
+def test_the_maintainer_notes_themselves_are_not_shipped_so_not_checked(tmp_path, monkeypatch):
+    root = reference_tree(tmp_path, monkeypatch, {
+        "AGENTS.md": "see docs/DESIGN.md and .agents/skills/x/SKILL.md\n",
+        "docs/PLAN.md": "see AGENTS.md\n",
+        ".agents/skills/x/SKILL.md": "see AGENTS.md\n",
+    })
+
+    assert references_guard.check(root) == []
+
+
+def test_a_frozen_changelog_section_is_not_checked_because_it_cannot_change(
+    tmp_path, monkeypatch
+):
+    """Its hash is pinned by the other guard, so asking for a change would be a contradiction."""
+    changelog = (
+        "# Changelog\n\n## Unreleased\n\nnothing yet\n\n"
+        "## [0.1.0] - 2026-10-10\n\n- see AGENTS.md 6 for the audit\n"
+    )
+    import hashlib
+
+    section = references_guard.changelog_sections(changelog)["0.1.0"]
+    digest = "sha256:" + hashlib.sha256(section.encode("utf-8")).hexdigest()
+    root = reference_tree(tmp_path, monkeypatch, {"CHANGELOG.md": changelog},
+                          record={"0.1.0": digest})
+
+    assert references_guard.check(root) == []
+
+
+def test_an_unreleased_changelog_section_is_checked(tmp_path, monkeypatch):
+    """The escape hatch is the record, not the top of the file."""
+    root = reference_tree(tmp_path, monkeypatch, {
+        "CHANGELOG.md": "# Changelog\n\n## Unreleased\n\n- see AGENTS.md 6\n",
+    })
+
+    problems = references_guard.check(root)
+
+    assert problems and "CHANGELOG.md" in problems[0]

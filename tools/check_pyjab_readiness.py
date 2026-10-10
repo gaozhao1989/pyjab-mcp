@@ -21,7 +21,7 @@ that is not there:
 
 ``UNKNOWN`` counts as not ready on purpose: on a non-Windows machine the Windows-only
 modules cannot be imported, and "I could not measure it" is not "it is there" (this
-project's AGENTS.md §2.4).
+project's rule about measurements: not being able to measure is not a zero).
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ WAITING = (
 
 WALK_NOTE = (
     "the snapshot reads the tree through walk(); it is in pyjab 1.9.0, so the pin is what "
-    "guarantees it (AGENTS.md 6, R3 retired by the 1.9.0 release)"
+    "guarantees it (R3 retired by the 1.9.0 release)"
 )
 
 RESOLVED = "RESOLVED"

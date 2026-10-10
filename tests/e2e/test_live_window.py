@@ -36,6 +36,7 @@ What it is looking for, in order of how much it would hurt to get wrong:
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -193,11 +194,11 @@ def wait_for_window(bridge: BridgeThread, backend: PyjabBackend, title: str,
     pytest.fail(f"window {title!r} never appeared within {timeout}s. JAB could see: {seen}")
 
 
-def start_app(title: str, classes: Path) -> subprocess.Popen:
+def start_app(title: str, classes: Path, main_class: str = APP_CLASS) -> subprocess.Popen:
     java = shutil.which("java")
     assert java is not None
     return subprocess.Popen(
-        [java, "-cp", str(classes), APP_CLASS, f"--title={title}"],
+        [java, "-cp", str(classes), main_class, f"--title={title}"],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
 
@@ -218,6 +219,47 @@ def main_window(live, accessibility_enabled, compiled_app: Path):
     try:
         wait_for_window(bridge, backend, MAIN_TITLE)
         attached: AttachedWindow = call(bridge, backend.attach, title=MAIN_TITLE)
+        yield attached
+    finally:
+        stop_app(process)
+
+
+BOUNDARY_TITLE = "pyjab-mcp boundary app"
+BOUNDARY_CLASS = "BoundaryApp"
+
+
+@pytest.fixture(scope="session")
+def boundary_classes() -> Path:
+    """Compile this repository's own fixture application.
+
+    It exists because the README tells users two things nothing tested: that a canvas-drawn
+    interface has no accessible children, and that two elements can share a name. pyjab's test
+    application has neither case, and adding them there would be a change to another repository
+    for the sake of a test in this one.
+    """
+    if not shutil.which("javac"):
+        pytest.skip("no javac on PATH: install a JDK (the CI job uses setup-java)")
+
+    source = Path(__file__).resolve().parent / "fixtures" / "BoundaryApp.java"
+    assert source.is_file(), f"the fixture application is missing: {source}"
+    classes = Path(tempfile.mkdtemp(prefix="pyjab-mcp-boundary-classes-"))
+    result = subprocess.run(
+        [shutil.which("javac"), "-d", str(classes), str(source)],
+        capture_output=True, text=True, timeout=300,
+    )
+    if result.returncode != 0:
+        pytest.fail(f"javac failed for the fixture application:\n{result.stdout}\n{result.stderr}")
+    return classes
+
+
+@pytest.fixture(scope="session")
+def boundary_window(live, accessibility_enabled, boundary_classes: Path):
+    """The boundary application, listed and attached through the real bridge."""
+    bridge, backend = live
+    process = start_app(BOUNDARY_TITLE, boundary_classes, BOUNDARY_CLASS)
+    try:
+        wait_for_window(bridge, backend, BOUNDARY_TITLE)
+        attached: AttachedWindow = call(bridge, backend.attach, title=BOUNDARY_TITLE)
         yield attached
     finally:
         stop_app(process)
@@ -378,8 +420,6 @@ async def tool(server, name: str, arguments: dict) -> str:
 
 def handle_in(text: str) -> str:
     """The first ``e:...`` handle in a tool's reply."""
-    import re
-
     match = re.search(r"\[(e:[0-9a-f]+)\]", text)
     assert match, f"no handle in the reply: {text}"
     return match.group(1)
@@ -532,3 +572,86 @@ def test_detaching_releases_the_window_and_leaves_the_application_running(live, 
     assert again.hwnd, "and it can be attached again"
     bridge.submit(backend.detach, again.window_id).result(timeout=60)
     print("\n[L3] detach() released the window and the application kept running")
+
+
+def test_a_canvas_is_an_element_with_nothing_under_it(live, boundary_window):
+    """The README's canvas row, tested rather than asserted from pyjab#73's conclusion.
+
+    The pair matters: the pixels exist and the structure does not. A screenshot of the canvas
+    returns bytes — it is a real, painted, visible control — and the accessible tree under it
+    has no children at all, so there is nothing to find, click or read. That is why the README
+    says a picture is not something you can act on.
+    """
+    bridge, backend = live
+
+    matches = call(bridge, backend.find, boundary_window.window_id, by="name",
+                   value="Canvas panel")
+    located = [(record, locator) for record, locator in matches if locator]
+    assert located, f"the canvas is not addressable at all; matches were {matches}"
+    canvas, locator = located[0]
+
+    assert canvas.role in ("panel", "canvas"), f"the canvas reports role {canvas.role!r}"
+    assert canvas.children_count == 0, (
+        f"a canvas that paints itself must have no accessible children, and this one reports "
+        f"{canvas.children_count}"
+    )
+
+    # The neighbour proves the window was readable: without this, "no children" and "could not
+    # read the window" would pass the same assertion.
+    neighbours = call(bridge, backend.find, boundary_window.window_id, by="name",
+                      value="Ordinary button")
+    assert [record for record, _ in neighbours], (
+        "the ordinary button beside the canvas must be found, or the empty canvas above proves "
+        "nothing about the canvas"
+    )
+
+    png = call(bridge, backend.screenshot, boundary_window.window_id, locator, canvas)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n", "the canvas still has pixels"
+    assert len(png) > 500, f"a {len(png)}-byte PNG of a painted canvas is suspiciously small"
+    print(
+        f"\n[L3] canvas: role={canvas.role!r} children={canvas.children_count} "
+        f"children_count={canvas.children_count} and {len(png)} bytes of PNG"
+    )
+
+
+@pytest.mark.asyncio
+async def test_two_elements_with_the_same_name_are_two_handles(live, boundary_window):
+    """Why a handle carries a position as well as a name — through the tools, as an agent sees it.
+
+    Both text fields are called "Duplicate field". A search has to return both, each handle has
+    to point at one of them, and typing into one must change that one and leave the other alone.
+    A name-only identity would make these two indistinguishable, which is how a tool ends up
+    reading back the wrong field.
+    """
+    from pyjab_mcp.server import ServerState, create_server
+
+    bridge, _backend = live
+    state = ServerState(bridge=bridge)
+    server = create_server(state=state)
+
+    attached = await tool(server, "java_attach_window", {"title": BOUNDARY_TITLE})
+    session_id = attached.split(" ", 1)[0]
+    found = await tool(server, "java_find", {"session_id": session_id, "name": "Duplicate field"})
+
+    handles = re.findall(r"\[(e:[0-9a-f]+)\]", found)
+    assert len(handles) == 2, f"two fields share this name; the reply listed {handles}:\n{found}"
+
+    before = [
+        await tool(server, "java_get_text", {"session_id": session_id, "handle": handle})
+        for handle in handles
+    ]
+    assert "first value" in before[0] and "second value" in before[1], before
+
+    await tool(server, "java_set_text", {
+        "session_id": session_id, "handle": handles[1], "value": "changed the second one",
+    })
+    after = [
+        await tool(server, "java_get_text", {"session_id": session_id, "handle": handle})
+        for handle in handles
+    ]
+
+    assert "changed the second one" in after[1], after
+    assert "first value" in after[0], (
+        f"the other field must be untouched, so two names alone cannot identify an element: {after}"
+    )
+    print("\n[L3] two same-named fields stayed two different handles")

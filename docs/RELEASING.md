@@ -4,8 +4,8 @@ A release is: **bump the version, move the changelog, tag, and let
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) do the rest.** The workflow
 is tag-driven, so a tag is the only thing that publishes anything.
 
-Released versions are immutable — PyPI will not let a version be replaced or removed
-(`AGENTS.md` §2.3). That is why every check runs **before** the first upload, and why the
+Released versions are immutable — PyPI will not let a version be replaced or removed.
+That is why every check runs **before** the first upload, and why the
 version guard exists.
 
 ## One-time setup
@@ -132,19 +132,20 @@ all:
 
 ```console
 python -m venv /tmp/check
-/tmp/check/bin/python -m pip install "pyjab-mcp==0.1.0"
+/tmp/check/bin/python -m pip install "pyjab-mcp==0.1.2"
+/tmp/check/bin/pyjab-mcp --version          # the version the wheel was built as
 /tmp/check/bin/python -c "
-import asyncio, pyjab_mcp
+import asyncio
 from pyjab_mcp.server import create_server
-print('version:', pyjab_mcp.__version__)
 print('tools:', [t.name for t in asyncio.run(create_server().list_tools())])
 "
 ```
 
-Do not use `pyjab-mcp --help` for this. The console script takes no arguments and starts the
-stdio server whatever it is given, so `--help` prints nothing and exits 0 when stdin closes —
-a command that looks like a check and is not one. (`--help`/`--version` are worth adding; it is
-not a release rule, and 0.1.0 is published.)
+`--help` prints what the server needs and `--version` prints the version; both exit before the
+transport starts, which is why they may write to stdout while the server may not. Until 0.1.2
+the script ignored its arguments entirely, so `--help` printed nothing and exited 0 — a command
+that looked like a check and was not one, which is why this step used to spell the version check
+out the long way.
 
 ## If the tag is wrong
 
@@ -210,6 +211,33 @@ a runner, with no tag involved. When it goes red the fix is two lines: `$schema`
 That workflow deliberately does **not** pin the `mcp-publisher` version it downloads — the
 point is to ask what the registry currently accepts. The copy in `release.yml` is the same
 download for the same reason.
+
+## Aggregator listings
+
+The official registry is the source the aggregators read, so this comes **after** a release is
+registered — there is nothing to submit before that. The order below is cheapest first, and none
+of it can be automated: each is a form on somebody else's site, and two of them want an account.
+
+| site | what it asks for | notes |
+|---|---|---|
+| **LobeHub** | the registry entry or the GitHub repository | Usually finds a registered server on its own; a submission is a form with the name and a one-line description. |
+| **PulseMCP** | the server name and repository URL | Also crawls the registry; usually appears without a submission shortly after registration. |
+| **Smithery** | the package and how to run it | Wants a runnable command: `uvx pyjab-mcp` is what `server.json` already declares as the runtime hint. It may ask for a Windows/Java note — this server cannot run anywhere else. |
+| **mcp.so** | name, description, repository, category | A plain directory listing with no verification. |
+
+Copy the description from `server.json` verbatim. It is already written to the registry's rules
+(one line, capabilities rather than implementation, under 100 characters), so paraphrasing it for
+each site is how the listings end up disagreeing with the registry about what this is.
+
+Two things to say in every submission, because they are the questions a reviewer asks:
+
+* it needs **Windows** and a JDK with Java Access Bridge enabled — it is not a cross-platform
+  server, and a listing that omits this produces issue reports that are really installation
+  questions;
+* it **attaches to an application that is already running** and never launches or restarts one.
+
+After submitting, the plan's criterion is met at **three** listings; the count is in the project's
+readiness notes rather than here, because it is a fact about accounts rather than about code.
 
 ## What is deliberately not automated
 

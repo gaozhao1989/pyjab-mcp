@@ -14,7 +14,7 @@ pyjab's changelog carries a marker line for changes it judges to matter here:
     * **Something changed.** ... ``Affects: pyjab-mcp``
 
 A marker is a human judgement and can be forgotten or wrong, which is why this is only one
-of the two mechanisms in AGENTS.md §1a -- the load-bearing one is the contract tests in
+of the two halves of the drift mechanism -- the load-bearing one is the contract tests in
 ``tests/contract/``, which pin behaviour rather than announcements. This check covers the
 other half: a marker that has been written and nobody has answered.
 
@@ -33,7 +33,7 @@ What fails
   stale acknowledgement is a claim about a change that no longer exists;
 * (with ``--strict``) a changelog that could not be read at all. Without it, an unreadable
   source is reported as ``UNAVAILABLE`` and the check passes: "I could not read it" is not
-  "nothing was marked" (AGENTS.md §2.4), and a check that goes red every time the network
+  "nothing was marked", and a check that goes red every time the network
   hiccups is a check people learn to ignore.
 
 Usage
@@ -134,7 +134,7 @@ def load_acknowledged(
     if not path.exists():
         return {}, {}, (
             f"{path.name} does not exist. It is the record of what was done about each "
-            "marked pyjab change, and AGENTS.md 1a requires it."
+            "marked pyjab change, and the drift rule requires it."
         )
     try:
         import yaml
