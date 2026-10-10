@@ -212,6 +212,33 @@ That workflow deliberately does **not** pin the `mcp-publisher` version it downl
 point is to ask what the registry currently accepts. The copy in `release.yml` is the same
 download for the same reason.
 
+## Aggregator listings
+
+The official registry is the source the aggregators read, so this comes **after** a release is
+registered — there is nothing to submit before that. The order below is cheapest first, and none
+of it can be automated: each is a form on somebody else's site, and two of them want an account.
+
+| site | what it asks for | notes |
+|---|---|---|
+| **LobeHub** | the registry entry or the GitHub repository | Usually finds a registered server on its own; a submission is a form with the name and a one-line description. |
+| **PulseMCP** | the server name and repository URL | Also crawls the registry; usually appears without a submission shortly after registration. |
+| **Smithery** | the package and how to run it | Wants a runnable command: `uvx pyjab-mcp` is what `server.json` already declares as the runtime hint. It may ask for a Windows/Java note — this server cannot run anywhere else. |
+| **mcp.so** | name, description, repository, category | A plain directory listing with no verification. |
+
+Copy the description from `server.json` verbatim. It is already written to the registry's rules
+(one line, capabilities rather than implementation, under 100 characters), so paraphrasing it for
+each site is how the listings end up disagreeing with the registry about what this is.
+
+Two things to say in every submission, because they are the questions a reviewer asks:
+
+* it needs **Windows** and a JDK with Java Access Bridge enabled — it is not a cross-platform
+  server, and a listing that omits this produces issue reports that are really installation
+  questions;
+* it **attaches to an application that is already running** and never launches or restarts one.
+
+After submitting, the plan's criterion is met at **three** listings; the count is in the project's
+readiness notes rather than here, because it is a fact about accounts rather than about code.
+
 ## What is deliberately not automated
 
 * **Choosing the version.** Semantic versioning is a judgement about what changed.
