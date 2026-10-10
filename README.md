@@ -25,6 +25,10 @@ brought the tree walk a snapshot is built on, and 1.10.0 brought the public wind
 public way to send a key sequence, and pretending `send_text` is one would be a lie for
 `alt+y`. The reply says what to do instead.
 
+**Two elements can share a name**, which is why a handle carries where an element *is* as well as
+what it is called: searching by name returns every match, each gets its own handle, and the
+end-to-end suite checks that clicking one acts on that one and not the other.
+
 **Nothing is acted on until it has been checked.** Every action re-finds the element and
 compares role, name, position among siblings and bounds against what the snapshot recorded,
 then acts on the element it just checked — and if anything differs, it does nothing and
@@ -145,7 +149,7 @@ rather than the pixels.
 
 | Not supported | Why |
 |---|---|
-| **Canvas-drawn interfaces** — a `JPanel` painting its own widgets | There are no accessible children, so there is nothing to find, click or read. `java_screenshot` will show you a picture, and a picture is not something you can act on. If a panel like this needs to be driven, the application has to expose the controls. **Where this comes from:** pyjab investigated a canvas-painted panel (`pyjab#73`) and found no accessible children. Neither repository has a regression test for it — pyjab's test application has no canvas — so treat this as the design's expectation rather than a measured result. Adding the test is on the plan. |
+| **Canvas-drawn interfaces** — a `JPanel` painting its own widgets | There are no accessible children, so there is nothing to find, click or read. `java_screenshot` will show you a picture, and a picture is not something you can act on. If a panel like this needs to be driven, the application has to expose the controls. **Measured, not just expected.** pyjab investigated a canvas-painted panel (`pyjab#73`) and found no accessible children; this repository now has the regression test, against a fixture application that paints a panel and contains no child components (`tests/e2e/fixtures/BoundaryApp.java`). It asserts the pair: the panel is a leaf with `children_count = 0`, and a screenshot of *the same element* returns real PNG bytes — pixels without structure, which is the whole point. It runs in the `windows-gui` job; pyjab's own test application still has no canvas, which is tracked in `pyjab#169`. |
 | **Java inside a browser** (an embedded JVM, a Java Web Start descendant) | The browser owns the window and does not publish the applet's Java accessibility tree through JAB. |
 | **Applets in a plugin host** | Same reason: no JAB tree reaches the desktop. |
 | **Non-Java Windows applications** | Nothing here speaks UIA. A UIA-based MCP server is the right tool. |
