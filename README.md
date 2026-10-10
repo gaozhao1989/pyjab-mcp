@@ -35,15 +35,14 @@ last one is the reason the layer exists — a message pump on the wrong thread p
 other test in this repository. What it still cannot cover is your application: the run drives
 pyjab's test app, and the one that matters is the one you care about.
 
-Two gaps in pyjab are recorded rather than worked around, and both are visible in
-`java_diagnostics` (`AGENTS.md` §6.2):
+It needs `pyjab>=1.10.0`, which brought the two APIs this project spent M1 and M2 waiting on:
+`list_java_windows()`, so the window list comes from the bridge directly rather than through
+pyjab's CLI, and `JABDriver.detach()`, so a session can be released **without terminating the
+application** — the only teardown before it killed the bound process.
 
-* **no public API lists Java windows**, so `java_list_windows` runs through pyjab's
-  documented `pyjab-inspect windows --json` in a subprocess — a public interface, at the cost
-  of a process per listing;
-* **there is no non-destructive detach**, so a bound window stays bound for the life of the
-  process. The server holds one driver per attached window, never one per call, and never
-  calls `JABDriver.__exit__`, which would terminate the application.
+One gap is still recorded rather than worked around (`AGENTS.md` §6.2): **there is no public
+way to send a key sequence**, so `java_send_keys` reports that requirement instead of
+pretending `send_text` can express `alt+y`.
 
 A handle from `java_snapshot` is a position, not a reference. A later call re-finds the
 element and checks its role, name, position and bounds before doing anything, so a window

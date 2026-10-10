@@ -57,14 +57,15 @@ from pyjab_mcp.diagnostics import one_line as _one_line   # noqa: E402
 #:   it, and there is nothing left to wait for. Probing is still reported, but it cannot
 #:   fail the check off Windows, where the Windows-only module cannot be imported at all.
 WAITING = (
-    ("list_windows", "public java-window listing", "list_java_windows", None),
-    ("detach", "non-destructive detach", "detach", None),
+    ("list_windows", "public java-window listing", None, "1.10.0"),
+    ("detach", "non-destructive detach", None, "1.10.0"),
     ("walk", "tree walk (JABElement.walk)", None, "1.9.0"),
+    ("send_keys", "public key/shortcut sending", "send_keys", None),
 )
 
 WALK_NOTE = (
     "the snapshot reads the tree through walk(); it is in pyjab 1.9.0, so the pin is what "
-    "guarantees it (AGENTS.md 6.2 R3, retired by the 1.9.0 release)"
+    "guarantees it (AGENTS.md 6, R3 retired by the 1.9.0 release)"
 )
 
 RESOLVED = "RESOLVED"

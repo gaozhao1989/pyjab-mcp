@@ -228,6 +228,30 @@ under **Unreleased** until it is tagged.
 
 ### Changed
 
+* **The pin is `pyjab>=1.10.0`, and R1 and R2 are retired.** 1.10.0 added
+  `pyjab.list_java_windows()` — dicts with `hwnd`, `title` and `pid` — and
+  `JABDriver.detach()`, which releases the root element's JAB reference and forgets the window
+  **without terminating its process**. Those were the two gaps this project waited through M1
+  and M2 for: the listing no longer needs pyjab's CLI in a subprocess, and a session can be
+  released without killing the application it was observing.
+
+  `PyjabBackend.close()` now detaches every window instead of dropping the dict, and attaching
+  a window that is already bound releases the earlier binding rather than holding a second
+  context for it. The CLI listing stays as the fallback for an install below the pin — a floor
+  can be worked around — and nothing supported reaches it.
+
+  **1.10.0 was published while this project's CI was running.** The readiness check reported it
+  `READY` and a test that asserted the previous world failed in the same run; both were right.
+  It is the drift machinery doing what it was built for, and the reason the pin, the registry
+  and the readiness check are all verified rather than remembered: each `released_in` here was
+  checked against the installed wheel, and the 1.8.0 and 1.9.0 sdists for what came earlier.
+
+* **`java_diagnostics` reports a Windows-only API call off Windows as unavailable**, rather
+  than letting pyjab's descriptive `ImportError` cross the tool boundary: the library is
+  importable everywhere and only *runs* on Windows, and that is an environment answer.
+
+### Changed
+
 * **D2's verification is split into what blocks and what is reported, because a real run showed
   why it has to be.** The first end-to-end run through the tools set a text field to `"hello"`,
   then could not read it back: the edit had *renamed* the element. `JTextField("1122233455")`

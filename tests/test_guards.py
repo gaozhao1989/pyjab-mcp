@@ -142,7 +142,7 @@ MINIMAL_ARCHITECTURE = """# Architecture
 | session | `java_list_windows`, `java_attach_window` | M1 |
 | observe | `java_snapshot` | M2 |
 | observe | `java_screenshot` | M6 |
-| act | `java_click` | M5 |
+| act | `java_click` | M7 |
 """
 
 
@@ -184,10 +184,10 @@ def test_the_documented_surface_guard_catches_a_planned_tool_already_registered(
     problems = docs_guard.check(
         architecture=page, package=REPO_ROOT / "src" / "pyjab_mcp",
         registered=["java_diagnostics", "java_list_windows", "java_attach_window",
-                    "java_screenshot"],
+                    "java_click"],
     )
 
-    assert any("NOT YET: java_screenshot" in problem for problem in problems)
+    assert any("NOT YET: java_click" in problem for problem in problems)
 
 
 def test_the_documented_surface_guard_catches_an_undocumented_module(tmp_path):
@@ -302,18 +302,26 @@ def _report(status: str, detail: str = "because", version: str = "9.9.9"):
     return PyjabApiReport(version, None, facts)
 
 
-def test_readiness_is_ready_when_the_probe_says_available_or_the_pin_resolves_it():
+def test_readiness_is_resolved_by_the_pin_and_measured_otherwise():
+    """Three answers, and the difference matters: resolved by the pin, ready by probe, or not.
+
+    ``list_windows``, ``detach`` and ``walk`` are pin questions now -- pyjab released them,
+    so what guarantees them is the floor in pyproject.toml rather than a probe on whatever
+    machine happens to be running. ``send_keys`` is still a release question.
+    """
     verdicts = readiness_guard.readiness(_report("available"))
 
-    # The walk entry is a pin question: 1.9.0 shipped it, so the pin is the answer even if
-    # a probe on this platform cannot measure it.
-    assert verdicts["list_windows"][0] == readiness_guard.READY
+    assert verdicts["list_windows"][0] == readiness_guard.RESOLVED
     assert verdicts["walk"][0] == readiness_guard.RESOLVED
+    assert verdicts["send_keys"][0] == readiness_guard.READY
 
-    old = readiness_guard.readiness(_report("available", version="1.8.0"))
-    assert all(
-        verdict != readiness_guard.RESOLVED for verdict, _ in old.values()
-    ), "an older pyjab must not be reported as having the release"
+    old = readiness_guard.readiness(_report("missing", version="1.9.0"))
+    assert old["list_windows"][0] == readiness_guard.NOT_READY, (
+        "an install below the pin must not be reported as having the release"
+    )
+    assert old["walk"][0] == readiness_guard.RESOLVED, (
+        "1.9.0 does have the walk, and the pin's floor is what says so"
+    )
 
 
 @pytest.mark.parametrize("status", ["missing", "unknown"])

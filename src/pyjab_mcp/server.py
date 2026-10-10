@@ -15,13 +15,15 @@ it were a fact about the world.
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import functools
 import logging
 import secrets
 import threading
+import time
 from typing import Callable, Optional
 
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
@@ -1068,5 +1070,176 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
             "For a shortcut, the application usually exposes the same action as a menu item: "
             'find it with java_find(role="menu item") and use java_click.'
         )
+
+    # -----------------------------------------------------------------------------
+    # M6: waiting, and looking
+    # -----------------------------------------------------------------------------
+
+    @server.tool(
+        name="java_wait_for",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
+    )
+    async def java_wait_for(
+        session_id: str,
+        window_title: str = "",
+        handle: str = "",
+        text_equals: str = "",
+        timeout: float = 10.0,
+        poll_interval: float = 0.5,
+    ) -> str:
+        """Wait for something to happen, instead of asking too early and being told no.
+
+        Three conditions, chosen by what you pass:
+
+        * `window_title="A Dialog"` — wait until a Java window with that title (fnmatch, so
+          `"*Progress*"` works) exists. Use it after an action that opens one.
+        * `handle=..., text_equals="Saved"` — wait until that element's text *is* this.
+        * `handle=...` alone — wait until its text *changes* from what it reads when the wait
+          starts, and report both values.
+
+        **A timeout is a result, not an error.** The reply says the condition was not met and
+        what was seen instead, because "not yet" is information an agent can act on — it can
+        wait longer, look somewhere else, or take a snapshot — while an error reads as a
+        failed call. pyjab's own waits raise; this one reports, and the difference is
+        deliberate for a tool a model is driving.
+
+        The waiting happens here rather than inside pyjab, and that is also deliberate: the
+        bridge has exactly one owning thread, so a wait that ran *on* it would block every
+        other call for its whole duration. This polls between calls instead, which also means
+        a client can cancel it.
+
+        Args:
+            session_id: From java_attach_window.
+            window_title: Title (fnmatch) of a window to wait for.
+            handle: An element whose text to watch.
+            text_equals: The text to wait for, with a handle.
+            timeout: Give up after this many seconds.
+            poll_interval: Seconds between checks. Listing windows costs a process
+                (pyjab 1.9.0 has no public listing API), so a window wait polls slowly.
+
+        Returns:
+            Whether the condition was met, how long it took, and what was seen.
+
+        Errors:
+            ``is_error`` only for an unknown session or handle, or for no condition at all.
+            A timeout is reported in the reply, not as an error.
+        """
+        if not window_title and not handle:
+            raise ToolError(
+                "give a condition: window_title=<fnmatch> to wait for a window, or "
+                "handle=<e:...> (with text_equals=<text>) to wait for an element's text."
+            )
+        try:
+            bridge = await state.started_bridge()
+            attached = state.session(session_id)
+            entry = None
+            if handle:
+                _attached, entry = _entry(session_id, handle)
+        except Exception as exc:  # noqa: BLE001
+            raise _tool_error(exc) from exc
+
+        started = time.monotonic()
+        deadline = started + max(0.1, timeout)
+        interval = max(0.05, poll_interval)
+        last = "(nothing checked yet)"
+
+        # "Wait until the text changes" is measured from when the wait starts, not from when
+        # the handle was made: the caller wants the next change, and reading a baseline here
+        # costs one call instead of one per element in every snapshot.
+        baseline: "Optional[str]" = None
+        if handle and not text_equals:
+            try:
+                baseline = await bridge.call_backend("text", entry.window_id, entry.locator)
+            except Exception as exc:  # noqa: BLE001 - reported by the first poll
+                last = f"{type(exc).__name__}: {exc}"
+
+        while True:
+            try:
+                if window_title:
+                    windows = await bridge.call_backend("java_windows")
+                    titles = [window.title for window in windows]
+                    last = f"windows visible: {titles}"
+                    if any(fnmatch.fnmatch(title, window_title) for title in titles):
+                        return (
+                            f"met after {time.monotonic() - started:.1f}s: a window matching "
+                            f"{window_title!r} exists."
+                        )
+                else:
+                    resolved = await bridge.call_backend(
+                        "resolve", entry.window_id, entry.locator
+                    )
+                    text = await bridge.call_backend("text", entry.window_id, entry.locator)
+                    last = f"{resolved.label} text={text!r}"
+                    if text_equals:
+                        if text == text_equals:
+                            return (
+                                f"met after {time.monotonic() - started:.1f}s: "
+                                f"{resolved.label} now reads {text!r}."
+                            )
+                    elif baseline is None or text != baseline:
+                        return (
+                            f"met after {time.monotonic() - started:.1f}s: "
+                            f"{resolved.label} changed from {baseline!r} to {text!r}."
+                        )
+            except Exception as exc:  # noqa: BLE001 - a tree mid-change is not a failure
+                last = f"{type(exc).__name__}: {exc}"
+
+            if time.monotonic() >= deadline:
+                return (
+                    f"timed out after {time.monotonic() - started:.1f}s: the condition was "
+                    f"not met. Last seen: {last}. Wait longer, or take a fresh snapshot to "
+                    "see what the window looks like now."
+                )
+            await asyncio.sleep(interval)
+
+    @server.tool(
+        name="java_screenshot",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=True),
+    )
+    async def java_screenshot(session_id: str, handle: str = "") -> Image:
+        """A PNG of the window, or of one element inside it.
+
+        Use it when the accessibility tree is not enough — a chart, a canvas, a layout problem
+        — and remember what it cannot do: **a picture is not readable structure.** Anything
+        you want to act on should be found in the tree with java_snapshot or java_find, because
+        that is where the handles and the names are. Canvas-drawn interfaces are the case where
+        this is the only thing that works, and the only thing that is not there.
+
+        With a handle, the element is verified first, for the same reason an action is: a
+        picture of whatever moved into the position would mislead exactly as a click on it
+        would.
+
+        Args:
+            session_id: From java_attach_window.
+            handle: Optional element to photograph instead of the whole window.
+
+        Returns:
+            The image itself, as an image content block. Nothing else: a caption would be
+            text, and everything a caller needs to know is in the arguments it passed.
+
+        Errors:
+            ``is_error`` for an unknown session or handle, an element that changed, or a
+            window whose geometry is not reported — there is nothing to grab then, and saying
+            so beats an empty image.
+        """
+        try:
+            bridge = await state.started_bridge()
+            attached = state.session(session_id)
+            locator = None
+            expected = None
+            if handle:
+                _attached, entry = _entry(session_id, handle)
+                locator, expected = entry.locator, entry.expected
+            png = await bridge.call_backend(
+                "screenshot", attached.window_id, locator, expected
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise _tool_error(exc) from exc
+        if not png:
+            raise ToolError(
+                "the screenshot came back empty: the window or element reports no geometry, "
+                "and there is nothing to grab. java_get_element shows what it does report."
+            )
+        return Image(data=png, format="png")
 
     return server

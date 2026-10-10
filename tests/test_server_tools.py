@@ -35,6 +35,8 @@ TOOL_ORDER = [
     "java_select",
     "java_fill_form",
     "java_send_keys",
+    "java_wait_for",
+    "java_screenshot",
 ]
 
 
@@ -128,7 +130,7 @@ async def test_a_broken_bridge_is_an_anticipated_failure_with_a_next_step():
 async def test_the_missing_pyjab_api_reaches_the_model_as_its_requirement_text():
     class GapBackend(FakeBackend):
         def java_windows(self):
-            raise PyjabApiGap(requirement("list_java_windows"))
+            raise PyjabApiGap(requirement("send_keys"))
 
     server, _state = make_server(GapBackend())
 

@@ -37,29 +37,41 @@ def test_pyjab_is_installed_and_probed():
 
 
 def test_the_probe_and_the_backend_agree_about_the_window_listing():
-    """One source of truth: the public name is used when it exists, the CLI when it does not.
+    """One source of truth: the public API when it exists, the CLI when it does not.
 
-    Off Windows the fallback cannot answer either -- pyjab is Windows only -- so the
-    assertion is that the failure names the *fallback* rather than pretending no listing
-    path exists.
+    pyjab 1.10.0 added ``list_java_windows()``, so this is now the path a supported install
+    takes. Off Windows it raises pyjab's own descriptive ImportError, which the adapter turns
+    into an unusable-environment answer rather than passing an import failure up to the tool.
     """
     api = probe_public_api()
     backend = PyjabBackend()
 
     if api.has("public java-window listing"):
-        assert isinstance(backend.java_windows(), tuple)
-        return
-
-    if sys.platform == "win32":  # pragma: no cover - needs a Windows box with a JVM
-        assert isinstance(backend.java_windows(), tuple)
+        if sys.platform == "win32":  # pragma: no cover - needs a Windows box with a JVM
+            assert isinstance(backend.java_windows(), tuple)
+            return
+        with pytest.raises(PyjabUnavailable) as caught:
+            backend.java_windows()
+        assert "Windows-only" in str(caught.value)
         return
 
     with pytest.raises(PyjabUnavailable) as caught:
         backend.java_windows()
-    assert "pyjab-inspect" in str(caught.value)
+    assert "pyjab-inspect" in str(caught.value), (
+        "an install below the pin falls back to the CLI; off Windows that fails too, and the "
+        "message has to name what was tried"
+    )
 
 
-def test_the_window_listing_falls_back_to_the_documented_cli():
+@pytest.fixture
+def below_the_pin(monkeypatch):
+    """Force the CLI fallback, which a supported install no longer reaches."""
+    monkeypatch.setattr(
+        "pyjab_mcp.backend._public_window_listing", lambda: None
+    )
+
+
+def test_the_window_listing_falls_back_to_the_documented_cli(below_the_pin):
     """The fallback is a public interface: `pyjab-inspect windows --json`."""
     import json
     from types import SimpleNamespace
@@ -80,14 +92,14 @@ def test_the_window_listing_falls_back_to_the_documented_cli():
     assert [(w.hwnd, w.title, w.pid) for w in windows] == [(65537, "App", 42)]
 
 
-def test_an_empty_cli_answer_is_a_measurement_not_a_failure():
+def test_an_empty_cli_answer_is_a_measurement_not_a_failure(below_the_pin):
     from types import SimpleNamespace
 
     runner = lambda command: SimpleNamespace(returncode=0, stdout="[]", stderr="")
     assert PyjabBackend(cli_runner=runner).java_windows() == ()
 
 
-def test_a_cli_that_fails_is_reported_with_its_own_message():
+def test_a_cli_that_fails_is_reported_with_its_own_message(below_the_pin):
     from types import SimpleNamespace
 
     runner = lambda command: SimpleNamespace(
@@ -100,7 +112,7 @@ def test_a_cli_that_fails_is_reported_with_its_own_message():
     assert "No Java windows found." in str(caught.value)
 
 
-def test_a_cli_that_does_not_return_json_is_reported_not_guessed():
+def test_a_cli_that_does_not_return_json_is_reported_not_guessed(below_the_pin):
     from types import SimpleNamespace
 
     runner = lambda command: SimpleNamespace(returncode=0, stdout="not json", stderr="")
@@ -112,9 +124,9 @@ def test_a_cli_that_does_not_return_json_is_reported_not_guessed():
 
 
 def test_the_gap_message_names_what_is_missing_and_where_to_read_about_it():
-    message = requirement("list_java_windows").message()
+    message = requirement("send_keys").message()
 
-    assert "java_list_windows" in message
+    assert "key sequence or shortcut" in message
     assert "expected in:" in message
     assert "AGENTS.md" in message
     # The workaround has to be named as unacceptable, not left as an exercise.
@@ -175,11 +187,14 @@ def test_the_window_listing_record_shape_is_normalised():
     assert (as_object.hwnd, as_object.title, as_object.pid) == (65537, "App", None)
 
 
-def test_a_record_without_a_handle_is_reported_as_the_gap_not_guessed_at():
+def test_a_record_without_a_handle_is_reported_rather_than_guessed_at():
+    """A malformed record is a fact about the response, not a missing API."""
     from pyjab_mcp.backend import _to_window
 
-    with pytest.raises(PyjabApiGap):
+    with pytest.raises(PyjabUnavailable) as caught:
         _to_window({"title": "no handle here"})
+
+    assert "without an hwnd" in str(caught.value)
 
 
 def test_the_walk_fact_is_unknown_rather_than_missing_off_windows():
@@ -192,3 +207,33 @@ def test_the_walk_fact_is_unknown_rather_than_missing_off_windows():
     else:
         assert fact.status == "unknown"
         assert "cannot be imported here" in fact.detail
+
+
+def test_detaching_releases_the_window_and_leaves_the_process_alone():
+    """R2's answer, and the reason `close()` no longer just clears a dict."""
+    from tests._fakedriver import FakeDriver
+
+    backend = PyjabBackend()
+    driver = FakeDriver()
+    backend._drivers["w1"] = driver
+
+    assert backend.detach("w1") is True
+    assert driver.detached is True, "the window's JAB reference has to be given back"
+    assert backend.detach("w1") is False, "detaching twice is not an error, just nothing to do"
+
+
+def test_a_detach_that_raises_does_not_stop_the_others(caplog):
+    """It runs on the way out: one uncooperative window must not strand the rest."""
+    from tests._fakedriver import FakeDriver
+
+    class Exploding(FakeDriver):
+        def detach(self) -> None:
+            raise RuntimeError("the bridge refused")
+
+    backend = PyjabBackend()
+    backend._drivers["w1"] = Exploding()
+    backend._drivers["w2"] = FakeDriver()
+
+    backend.close()
+
+    assert backend._drivers == {}

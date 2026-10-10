@@ -55,7 +55,7 @@ TOOL_HEADING = "## Tool surface"
 #:
 #: This list moves as milestones land, and moving it is the deliberate act: it is what makes
 #: a tool's presence in the code a claim the page has to agree with.
-SHIPPED_MILESTONES = ("M1", "M2", "M3", "M4", "M5")
+SHIPPED_MILESTONES = ("M1", "M2", "M3", "M4", "M5", "M6")
 
 _BACKTICKED = re.compile(r"`([^`]+)`")
 

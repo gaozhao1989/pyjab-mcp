@@ -107,11 +107,13 @@ SURFACE: Dict[Touchpoint, Entry] = {
         "module-scope rule.",
     ),
     ("pyjab", "list_java_windows"): Entry(
-        UNRELEASED, "",
-        "Probed with getattr/hasattr, never imported: the public window listing this "
-        "project asked for (backend.REQUIREMENTS key 'list_java_windows', AGENTS.md 6.2 "
-        "R1). 1.9.0 did not add it. The day it appears, PyjabBackend starts using it with "
-        "no change here.",
+        PUBLIC, "1.10.0",
+        "The public window listing this project asked for as R1, released in 1.10.0 as "
+        "`pyjab.list_java_windows()`: dicts with hwnd, title and pid. Feature-detected with "
+        "getattr rather than version-compared, so an install below the pin still falls back "
+        "to the documented CLI. 1.10.0 was published while this project's CI was running, "
+        "which is how the switch was noticed -- the readiness check reported it READY and a "
+        "test that asserted the old world failed.",
     ),
     ("pyjab.common.win32utils", "*"): Entry(
         PUBLIC, "1.8.0",
@@ -163,6 +165,14 @@ SURFACE: Dict[Touchpoint, Entry] = {
         "docs/3-pyjab.md documents and what the wheel installs. Using the published CLI is "
         "the point: its bridge_without_window() helper is what R1 needs and is not in the "
         "module's __all__.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.detach"): Entry(
+        PUBLIC, "1.10.0",
+        "Releases the root element's JAB reference and forgets the window, **without "
+        "terminating its process** -- the R2 gap, answered in 1.10.0. This is what lets a "
+        "session end without killing the application it was observing; before it, the only "
+        "teardown was __exit__, which sends SIGTERM to the bound pid. Idempotent by pyjab's "
+        "own documentation, and it makes __exit__ a no-op afterwards by forgetting the pid.",
     ),
     ("pyjab.jabdriver", "JABDriver"): Entry(
         PUBLIC, "1.8.0",
@@ -309,6 +319,19 @@ SURFACE: Dict[Touchpoint, Entry] = {
     ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> select_row"): Entry(
         PUBLIC, "1.8.0",
         "Selects a whole row, through the same accessible-selection path.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.get_screenshot_as_png"): Entry(
+        PUBLIC, "1.8.0",
+        "PNG bytes for the bound window. In 1.9.0 this is built with ctypes and zlib -- "
+        "Pillow became an extra in that release, so java_screenshot needs no imaging "
+        "dependency on either side. get_screenshot() still returns a Pillow Image and is "
+        "deprecated for removal in 2.0.0, which is why nothing here calls it.",
+    ),
+    ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> get_screenshot_as_png"): Entry(
+        PUBLIC, "1.8.0",
+        "PNG bytes for one element. Taken only after the element is verified, because a "
+        "picture of whatever moved into the position would mislead exactly as a click on it "
+        "would.",
     ),
     ("pyjab.jabdriver", "JABDriver.find_elements_by_name"): Entry(
         PUBLIC, "1.8.0",

@@ -48,6 +48,8 @@ async def test_the_console_script_answers_a_real_mcp_handshake():
                 "java_select",
                 "java_fill_form",
                 "java_send_keys",
+                "java_wait_for",
+                "java_screenshot",
             ]
 
             # A tool call over the wire, not just tools/list: this is the end of the

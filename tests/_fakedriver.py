@@ -247,6 +247,7 @@ class FakeDriver:
         self.searches: List[Dict[str, Any]] = []
         #: Every action a test caused, in order, with what it was asked for.
         self.actions: List[Dict[str, Any]] = []
+        self.detached = False
         self.outstanding = 0
         self.handed_out = 0
         self.walk_calls: List[Dict[str, Any]] = []
@@ -324,6 +325,17 @@ class FakeDriver:
                               f"{path}#cell({row},{column})")
         element._cell_text = value
         return element
+
+    # -- what PyjabBackend.detach uses ------------------------------------------------
+
+    def detach(self) -> None:
+        """pyjab's ``JABDriver.detach``: release the binding, leave the process alone.
+
+        On the *driver*, not the element: pyjab puts it there, and a fake that mirrors the
+        adapter's guess instead of pyjab is how an earlier version of this file agreed with a
+        call to a method that does not exist.
+        """
+        self.detached = True
 
     # -- convenience -----------------------------------------------------------------
 

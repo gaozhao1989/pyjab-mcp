@@ -474,3 +474,29 @@ async def test_the_whole_flow_through_the_mcp_tools(live, main_window):
     assert "second pass" in await tool(
         server, "java_get_text", {"session_id": session_id, "handle": field_handle}
     )
+
+
+def test_detaching_releases_the_window_and_leaves_the_application_running(live, main_window):
+    """R2 verified where it means something: a real application that must survive.
+
+    ``JABDriver.detach()`` is the difference between ending a session and killing the process
+    it was watching. The assertion is therefore not "detach returned" but "the window is still
+    there afterwards, and can be attached again".
+    """
+    bridge, backend = live
+
+    attached = call(bridge, backend.attach, title=MAIN_TITLE)
+    assert attached.window_id
+
+    released = bridge.submit(backend.detach, attached.window_id).result(timeout=60)
+    assert released is True, "there was a window to release"
+
+    listing = call(bridge, backend.java_windows)
+    assert any(window.title == MAIN_TITLE for window in listing), (
+        "the application is gone: detach() killed the process it was attached to"
+    )
+
+    again = call(bridge, backend.attach, title=MAIN_TITLE)
+    assert again.hwnd, "and it can be attached again"
+    bridge.submit(backend.detach, again.window_id).result(timeout=60)
+    print("\n[L3] detach() released the window and the application kept running")

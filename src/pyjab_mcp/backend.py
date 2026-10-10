@@ -23,6 +23,7 @@ from __future__ import annotations
 import importlib.metadata
 import importlib.util
 import json
+import logging
 import subprocess
 import sys
 from contextlib import contextmanager
@@ -43,6 +44,8 @@ from typing import (
 from .handles import locator_candidates, locator_for, verify
 from .tree import Record, Walk, walked_nodes
 from .windows import JavaWindow
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------------
 # What pyjab does not yet provide, and why the obvious workaround is not one.
@@ -75,22 +78,6 @@ class Requirement:
 
 REQUIREMENTS: "tuple[Requirement, ...]" = (
     Requirement(
-        key="list_java_windows",
-        blocks="java_list_windows without the pyjab-inspect fallback",
-        wanted="a public API that lists the Java windows JAB can see",
-        why=(
-            "JABDriver cannot be constructed without binding a window, and a raw bridge "
-            "call is wrong until JABFixedFunc._fix_bridge_functions() has run -- which is "
-            "private, and without it ctypes truncates a 64-bit HWND to 32 bits, so "
-            "isJavaWindow would answer about a different window. pyjab 1.9.0 ships "
-            "pyjab.inspector.bridge_without_window(), which is exactly the missing piece, "
-            "but it is not in that module's __all__ and no documentation promises it."
-        ),
-        # Restated after 1.9.0: the release shipped the walk (R3, retired) and the inspector
-        # module, and did not promote this function or add a listing API.
-        expected_in="a pyjab minor after 1.9.0; 1.9.0 does not have it",
-    ),
-    Requirement(
         key="send_keys",
         blocks="java_send_keys, and therefore any shortcut that is not plain text",
         wanted="a public way to send a key sequence or shortcut (e.g. alt+y) to a window",
@@ -101,22 +88,20 @@ REQUIREMENTS: "tuple[Requirement, ...]" = (
             "depending on method names nobody promised, in the one area where a wrong key "
             "does something irreversible to the application."
         ),
-        expected_in="a pyjab minor after 1.9.0; 1.9.0 has no public key API",
-    ),
-    Requirement(
-        key="detach",
-        blocks="releasing a session without ending the application (M2 sessions)",
-        wanted="a public, non-destructive way to detach from a window it did not launch",
-        why=(
-            "the only teardown JABDriver has is __exit__, which terminates the bound "
-            "process by pid; calling it on a user's application would kill it. 1.9.0 added "
-            "no close()/quit()/detach(), so a session's accessible-context reference cannot "
-            "be given back. This server therefore holds at most one driver per attached "
-            "window, never calls __exit__, and says so in java_diagnostics."
-        ),
-        expected_in="a pyjab minor after 1.9.0; 1.9.0 does not have it",
+        expected_in="a pyjab minor after 1.10.0; 1.10.0 has no public key API",
     ),
 )
+
+#: Requirements that were answered, kept as the record of what was waited for and what
+#: answered it. R1 (`list_java_windows`) and R2 (`JABDriver.detach`) were both released in
+#: pyjab 1.10.0; R3 (the tree walk) in 1.9.0. They are not requirements any more -- nothing
+#: reads this list -- but deleting the history outright is how a project forgets why its pin
+#: is where it is.
+RETIRED_REQUIREMENTS: "Mapping[str, str]" = {
+    "list_java_windows": "released in pyjab 1.10.0 as pyjab.list_java_windows()",
+    "detach": "released in pyjab 1.10.0 as JABDriver.detach()",
+    "walk": "released in pyjab 1.9.0 as JABElement.walk() / JABTree",
+}
 
 
 def requirement(key: str) -> Requirement:
@@ -229,9 +214,9 @@ def probe_public_api() -> PyjabApiReport:
         Fact(
             "pyjab.inspector (CLI fallback)",
             AVAILABLE if importlib.util.find_spec("pyjab.inspector") else MISSING,
-            "shipped in 1.9.0; the documented `pyjab-inspect windows --json` is what this "
-            "server falls back to for listing, because its bridge_without_window() helper "
-            "is not public",
+            "shipped in 1.9.0. Since 1.10.0 added list_java_windows() this is only reached "
+            "by an install older than this project's pin; the documented "
+            "`pyjab-inspect windows --json` stays as that fallback rather than as the path",
         ),
     ]
     return PyjabApiReport(version, None, tuple(facts))
@@ -358,6 +343,10 @@ class Backend(Protocol):
             column: Optional[int] = None) -> None:
         """Verify the element and act on it, in one element lifetime."""
 
+    def screenshot(self, window_id: str, locator: Optional[str] = None,
+                   expected: Optional[Record] = None) -> bytes:
+        """PNG bytes for the bound window, or for one verified element."""
+
     def close(self) -> None:
         """Release what this backend holds, without touching the applications it observes."""
 
@@ -446,7 +435,20 @@ class PyjabBackend:
     def java_windows(self) -> Sequence[JavaWindow]:
         listing = _public_window_listing()
         if listing is not None:
-            return tuple(_to_window(record) for record in listing())
+            try:
+                return tuple(_to_window(record) for record in listing())
+            except ImportError as exc:
+                # pyjab is importable everywhere but only *runs* on Windows, and its
+                # descriptive ImportError is what crossing that line looks like from here.
+                # Passing it through would hand the tool layer an import failure to explain;
+                # it is an ordinary unusable-environment answer instead.
+                raise PyjabUnavailable(
+                    f"the Java Access Bridge is Windows-only, so it cannot list windows "
+                    f"here: {exc}"
+                ) from exc
+        # Reached only when the installed pyjab is older than this project's pin (or someone
+        # has vendored one). Kept because the CLI is a public interface rather than a private
+        # one, and because a floor can be worked around -- not because it is expected.
         return tuple(_cli_java_windows(self._run_cli))
 
     def attach(self, *, title: str = "", hwnd: Optional[int] = None,
@@ -476,6 +478,12 @@ class PyjabBackend:
                 f"could not bind to the window ({title or hwnd}): "
                 f"{type(exc).__name__}: {exc}"
             ) from exc
+
+        # Attaching the same window twice would hold two contexts for it, and the second is
+        # pure waste: release the one already bound to this handle first.
+        for existing, bound in list(self._drivers.items()):
+            if int(getattr(bound, "hwnd", 0) or 0) == int(driver.hwnd or 0):
+                self.detach(existing)
 
         self._counter += 1
         window_id = f"w{self._counter}"
@@ -526,15 +534,39 @@ class PyjabBackend:
             value=value, simulate=simulate, row=row, column=column,
         )
 
-    def close(self) -> None:
-        """Drop the bound drivers **without ending the applications they observe**.
+    def screenshot(self, window_id: str, locator: Optional[str] = None,
+                   expected: Optional[Record] = None) -> bytes:
+        """A screenshot.  See :func:`screenshot_driver`."""
+        return screenshot_driver(
+            self._driver(window_id), locator=locator, expected=expected
+        )
 
-        This is the R2 gap made explicit. A driver holds an accessible-context reference and
-        the only teardown pyjab offers is ``JABDriver.__exit__``, which sends ``SIGTERM`` to
-        the bound pid. So this releases nothing and says so: the contexts go when the process
-        does. One driver per attached window, never one per call, is what keeps that bounded.
+    def close(self) -> None:
+        """Detach every bound window, releasing its JAB reference and leaving it running.
+
+        This used to be ``self._drivers.clear()`` with a comment saying nothing could be
+        released: the only teardown pyjab had was ``__exit__``, which terminates the bound
+        process. ``JABDriver.detach()`` arrived in 1.10.0 and does the part this project
+        wanted -- release the root element's reference, forget the window, leave the
+        application alone -- so a session now ends without killing anything.
         """
-        self._drivers.clear()
+        for window_id in list(self._drivers):
+            self.detach(window_id)
+
+    def detach(self, window_id: str) -> bool:
+        """Release one attached window.  Returns whether there was one to release.
+
+        A failure here is logged rather than raised: this runs on the way out, and a bridge
+        that cannot release a reference must not stop the other windows from being released.
+        """
+        driver = self._drivers.pop(window_id, None)
+        if driver is None:
+            return False
+        try:
+            driver.detach()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("detaching %s raised: %s", window_id, exc)
+        return True
 
     # -- helpers -------------------------------------------------------------------
 
@@ -813,6 +845,29 @@ def act_driver(driver: Any, locator: str, expected: Record, action: str, *,
             raise ValueError(f"unknown action {action!r}")
 
 
+def screenshot_driver(driver: Any, *, locator: Optional[str] = None,
+                      expected: Optional[Record] = None) -> bytes:
+    """PNG bytes for the whole bound window, or for one element inside it.
+
+    pyjab returns the bytes and nothing else, which is the right shape for this layer: no
+    image library is pulled in on either side. ``get_screenshot_as_png`` builds the PNG from
+    the pixels with ctypes and zlib in 1.9.0 -- Pillow became an extra in that release, and
+    this project does not need it.
+
+    With a locator, the element is verified first, exactly as an action is: photographing
+    something is a read, but it is a read *of a particular element*, and a picture of whatever
+    moved into the position would be as misleading as a click on it.
+    """
+    if locator is None:
+        return driver.get_screenshot_as_png()
+    with element_for(driver, locator) as element:
+        if expected is not None:
+            result = verify(expected, Record.from_pyjab(element.as_record()))
+            if not result.ok:
+                raise ElementChanged(result.message())
+        return element.get_screenshot_as_png()
+
+
 def find_driver(driver: Any, *, by: str, value: Any, visible: bool = False,
                 limit: int = 20) -> "List[Tuple[Record, Optional[str]]]":
     """Search the window and return each match with the locator that finds it again.
@@ -990,7 +1045,12 @@ def _to_window(record: Any) -> JavaWindow:
     hwnd = get("hwnd")
     title = get("title")
     if hwnd is None or title is None:
-        raise PyjabApiGap(requirement("list_java_windows"))
+        # Not a missing API: pyjab's listing is documented to return hwnd/title/pid, so a
+        # record without them is a response this project cannot read, and saying which part
+        # was missing beats guessing.
+        raise PyjabUnavailable(
+            f"pyjab's window listing returned a record without an hwnd or a title: {record!r}"
+        )
     pid = get("pid")
     return JavaWindow(hwnd=int(hwnd), title=str(title), pid=int(pid) if pid else None)
 

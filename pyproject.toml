@@ -31,11 +31,12 @@ classifiers = [
 ]
 
 dependencies = [
-    # The substrate. 1.9.0 is the floor because it is the first release with
-    # `JABElement.walk` / `JABTree` (the M2 snapshot) and `JABElement.as_record` (the fields
-    # a handle records and re-verifies against). 1.8.0 has neither, so a floor below 1.9.0
-    # would permit an install that cannot snapshot. See AGENTS.md 6.
-    "pyjab>=1.9.0",
+    # The substrate. 1.10.0 is the floor: 1.9.0 brought the tree walk and `as_record` (the
+    # M2 snapshot, and the fields a handle re-verifies against), and 1.10.0 brought
+    # `list_java_windows()` and `JABDriver.detach()` -- the two APIs this project spent M1
+    # and M2 waiting on, and the reason the listing no longer needs a fallback. A floor below
+    # this one permits an install that cannot list a window through the API. See AGENTS.md 6.
+    "pyjab>=1.10.0",
     # The official SDK. `mcp.server.mcpserver.MCPServer` is the 2.x name for what used to be
     # FastMCP -- 1.x exposes `mcp.server.fastmcp` instead, so the floor is genuinely 2.0 and
     # a 1.x install fails at import, not at runtime.

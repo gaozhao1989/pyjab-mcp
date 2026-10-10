@@ -228,3 +228,43 @@ def test_the_walk_result_still_reports_its_own_truncation():
         "walk_driver reads .limit_hit as well, because stopping the iteration is not the "
         "same as pyjab stopping it"
     )
+
+
+def test_the_public_window_listing_exists_and_is_documented_as_records():
+    """R1's answer, and the shape the adapter reads: hwnd, title and pid.
+
+    Off Windows the call raises pyjab's descriptive ImportError -- the function is defined
+    everywhere and its body is imported inside, so `import pyjab` stays harmless -- which is
+    what makes the shape checkable here and the behaviour checkable on Windows.
+    """
+    import pyjab
+
+    assert hasattr(pyjab, "list_java_windows"), (
+        "the pin requires pyjab>=1.10.0, whose whole point for this project is this function"
+    )
+    signature = inspect.signature(pyjab.list_java_windows)
+    assert list(signature.parameters) == [], f"it takes no arguments; now {signature}"
+
+    doc = pyjab.list_java_windows.__doc__ or ""
+    for key in ("hwnd", "title", "pid"):
+        assert key in doc, f"the listing no longer documents {key!r}, which _to_window reads"
+
+    if sys.platform == "win32":  # pragma: no cover - needs a Windows box
+        records = pyjab.list_java_windows()
+        assert isinstance(records, list)
+        for record in records[:3]:
+            assert {"hwnd", "title"} <= set(record), record
+
+
+@windows_only
+def test_the_driver_can_detach_without_terminating_anything():
+    """R2's answer: the release this project needs, and the one it must not confuse with
+    ``__exit__`` (which sends SIGTERM to the bound pid)."""
+    from pyjab.jabdriver import JABDriver
+
+    assert hasattr(JABDriver, "detach"), (
+        "sessions are released with detach(); without it the only teardown kills the app"
+    )
+    assert list(inspect.signature(JABDriver.detach).parameters) == ["self"]
+    doc = (JABDriver.detach.__doc__ or "").lower()
+    assert "without terminating" in doc, "detach has to be the non-destructive one"
