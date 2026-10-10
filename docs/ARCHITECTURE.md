@@ -153,6 +153,16 @@ Every action verifies first and acts on the element it verified, inside one elem
 so there is no window between the check and the action in which the tree could move. When the
 element has changed, **nothing is done** — the difference is reported instead.
 
+**Two answers to "how many children".** pyjab reports an element's **total** child count in
+`as_record()`, while a walk yields the children the accessibility tree **exposes** — so a
+collapsed node or an unselected tab legitimately reports children the walk never produces.
+`java_snapshot` prints the element's own number and marks the difference (`children=3 (+2)`)
+with one legend explaining it, because a reply that shows `children=3` above nothing cannot be
+told apart from a walk that stopped early, a rendering bug, or a read that failed. This
+project's own `only_interactive` filter is deliberately **not** part of that number: a dropped
+container was still walked, and blaming the application for our rendering would be a lie in the
+other direction.
+
 `java_wait_for` waits for a window to appear or an element's text to change, polling between
 bridge calls rather than inside one: the bridge has a single owning thread, so a wait that ran
 on it would block every other call for its whole duration. A timeout is reported as a result

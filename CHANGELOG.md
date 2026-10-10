@@ -8,8 +8,27 @@ under **Unreleased** until it is tagged.
 
 ## Unreleased
 
-Nothing yet.
+### Fixed
 
+* **A snapshot could print `children=3` with nothing under it and give no reason.** pyjab reports
+  an element's **total** child count while a walk yields the children the tree *exposes*, so a
+  collapsed node or an unselected tab legitimately shows fewer children than it reports — pyjab's
+  own finding, [pyjab#173](https://github.com/gaozhao1989/pyjab/issues/173). Four situations then
+  looked identical: children that are not visible, a walk stopped by its limit, a bug in this
+  renderer, or a read that failed.
+
+  `java_snapshot` now marks the difference where it exists — `children=3 (+2)`, on the node and on
+  the window line — with one legend explaining that the first number is the element's own total.
+  When the walk was also cut short the legend says so, because the gap then has two possible
+  causes and the reply must not pick one for the reader. Both appear **only when the `children`
+  field is printed**, so a default snapshot does not grow a paragraph it cannot use.
+
+  This project's own `only_interactive` filter is deliberately outside the comparison: a container
+  dropped from the *rendering* was still walked, and counting it as a gap would blame the
+  application for our choice. Six tests cover the marker, the legend, the truncated variant, the
+  filter case, and the ordinary case where nothing is added.
+
+### Added
 ## [0.1.1] - 2026-10-10
 
 **A patch release, because the MCP Registry registers a PyPI package by reading a line out of
