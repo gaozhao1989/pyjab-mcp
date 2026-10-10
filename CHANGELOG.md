@@ -8,6 +8,12 @@ under **Unreleased** until it is tagged.
 
 ## Unreleased
 
+Nothing yet.
+
+## [0.1.2] - 2026-10-10
+
+**A patch release with three things a user can feel**: `java_send_keys` now sends chords where the installed pyjab provides the API rather than refusing unconditionally (so the release that answers R4 makes it work with no change here), `java_snapshot` says why it can show fewer children than an element reports instead of printing an unexplained `children=3`, and the console script gained `--help` and `--version`. The sections below are the detail.
+
 ### Added
 
 * **`--help` says where to get help, and what the free version includes.** The plan's F1 asked

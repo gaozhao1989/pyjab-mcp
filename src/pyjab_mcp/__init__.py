@@ -14,6 +14,6 @@ through the JVM's own accessibility tree. See the README for what they are and w
 substrate cannot reach.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 __all__ = ["__version__"]
