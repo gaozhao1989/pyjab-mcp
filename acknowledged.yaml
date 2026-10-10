@@ -20,6 +20,32 @@
 # must move up into `acknowledged`.
 
 acknowledged:
+  # Found by the guard on 2026-10-10, mid-session, while the release this marker belongs to had
+  # not happened: the drift machinery doing its job rather than a change anyone announced.
+  - commit: line:504876b8fb65
+    what: >-
+      `visible_children_count` stops raising and returns the number: a childless self-painting
+      panel and a refused call both answer `0`, so `0` no longer distinguishes "no visible
+      children" from "could not read them". pyjab's note names the readable signal --
+      `children_count`, from `getAccessibleContextInfo`, which raises first if the context info
+      could not be read. Nothing to change here.
+
+      * **This project never touches `visible_children_count`.** `grep -rn visible_children
+        src/ tests/ tools/` has no hits, and the API-surface guard records no touchpoint on it,
+        so the raising contract was never ours to depend on.
+      * Our child-count logic reads `children_count` (the record field, `src/pyjab_mcp/tree.py`),
+        which is exactly the signal the note recommends for telling "no children" from "could
+        not read them" -- and that is what #18's `children(+n)` marker is built on.
+      * It is **not in any release**: the marker says first released in 1.11.0, PyPI's latest is
+        1.10.0, and the pin is `pyjab>=1.10.0`, so no supported install changes behaviour. The
+        check happens where the note says it should: `tests/contract/test_pyjab_contract.py`
+        runs against `pyjab@master` in the weekly drift job.
+      * **One thing to look at when 1.11.0 is released**, recorded here so it is not lost:
+        the record reader writes `int(raw.get("children_count") or 0)`, so a missing or `None`
+        value reads as `0`. That is the one place where "the property refused" and "there are no
+        children" could still collapse -- it is `as_record()`'s contract rather than this
+        property's, and the contract test is what should pin it when the pin moves.
+
   # Keyed by `line:<digest>` rather than a commit, because pyjab's marker for this change
   # carries a release rather than a hash. That is the point of the fallback: the marker was
   # reworded (it used to name commit 8ec88a3, before the release section existed), so the id
