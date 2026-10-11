@@ -87,6 +87,17 @@ def _is_shipped(mark: str) -> bool:
     A named release is always "now": the cell is written when the tool lands, and the release
     either already carries it or is the one being prepared.  A milestone counts only once it
     has landed and moved into :data:`SHIPPED_MILESTONES`.
+
+    Read that as the shape of the two marks, because the table now has both and the next person
+    to add a tool has to pick one.  A ``\\d+.\\d+.\\d+`` mark means **"in the code now, shipping
+    in that release"**; it exists because the plan's milestones are all complete, so a tool that
+    lands afterwards has no milestone to name and the milestone vocabulary could no longer
+    express the truth.  Use a milestone for a plan and a release for code that exists.
+
+    What this guard checks is **documentation-versus-code agreement**, not the truth of the
+    version -- it is the reason widening what counts as "shipping" is safe: a documented tool
+    that the server does not register still fails as MISSING TOOL, and no guard can catch a
+    false release number, which is a claim about the future rather than about this repository.
     """
     return mark in SHIPPED_MILESTONES or bool(_VERSION.fullmatch(mark))
 
