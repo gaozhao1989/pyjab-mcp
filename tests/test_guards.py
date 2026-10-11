@@ -13,6 +13,7 @@ and once against an input that is deliberately wrong, where it must complain.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -23,6 +24,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+import tests.test_mcpb_bundle as bundle_test
 import tools.check_dist_contents as dist_guard
 import tools.check_pyjab_changelog as changelog_guard
 import tools.check_documented_surface as docs_guard
@@ -1563,6 +1565,364 @@ def test_the_mcpb_job_builds_on_every_trigger_and_attaches_only_on_a_tag():
             "byte-identical and a released asset must not be replaced -- and everything else "
             "swallows the failure."
         )
+
+
+# ---------------------------------------------------------------------------------
+# The bundle jobs in ci.yml -- the .mcpb is *run*, not only inspected (issue #37)
+# ---------------------------------------------------------------------------------
+#
+# Every other statement about the bundle was a statement about its *shape*, and that is where
+# the last blocking defect lived: the `cp310` tree was missing `exceptiongroup`, so a 3.10
+# user's server died at startup while every static check passed, including one that compared
+# the declared range with the vendored directory **names**. The jobs pinned here are the
+# dynamic half -- one build, four legs on `windows-latest`, each unpacking the artifact and
+# driving a handshake through the bundle's own entry script with the interpreter of its leg.
+#
+# The hazard is not a wrong verdict. It is a job that does not run, or a test that skips:
+#   * a `paths:` filter on the workflow, or an `if:` on a job or the test step, leaves the run
+#     green with nothing executed -- "a job that is skipped by a filter is not a gate", which
+#     this repository has learned twice;
+#   * the test skips when `PYJAB_MCP_BUNDLE` is unset (so the default suite is unaffected), so
+#     a leg that stops setting it would report green while nothing ran. That is the lesson of
+#     issue #30, and the reason the skip condition is pinned as behaviour and not as text.
+
+CI_PATH = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+
+BUNDLE_BUILD_JOB = "mcpb-build"
+BUNDLE_RUN_JOB = "mcpb-runs"
+BUNDLE_ARTIFACT = "mcpb"
+BUNDLE_BUILD_STEP = "Build the MCPB bundle"
+BUNDLE_TEST_STEP = "Run the bundle's own entry script on this interpreter"
+
+#: The two commands, whole. `; exit 0`, `|| true` and a second command after the packer are all
+#: inside what is compared, which is what makes "the job ran it" mean "the job ran *this*".
+BUNDLE_BUILD_COMMAND = "python tools/build_mcpb.py --dist dist --out dist"
+BUNDLE_TEST_COMMAND = "python -m pytest tests/test_mcpb_bundle.py"
+
+#: The variable the test reads, and the value the job sets on it. The two ends are tied
+#: together here -- the key is `tests/test_mcpb_bundle.BUNDLE_ENV` itself, so renaming the
+#: constant without the workflow (or the reverse) reddens this pin rather than silently
+#: making every leg skip.
+BUNDLE_ENV_VALUE = "${{ github.workspace }}/bundle/*.mcpb"
+
+#: Both jobs' steps, whole and in order, as `name` or `uses` -- the same framing as the
+#: release pipeline's `mcpb` job, and for the same reason: a pin that asks whether *the* step
+#: was disarmed cannot see a *second* one added beside it.
+BUNDLE_BUILD_STEPS = (
+    "actions/checkout@v4",
+    "actions/setup-python@v5",
+    "Install the build tooling",
+    "Build the wheel",
+    BUNDLE_BUILD_STEP,
+    "actions/upload-artifact@v4",
+)
+BUNDLE_RUN_STEPS = (
+    "actions/checkout@v4",
+    "actions/setup-python@v5",
+    "Install the test process's own dependencies",
+    "actions/download-artifact@v4",
+    BUNDLE_TEST_STEP,
+)
+
+#: The minors the packer vendors a tree for. All four are needed: the defect was in one of
+#: them, and a leg that is missing is exactly how the `cp310` gap stayed invisible.
+BUNDLE_MINORS = ["3.10", "3.11", "3.12", "3.13"]
+
+
+def ci_workflow() -> dict:
+    """`.github/workflows/ci.yml`, parsed."""
+    return yaml.safe_load(CI_PATH.read_text(encoding="utf-8"))
+
+
+def ci_triggers(workflow: dict) -> dict:
+    """The workflow's ``on:`` block, however PyYAML spelled the key.
+
+    YAML 1.1 resolves the bare word ``on`` to a boolean, so ``safe_load`` gives this block the
+    key ``True`` and a pin that only looked for the string ``"on"`` would find nothing and pass
+    vacuously -- which is the shape of pin this repository has already been burned by.
+    """
+    assert "on" in workflow or True in workflow, (
+        f"ci.yml has no `on:` block at all: {sorted(map(str, workflow))!r}"
+    )
+    block = workflow.get("on", workflow.get(True))
+    assert isinstance(block, dict), f"ci.yml's `on:` block is not a mapping: {block!r}"
+    return block
+
+
+def ci_steps(job: dict) -> "list[dict]":
+    """A job's steps, as the workflow declares them."""
+    return list(job.get("steps") or [])
+
+
+def ci_step(job: dict, name: str) -> dict:
+    """The one step of *job* with this name, or a failure that says so."""
+    found = [step for step in ci_steps(job) if step.get("name") == name]
+    assert len(found) == 1, (
+        f"the job has {len(found)} steps named {name!r}. If it was renamed, retarget this pin; "
+        "if it was deleted, the job no longer does the thing the pin is about."
+    )
+    return found[0]
+
+
+def ci_step_names(job: dict) -> "tuple":
+    """Each step as its `name`, or its `uses` where it has none."""
+    return tuple(step.get("name") or step.get("uses") for step in ci_steps(job))
+
+
+def test_the_workflow_has_no_path_filter_that_could_leave_the_bundle_jobs_unrun():
+    """A job skipped by a filter is not a gate, and this repository has forgotten that twice."""
+    for trigger, config in ci_triggers(ci_workflow()).items():
+        config = config if isinstance(config, dict) else {}
+        for key in ("paths", "paths-ignore"):
+            assert key not in config, (
+                f"ci.yml's `{trigger}` trigger carries `{key}`. A path filter skips whole jobs "
+                "-- including the bundle jobs -- and a skipped job leaves the run green without "
+                "executing anything, which is exactly what these jobs exist to prevent."
+            )
+
+
+def test_the_bundle_builder_job_runs_the_packer_and_uploads_the_artifact():
+    """Issue #37's first half: one bundle, built from the wheel and kept for the four legs."""
+    jobs = ci_workflow().get("jobs") or {}
+    assert BUNDLE_BUILD_JOB in jobs, (
+        f"ci.yml has no `{BUNDLE_BUILD_JOB}` job: nothing builds the .mcpb in default CI, so "
+        "the four legs have nothing to run."
+    )
+    job = jobs[BUNDLE_BUILD_JOB]
+
+    assert ci_step_names(job) == BUNDLE_BUILD_STEPS, (
+        f"`{BUNDLE_BUILD_JOB}`'s steps are {ci_step_names(job)!r}, and this pin requires "
+        f"exactly {BUNDLE_BUILD_STEPS!r}. A step added here can build a different bundle, or "
+        "upload a different file, without touching the step this pin is about."
+    )
+    assert "if" not in job, (
+        f"`{BUNDLE_BUILD_JOB}` is conditional, so the bundle can be skipped on some event and "
+        "the four legs then run against an artifact from an earlier run, or none at all"
+    )
+    assert not job.get("continue-on-error"), (
+        f"`{BUNDLE_BUILD_JOB}` ignores its own failure, so a bundle that could not be built "
+        "leaves the run green"
+    )
+
+    build = ci_step(job, BUNDLE_BUILD_STEP)
+    assert shell_lines(build) == [BUNDLE_BUILD_COMMAND], (
+        f"the build step runs {shell_lines(build)!r}, and this pin requires exactly "
+        f"[{BUNDLE_BUILD_COMMAND!r}]. A trailing `; exit 0`, an `|| true`, or a second command "
+        "after the packer reports success for a bundle that was never built."
+    )
+    assert "if" not in build, (
+        "the build step is conditional, so the artifact the four legs run can be stale"
+    )
+    assert not build.get("continue-on-error"), (
+        "the build step ignores its own failure, so a bundle that was not built is uploaded"
+    )
+
+    artifacts = [
+        step for step in ci_steps(job)
+        if str(step.get("uses", "")).startswith("actions/upload-artifact")
+    ]
+    assert len(artifacts) == 1, (
+        f"`{BUNDLE_BUILD_JOB}` has {len(artifacts)} `actions/upload-artifact` steps; there has "
+        "to be exactly one, and it has to be the one the four legs download."
+    )
+    upload = artifacts[0]
+    assert flat(upload.get("with", {}).get("name")) == BUNDLE_ARTIFACT, (
+        f"the builder uploads an artifact named {upload.get('with', {}).get('name')!r}, and the "
+        f"runner job downloads {BUNDLE_ARTIFACT!r}"
+    )
+    assert flat(upload.get("with", {}).get("path")) == "dist/*.mcpb", (
+        f"the artifact step uploads {upload.get('with', {}).get('path')!r}, and this pin "
+        "requires exactly 'dist/*.mcpb'. A path that merely *contains* `*.mcpb` -- `*.mcpbz`, "
+        "`*.mcpb.asc` -- keeps a different set of files while reading like the right one."
+    )
+    assert flat(upload.get("with", {}).get("if-no-files-found", "")) == "error", (
+        "the artifact step does not fail when the build produced nothing, so the builder can "
+        "be green with four legs about to fail over a missing file"
+    )
+    assert "if" not in upload and not upload.get("continue-on-error"), (
+        "the artifact step is conditional or ignores its failure, so the legs can get no bundle"
+    )
+
+
+def test_the_bundle_runner_job_executes_it_on_every_supported_minor():
+    """Issue #37's second half: unpack and *run* it, per minor, on Windows."""
+    jobs = ci_workflow().get("jobs") or {}
+    assert BUNDLE_RUN_JOB in jobs, (
+        f"ci.yml has no `{BUNDLE_RUN_JOB}` job, so nothing in default CI ever executes a .mcpb"
+    )
+    build_job = jobs.get(BUNDLE_BUILD_JOB) or {}
+    job = jobs[BUNDLE_RUN_JOB]
+
+    assert BUNDLE_BUILD_JOB in (job.get("needs") or []), (
+        f"`{BUNDLE_RUN_JOB}` does not need `{BUNDLE_BUILD_JOB}`, so it can start before the "
+        "artifact it downloads exists"
+    )
+    assert flat(job.get("runs-on")) == "windows-latest", (
+        f"`{BUNDLE_RUN_JOB}` runs on {job.get('runs-on')!r}. The vendored trees are win_amd64 "
+        "wheels and the manifest declares win32, so a leg on another platform measures a "
+        "bundle nobody ships."
+    )
+    assert "if" not in job, (
+        f"`{BUNDLE_RUN_JOB}` is conditional: a job that a filter or a condition can skip is not "
+        "a gate on a merge"
+    )
+    assert not job.get("continue-on-error"), (
+        f"`{BUNDLE_RUN_JOB}` ignores its own failure, so a bundle that cannot start leaves the "
+        "run green"
+    )
+
+    matrix = ((job.get("strategy") or {}).get("matrix")) or {}
+    assert list(matrix.get("python-version") or []) == BUNDLE_MINORS, (
+        f"`{BUNDLE_RUN_JOB}` is a matrix over {matrix.get('python-version')!r}, and this pin "
+        f"requires {BUNDLE_MINORS!r}. One minor is what the bundle vendors per tree, and the "
+        "defect this job exists for was in exactly one of them (`cp310`)."
+    )
+    assert "exclude" not in matrix, (
+        "the matrix excludes a leg. Excluding one drops a minor from the run while the declared "
+        "list still reads as four -- `cp310` is the one that would be dropped, and the tree "
+        "that was broken."
+    )
+
+    assert ci_step_names(job) == BUNDLE_RUN_STEPS, (
+        f"`{BUNDLE_RUN_JOB}`'s steps are {ci_step_names(job)!r}, and this pin requires exactly "
+        f"{BUNDLE_RUN_STEPS!r}."
+    )
+
+    downloads = [
+        step for step in ci_steps(job)
+        if str(step.get("uses", "")).startswith("actions/download-artifact")
+    ]
+    assert len(downloads) == 1, (
+        f"`{BUNDLE_RUN_JOB}` has {len(downloads)} download steps; there has to be exactly one"
+    )
+    download = downloads[0]
+    assert flat(download.get("with", {}).get("name")) == BUNDLE_ARTIFACT, (
+        f"the runner downloads {download.get('with', {}).get('name')!r}, not "
+        f"{BUNDLE_ARTIFACT!r} -- the artifact the builder uploads"
+    )
+    assert str(download.get("with", {}).get("path", "")).strip(), (
+        "the download step names no path, so where the bundle lands is whatever the action "
+        "defaults to and the variable below points somewhere else"
+    )
+
+    test_step = ci_step(job, BUNDLE_TEST_STEP)
+    assert shell_lines(test_step) == [BUNDLE_TEST_COMMAND], (
+        f"the test step runs {shell_lines(test_step)!r}, and this pin requires exactly "
+        f"[{BUNDLE_TEST_COMMAND!r}]. This is the step that does the work: `|| true`, `; exit 0`, "
+        "a `--ignore` or a second pytest invocation after it all report success for a handshake "
+        "that never happened."
+    )
+    assert "if" not in test_step, (
+        "the test step is conditional, which is how a leg reports green without running the "
+        "bundle"
+    )
+    assert not test_step.get("continue-on-error"), "the test step ignores its own failure"
+    for fragment in ("||", "; true", "2>/dev/null", "--ignore", "continue-on-error"):
+        assert fragment not in str(test_step.get("run", "")), (
+            f"the test step contains {fragment!r}, which swallows or skips the failure"
+        )
+
+    env = test_step.get("env") or {}
+    assert list(env) == [bundle_test.BUNDLE_ENV], (
+        f"the test step sets {sorted(env)!r} and the test reads "
+        f"{bundle_test.BUNDLE_ENV!r} and only it. This is the tie between the two ends: without "
+        "it a renamed variable leaves every leg *skipped* and the job green."
+    )
+    assert flat(env[bundle_test.BUNDLE_ENV]) == BUNDLE_ENV_VALUE, (
+        f"the test step sets {bundle_test.BUNDLE_ENV} to {env[bundle_test.BUNDLE_ENV]!r}, and "
+        f"this pin requires exactly {BUNDLE_ENV_VALUE!r}. The filename carries the version, so "
+        "the job cannot name the file -- but an empty value, or a path that matches nothing, "
+        "must not be allowed to pass."
+    )
+
+    # The two jobs are one mechanism, so the artifact names are one fact.
+    builder_uploads = [
+        step for step in ci_steps(build_job)
+        if str(step.get("uses", "")).startswith("actions/upload-artifact")
+    ]
+    if builder_uploads:
+        assert flat(builder_uploads[0].get("with", {}).get("name")) == flat(
+            download.get("with", {}).get("name")
+        ), "the builder uploads an artifact the runner does not download, or the reverse"
+
+
+def test_the_bundle_test_skips_only_without_the_variable_and_fails_on_a_broken_one(monkeypatch,
+                                                                                  tmp_path):
+    """The skip is a decision about one variable, and it is pinned as *behaviour*.
+
+    A mutation of `tests/test_mcpb_bundle.py` that turns `pytest.fail` into `pytest.skip` -- or
+    that adds a `pytestmark` skipping the module -- leaves every leg green while no bundle is
+    ever run. So the outcome *kind* is asserted, not the presence of a string: the pin catches
+    whatever is raised and then says which kind it has to be.
+    """
+    # Unset: skipped, and the reason names the variable the job sets.
+    monkeypatch.delenv(bundle_test.BUNDLE_ENV, raising=False)
+    with pytest.raises(BaseException) as unset:  # noqa: PT011 - the kind is asserted below
+        bundle_test.bundle_path()
+    assert isinstance(unset.value, pytest.skip.Exception), (
+        f"with {bundle_test.BUNDLE_ENV} unset, bundle_path() raised "
+        f"{type(unset.value).__name__} ({unset.value}) instead of skipping. The default suite "
+        "on a machine with no bundle has to be unaffected, and the skip is the only outcome "
+        "allowed to be silent."
+    )
+    assert bundle_test.BUNDLE_ENV in str(unset.value), (
+        "the skip reason does not name the variable, so a reader of a green run cannot tell "
+        "why nothing ran"
+    )
+
+    # Set and broken: a *failure*. A skip here is the #30 hole -- a green job over nothing.
+    monkeypatch.setenv(bundle_test.BUNDLE_ENV, str(tmp_path / "absent.mcpb"))
+    with pytest.raises(BaseException) as broken:  # noqa: PT011 - the kind is asserted below
+        bundle_test.bundle_path()
+    assert isinstance(broken.value, pytest.fail.Exception), (
+        f"with {bundle_test.BUNDLE_ENV} set to a path that does not exist, bundle_path() "
+        f"raised {type(broken.value).__name__} ({broken.value}). It has to *fail*: a leg that "
+        "sets the variable and skips reports green while nothing was executed."
+    )
+    assert bundle_test.BUNDLE_ENV in str(broken.value)
+
+
+def test_the_bundle_test_file_cannot_be_left_skipped_by_anything_else():
+    """Run the file the job runs, with the variable unset, and read *why* it skipped.
+
+    The two pins above call one helper, and a helper can be bypassed above it: a
+    `pytestmark = pytest.mark.skip(...)`, or a `skipif` decorator, leaves both of them passing
+    and the job green with no bundle executed. Only running the file sees that, and the reason
+    it prints is what distinguishes "no bundle here" from "somebody switched it off".
+    """
+    test_file = "tests/test_mcpb_bundle.py"
+    environment = dict(os.environ)
+    environment.pop(bundle_test.BUNDLE_ENV, None)
+
+    skipped = subprocess.run(
+        [sys.executable, "-m", "pytest", test_file, "-q", "-rs", "-p", "no:cacheprovider"],
+        cwd=REPO_ROOT, capture_output=True, text=True, env=environment, timeout=600,
+    )
+    assert skipped.returncode == 0, (
+        f"with {bundle_test.BUNDLE_ENV} unset the file has to skip, and it exited "
+        f"{skipped.returncode}:\n{skipped.stdout[-2000:]}\n{skipped.stderr[-2000:]}"
+    )
+    assert "1 skipped" in skipped.stdout and "1 passed" not in skipped.stdout, (
+        f"expected exactly one skipped test, and got:\n{skipped.stdout[-2000:]}"
+    )
+    assert f"{bundle_test.BUNDLE_ENV} is not set" in skipped.stdout, (
+        "the skip reason is not the variable being unset. Every other reason -- a marker, a "
+        "skipif, a collection error turned into a skip -- is a run that proves nothing while "
+        "reporting green.\n" + skipped.stdout[-2000:]
+    )
+
+    environment[bundle_test.BUNDLE_ENV] = str(REPO_ROOT / "no-such-bundle.mcpb")
+    failed = subprocess.run(
+        [sys.executable, "-m", "pytest", test_file, "-q", "-p", "no:cacheprovider"],
+        cwd=REPO_ROOT, capture_output=True, text=True, env=environment, timeout=600,
+    )
+    assert failed.returncode != 0, (
+        f"with {bundle_test.BUNDLE_ENV} set to a file that is not there, the file exited 0 -- "
+        "the same hole, one layer down:\n" + failed.stdout[-2000:]
+    )
+    assert "1 failed" in failed.stdout, (
+        f"expected one failure rather than a skip or an error:\n{failed.stdout[-2000:]}"
+    )
 
 
 # ---------------------------------------------------------------------------------

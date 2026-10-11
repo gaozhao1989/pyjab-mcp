@@ -235,6 +235,17 @@ release** — `tools/build_mcpb.py` from the same `dist` artifact, in a job that
 `workflow_dispatch` too: there it builds and validates the bundle, uploads it as a workflow
 artifact and attaches nothing, which is how the bundle is checked *before* a tag exists.
 
+**The bundle is also *executed* on every pull request, and its limits are worth knowing here.**
+`ci.yml`'s `mcpb-runs` job is a matrix over CPython **3.10, 3.11, 3.12 and 3.13** on
+`windows-latest`: it unpacks the single artifact `mcpb-build` produced and drives a real MCP
+handshake through the bundle's own `server/entry.py` with the interpreter of the leg, so each
+vendored `server/vendor/cp3XX` tree is imported rather than listed. It is part of default CI, so it
+runs before a merge. **It is not L3 and it does not replace it**: there is no JDK, no Java Access
+Bridge and no Java application in it, so what it proves is that the bundle *starts and answers
+`tools/list`* on Windows with a plain interpreter — it proves nothing about a live window and it
+exercises no tool call against one. That remains `windows-gui.yml`'s job, and the pipeline still
+requires a green run of it on the tagged commit.
+
 ## After the tag
 
 **Freeze the new section**, so that nothing can edit it later without CI saying so:
