@@ -132,6 +132,48 @@ def test_the_api_surface_guard_notices_an_entry_that_is_no_longer_used():
     assert any("STALE" in problem for problem in problems)
 
 
+def test_the_api_surface_guard_refuses_an_argument_it_does_not_have():
+    """Issue #65: `--strict`, or a typo of `--derived`, used to be silently ignored.
+
+    There is no argparse here, so every argument but `--derived` was dropped and the full
+    check ran instead -- answering a different question while exiting 0, which is the shape
+    AGENTS.md 2.4 calls a bug.
+    """
+    result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "tools" / "check_pyjab_api_surface.py"), "--strict"],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=180,
+    )
+
+    assert result.returncode == 1, (
+        f"the guard exited {result.returncode} for an argument it cannot honour:\n"
+        f"{result.stdout}\n{result.stderr}"
+    )
+    assert "--strict" in result.stdout, (
+        "the refusal has to name the argument it could not honour"
+    )
+    assert "PASSED" not in result.stdout, (
+        "a guard that ignored the argument must not then report a pass"
+    )
+
+
+def test_the_api_surface_guard_refuses_an_unreadable_installed_version(monkeypatch, capsys):
+    """Issue #65: with no readable pyjab the released-in comparison was skipped, not refused.
+
+    The guard's headline is that every name it uses is in the *installed* pyjab. When the
+    version cannot be read that claim cannot be made, and reporting it as satisfied is the
+    "I could not read it" / "nothing is wrong" confusion (AGENTS.md 2.4). ``check(None)``
+    stays a legitimate library call -- the caller has not probed anything -- so the refusal
+    belongs to the command line.
+    """
+    monkeypatch.setattr(surface_guard, "_installed_version", lambda: None)
+
+    assert surface_guard.main([]) == 1
+
+    out = capsys.readouterr().out
+    assert "installed pyjab version could not be read" in out
+    assert "PASSED" not in out
+
+
 # ---------------------------------------------------------------------------------
 # tools/check_documented_surface.py
 # ---------------------------------------------------------------------------------
@@ -2303,6 +2345,45 @@ def test_recording_freezes_what_the_tag_says(tmp_path, monkeypatch):
 
     assert json.loads(record_path.read_text()) == {"0.1.0": immutable_guard.digest(section)}
     assert immutable_guard.check() == 0
+
+
+def test_recording_refuses_an_empty_version(tmp_path, monkeypatch, capsys):
+    """Issue #65: `--record ""` is falsy, so the guard ran the plain check and exited 0.
+
+    That is the opposite operation and a green one: the release path asked to freeze a
+    section and was told the sections were unchanged.
+    """
+    section = immutable_guard.sections(CHANGELOG_FIXTURE)["0.1.0"]
+    immutable_tree(tmp_path, monkeypatch, {"0.1.0": immutable_guard.digest(section)})
+
+    assert immutable_guard.main(["--record", ""]) == 1, (
+        "an empty version names no release, so it cannot fall through to check()"
+    )
+
+    out = capsys.readouterr().out
+    assert "empty string" in out, "the refusal has to name the input it could not honour"
+    assert "PASSED" not in out
+
+
+def test_a_record_that_cannot_be_read_refuses_rather_than_passing(tmp_path, monkeypatch):
+    """Issue #65: a missing record file printed "recorded: 0" and then PASSED, exit 0.
+
+    "No released section is recorded" and "the record could not be read" are different
+    states, and only one of them is a pass (AGENTS.md 2.4). The refusal is a ``SystemExit``
+    rather than a returned 1 because ``load_record`` is also what ``--record`` reads, where
+    an unreadable record would silently drop every section already frozen.
+    """
+    immutable_tree(tmp_path, monkeypatch, {})
+    missing = tmp_path / "no-such-record.json"
+    monkeypatch.setattr(immutable_guard, "RECORD", missing)
+
+    with pytest.raises(SystemExit) as caught:
+        immutable_guard.check()
+
+    assert "FAILED" in str(caught.value)
+    assert missing.name in str(caught.value), (
+        "the refusal has to name the file it could not read"
+    )
 
 
 # ---------------------------------------------------------------------------------

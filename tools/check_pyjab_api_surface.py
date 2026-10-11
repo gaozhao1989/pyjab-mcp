@@ -597,7 +597,17 @@ def check(
     surface: Optional[Mapping[Touchpoint, Entry]] = None,
     installed: Optional[str] = "auto",
 ) -> List[str]:
-    """Return every problem, as sentences.  An empty list means the surface is accounted for."""
+    """Return every problem, as sentences.  An empty list means the surface is accounted for.
+
+    ``installed`` is the pyjab version to compare each recorded release against.  ``"auto"``
+    reads it from the environment.  ``None`` means **the caller has not probed a pyjab
+    install at all** -- a legitimate library state, in which the released-in comparison is
+    not made and the empty list means "nothing was found to be wrong" rather than "every
+    name was checked against the installed wheel".  The caller that does promise the
+    stronger verdict is the command line, so ``main`` refuses an unreadable version instead
+    of letting the unanswered question read as satisfied: "I could not read it" is not
+    "nothing is wrong".
+    """
     sites = derive_sites() if sites is None else sites
     surface = SURFACE if surface is None else surface
     if installed == "auto":
@@ -674,10 +684,34 @@ def _print_derived(sites: Mapping[Touchpoint, Sequence[str]]) -> None:
 
 
 def main(argv: Sequence[str] = ()) -> int:
+    unknown = [argument for argument in argv if argument != "--derived"]
+    if unknown:
+        print(
+            "FAILED: this guard does not understand "
+            + ", ".join(repr(argument) for argument in unknown)
+            + " -- it takes only --derived.\n"
+            "  An argument it cannot honour is refused rather than ignored, because a typo "
+            "of the one\n  real flag would otherwise run the full check and exit 0: it would "
+            "answer a\n  different question while looking like it answered the one that was "
+            "asked."
+        )
+        return 1
+
     sites = derive_sites()
     if "--derived" in argv:
         _print_derived(sites)
         return 0
+
+    installed = _installed_version()
+    if installed is None:
+        print(
+            "FAILED: the installed pyjab version could not be read "
+            "(importlib.metadata reports no 'pyjab' distribution), so this guard cannot\n"
+            "  say whether the names below are in the pyjab that is installed -- which is "
+            "the\n  question it exists to answer. Install pyjab, or run it with --derived "
+            "for the\n  source-only half."
+        )
+        return 1
 
     print(f"{len(sites)} pyjab touchpoint(s) in src/pyjab_mcp/:")
     for point in sorted(sites):
@@ -687,7 +721,7 @@ def main(argv: Sequence[str] = ()) -> int:
         status = entry.status if entry else "unrecorded"
         print(f"  {marker}{point[0]}.{point[1]}  [{status}]  {kinds}")
 
-    problems = check(sites=sites)
+    problems = check(sites=sites, installed=installed)
     if problems:
         print()
         for problem in problems:
