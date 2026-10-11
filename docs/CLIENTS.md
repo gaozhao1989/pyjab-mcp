@@ -165,7 +165,7 @@ Then `java_attach_window` and `java_snapshot`, and the model has structure with 
 | `java_list_windows` returns nothing, `java_diagnostics` is green | JAB was enabled after the application started, or the app has no accessible top-level window. Restart the application. |
 | `the Java Access Bridge is Windows-only` | You are not on Windows. This server cannot work there. |
 | `the element has changed since the snapshot` | The window changed since the snapshot. That is the safety rule doing its job — take a fresh snapshot. |
-| A tool answers with `pyjab does not provide ...` | A gap in the dependency rather than in this server: there is nothing to call. The reply names the requirement, the pyjab version expected to close it, and the issue tracking it. |
+| A tool answers with `pyjab does not provide ...` or `the installed pyjab predates it` | The dependency cannot do this. Either a gap that is still open — the reply names the release expected to close it and the issue tracking it — or an install older than the release this server requires, which is fixed with `python -m pip install -U pyjab`. |
 
 Every error a tool returns is meant to name the next step. If one does not, that is a bug
 worth reporting.

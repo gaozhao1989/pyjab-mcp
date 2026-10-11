@@ -20,10 +20,12 @@ from pyjab_mcp.backend import (
     AVAILABLE,
     MISSING,
     REQUIREMENTS,
+    RETIRED_REQUIREMENTS,
     PyjabApiGap,
     PyjabBackend,
     PyjabUnavailable,
     open_backend,
+    predates_the_pin,
     probe_public_api,
     requirement,
 )
@@ -43,21 +45,34 @@ def test_the_installed_pyjab_has_what_the_pin_buys():
     """
     import pyjab
 
+    package = Path(pyjab.__path__[0])
     missing: "List[str]" = []
     if not hasattr(pyjab, "list_java_windows"):
         missing.append("pyjab.list_java_windows() -- java_list_windows needs it (1.10.0)")
 
-    if sys.platform == "win32":  # pragma: no cover - the import is Windows-only
+    if sys.platform == "win32":  # pragma: no cover - the imports are Windows-only
+        from pyjab.common.win32utils import Win32Utils
         from pyjab.jabdriver import JABDriver
 
-        if not hasattr(JABDriver, "detach"):
-            missing.append("JABDriver.detach() -- releasing a session needs it (1.10.0)")
+        has_detach = hasattr(JABDriver, "detach")
+        has_send_keys = hasattr(JABDriver, "send_keys")
+        has_foreground = hasattr(Win32Utils, "set_window_foreground")
     else:
-        # Importing jabdriver off Windows raises pyjab's own descriptive ImportError, so the
-        # API's presence is read from the installed source **without importing it**.
-        driver_source = (Path(pyjab.__path__[0]) / "jabdriver.py").read_text(encoding="utf-8")
-        if "def detach" not in driver_source:
-            missing.append("JABDriver.detach() -- releasing a session needs it (1.10.0)")
+        # Importing jabdriver and win32utils off Windows raises pyjab's own descriptive
+        # ImportError, so the APIs' presence is read from the installed source **without
+        # importing it** -- which is also the only way to see the wheel's actual contents.
+        driver_source = (package / "jabdriver.py").read_text(encoding="utf-8")
+        win32_source = (package / "common" / "win32utils.py").read_text(encoding="utf-8")
+        has_detach = "def detach" in driver_source
+        has_send_keys = "def send_keys" in driver_source
+        has_foreground = "def set_window_foreground" in win32_source
+
+    if not has_detach:
+        missing.append("JABDriver.detach() -- releasing a session needs it (1.10.0)")
+    if not has_send_keys:
+        missing.append("JABDriver.send_keys() -- java_send_keys needs it (1.11.0)")
+    if not has_foreground:
+        missing.append("Win32Utils.set_window_foreground() -- R5's answer (1.11.0)")
 
     assert not missing, (
         f"this environment has pyjab {getattr(pyjab, '__version__', 'unknown')}, which is "
@@ -165,25 +180,38 @@ def test_a_cli_that_does_not_return_json_is_reported_not_guessed(below_the_pin):
     assert "did not return JSON" in str(caught.value)
 
 
-def test_the_gap_message_names_what_is_missing_and_where_to_read_about_it():
-    message = requirement("send_keys").message()
+def test_the_requirements_are_empty_because_1_11_0_answered_the_last_two():
+    """R4 and R5 are retired, and this is the tripwire for the next gap.
 
-    assert "key sequence or shortcut" in message
-    assert "expected in:" in message
-    # Where it is tracked, so a reader has somewhere to watch rather than only a workaround.
-    assert "gaozhao1989/pyjab#168" in message
-    # The workaround has to be named as unacceptable, not left as an exercise.
-    assert "why not a workaround:" in message
+    ``REQUIREMENTS`` stays -- it is where the next one goes rather than into an error
+    message -- but pyjab 1.11.0 released ``JABDriver.send_keys`` (R4) and
+    ``Win32Utils.set_window_foreground`` (R5), so it is empty. A new entry fails this test on
+    purpose: the change that adds one also has to name the release it waits for.
+    """
+    assert REQUIREMENTS == ()
+
+    for key in ("send_keys", "bring_to_foreground"):
+        assert key in RETIRED_REQUIREMENTS, (
+            f"{key!r} was recorded as a gap and is not recorded as answered"
+        )
+        assert "1.11.0" in RETIRED_REQUIREMENTS[key], (
+            "the record has to name the release that answered it, or the floor in "
+            "pyproject.toml has no reason written down"
+        )
+
+    with pytest.raises(KeyError):
+        requirement("send_keys")  # retired, so it is not a requirement any more
 
 
-def test_every_requirement_renders_and_has_a_unique_key():
-    keys = [item.key for item in REQUIREMENTS]
+def test_an_install_below_the_pin_is_told_which_release_answered_the_gap():
+    """The probe is a feature-detect, so an older pyjab is answered rather than crashed on."""
+    for key, provided in (("send_keys", "send_keys"),
+                          ("bring_to_foreground", "set_window_foreground")):
+        message = predates_the_pin(key)
 
-    assert len(keys) == len(set(keys))
-    for item in REQUIREMENTS:
-        message = item.message()
-        assert item.wanted in message
-        assert item.expected_in in message
+        assert "1.11.0" in message, f"{key}: the release to install has to be named"
+        assert provided in message, f"{key}: and what that release provides"
+        assert "pip install -U pyjab" in message, f"{key}: and the next step"
 
 
 def test_pumping_needs_pyjabs_windows_modules_which_do_not_exist_here():
@@ -330,7 +358,7 @@ def test_a_chord_goes_to_the_driver_when_pyjab_has_the_api():
 
 
 def test_the_gap_is_reported_when_pyjab_has_no_public_send_keys():
-    """The probe, not a version comparison: an older pyjab gets the requirement."""
+    """The probe, not a version comparison: an older pyjab gets the release it needs."""
     from pyjab_mcp.backend import PyjabApiGap, send_keys_driver
     from tests._fakedriver import FakeDriver
 
@@ -340,7 +368,8 @@ def test_the_gap_is_reported_when_pyjab_has_no_public_send_keys():
     with pytest.raises(PyjabApiGap) as caught:
         send_keys_driver(WithoutIt(), "alt+y")
 
-    assert "key sequence or shortcut" in str(caught.value)
+    assert "1.11.0" in str(caught.value), "the release that has it is the actionable part"
+    assert "predates it" in str(caught.value)
 
 
 def test_a_chord_pyjab_does_not_recognise_is_an_error_rather_than_a_no_op():
@@ -357,18 +386,16 @@ def test_a_chord_pyjab_does_not_recognise_is_an_error_rather_than_a_no_op():
     assert driver.keys_sent == [], "nothing was sent"
 
 
-def test_the_foreground_requirement_names_the_upstream_issue_and_the_gap():
-    """R5 exists so the workaround in java_send_keys's reply is not mistaken for a feature."""
-    message = requirement("bring_to_foreground").message()
+def test_the_probe_reports_the_foreground_capability():
+    """`java_diagnostics` has to say it, or the capability lives only in a docstring.
 
-    assert "bring an attached window to the foreground" in message
-    assert "_set_window_foreground" in message, "the private helper is the reason it is a gap"
-    assert "gaozhao1989/pyjab#180" in message, "and where it is tracked"
-    assert "interactive call" in message, "the measured workaround is part of the reason"
-
-
-def test_the_probe_reports_the_foreground_gap():
-    """`java_diagnostics` has to say it, or the gap lives only in a docstring."""
+    Only the fact's existence and its status are asserted here. On this machine it is
+    ``unknown`` (the Windows module cannot be imported) and in CI it is ``available`` (the pin
+    has it), so a ``missing`` branch would be an assertion no run could falsify. What an
+    install *below* the pin is told is pinned by
+    ``test_an_install_below_the_pin_is_told_which_release_answered_the_gap``, which runs
+    everywhere.
+    """
     facts = {fact.name: fact for fact in probe_public_api().facts}
 
     fact = facts["public way to bring a window to the foreground"]
@@ -377,7 +404,3 @@ def test_the_probe_reports_the_foreground_gap():
     assert fact.status in {
         backend_module.AVAILABLE, backend_module.MISSING, backend_module.UNKNOWN
     }
-    if fact.status == MISSING:
-        assert "gaozhao1989/pyjab#180" in fact.detail, (
-            "the fact an operator reads has to say where the gap is tracked"
-        )

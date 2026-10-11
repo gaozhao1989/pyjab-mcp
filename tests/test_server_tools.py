@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 
-from pyjab_mcp.backend import PyjabApiGap, PyjabUnavailable, requirement
+from pyjab_mcp.backend import PyjabApiGap, PyjabUnavailable, predates_the_pin
 from pyjab_mcp.server import _tool_error, ServerState, create_server
 from pyjab_mcp.backend import ElementChanged, TableReading
 from pyjab_mcp.tree import Record
@@ -127,10 +127,10 @@ async def test_a_broken_bridge_is_an_anticipated_failure_with_a_next_step():
     assert "java_diagnostics" in str(caught.value)
 
 
-async def test_the_missing_pyjab_api_reaches_the_model_as_its_requirement_text():
+async def test_the_missing_pyjab_api_reaches_the_model_as_the_release_it_needs():
     class GapBackend(FakeBackend):
         def java_windows(self):
-            raise PyjabApiGap(requirement("send_keys"))
+            raise PyjabApiGap(predates_the_pin("send_keys"))
 
     server, _state = make_server(GapBackend())
 
@@ -138,9 +138,8 @@ async def test_the_missing_pyjab_api_reaches_the_model_as_its_requirement_text()
         await server.call_tool("java_list_windows", {})
 
     message = str(caught.value)
-    assert "pyjab does not provide" in message
-    assert "expected in:" in message
-    assert "gaozhao1989/pyjab#168" in message
+    assert "1.11.0" in message, "the release that has the API is what the model can act on"
+    assert "pip install -U pyjab" in message
 
 
 async def test_attach_window_binds_through_the_backend_and_returns_a_session_id():
@@ -694,10 +693,10 @@ async def test_send_keys_sends_the_chord_when_pyjab_provides_the_api():
     )
 
 
-async def test_send_keys_answers_with_the_requirement_when_the_api_is_absent():
-    """An older pyjab: the probe finds nothing and the requirement is the answer."""
+async def test_send_keys_answers_with_the_release_when_the_api_is_absent():
+    """An older pyjab: the probe finds nothing and the release it needs is the answer."""
     server, _state, _backend, session_id, _handle = await acting_server(
-        keys_error=PyjabApiGap(requirement("send_keys")),
+        keys_error=PyjabApiGap(predates_the_pin("send_keys")),
     )
 
     with pytest.raises(ToolError) as caught:
@@ -706,8 +705,8 @@ async def test_send_keys_answers_with_the_requirement_when_the_api_is_absent():
         )
 
     message = str(caught.value)
-    assert "pyjab does not provide" in message
-    assert "key sequence or shortcut" in message
+    assert "1.11.0" in message, "the release that has the API, not just 'missing'"
+    assert "pip install -U pyjab" in message
     assert "java_set_text" in message, "it should also say what to do instead"
 
 

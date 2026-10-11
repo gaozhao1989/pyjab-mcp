@@ -706,9 +706,10 @@ async def test_a_chord_reaches_the_window_and_the_application_reacts(live, bound
     """The live half of `java_send_keys`, and the reason #19 is a separate task from #15.
 
     #15 made the tool feature-detect; this is the part that needs a pyjab which actually has
-    `send_keys`. The pinned release does not, so it **skips** under `windows-gui` and runs in
-    the drift job, which installs `pyjab@master`. That is deliberate: the chord path is
-    exercised against the code being released rather than only against the shape it promises.
+    `send_keys`. **1.11.0 released it**, so since the pin moved this test stops skipping under
+    `windows-gui` and runs against the real desktop there, as it already did in the drift job
+    (which installs `pyjab@master`). That is the layer that can say the chord arrives -- the
+    macOS suite cannot, and neither can a fake driver.
 
     The accelerator is the observable. `setAccelerator` only fires while the window has the
     keyboard focus, and nothing here focuses anything — that is pyjab's design, and the tool's
@@ -722,8 +723,8 @@ async def test_a_chord_reaches_the_window_and_the_application_reacts(live, bound
 
     if not probe_public_api().has("public key/shortcut sending"):
         pytest.skip(
-            "this pyjab has no public send_keys: the API is merged upstream and unreleased, "
-            "and the drift job (pyjab@master) is where this test is expected to run"
+            "this pyjab has no public send_keys; it was released in 1.11.0, so a supported "
+            "install has it"
         )
 
     bridge, backend = live

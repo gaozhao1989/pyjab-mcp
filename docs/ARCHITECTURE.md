@@ -171,12 +171,12 @@ rather than an error, because "not yet" is something an agent can act on. The tw
 listing comes from the bridge, with pyjab's documented `pyjab-inspect windows --json` left as
 the fallback for an install below the pin — and `JABDriver.detach()` releases a window
 **without terminating its process**, which is what lets a session end without killing the
-application it was observing. One gap is still recorded rather than worked around, and it is now a
-*release* gap rather than a missing API: there is no public way to send a key sequence in any
-**released** pyjab, so `java_send_keys` probes for `JABDriver.send_keys` and answers with the
-requirement when it is absent — the API is written and merged upstream
-(gaozhao1989/pyjab#168) and will make the tool work with no change here. The probe is the same
-mechanism that made the window listing and `detach()` start working the day 1.10.0 landed.
+application it was observing. The last two, R4 and R5, were answered by pyjab 1.11.0:
+`JABDriver.send_keys` is the chord primitive `java_send_keys` needs, and
+`Win32Utils.set_window_foreground` is the public way to bring a window forward that R5 was
+waiting on. Both call sites still probe rather than assume, which is the same mechanism that
+made the window listing and `detach()` start working the day 1.10.0 landed: an install below
+the floor is told which release has the API instead of raising an `AttributeError`.
 
 `java_snapshot` reads a bounded part of the tree — pyjab 1.9.0's `JABElement.walk`, which
 releases every JAB reference as it advances — and gives each rendered element a handle.
