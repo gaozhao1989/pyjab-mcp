@@ -150,7 +150,10 @@ jobs:
           python tools/check_local_only_files.py
           python tools/check_changelog_immutable.py
           python tools/check_published_references.py
-          python tools/check_pyjab_changelog.py
+          # --strict, exactly as ci.yml's `guards` job runs it: an unacknowledged marker, a
+          # stale acknowledgement or an unreadable changelog has to stop the tag rather than
+          # be printed while the release proceeds (issue #64).
+          python tools/check_pyjab_changelog.py --strict
           python tools/check_pyjab_readiness.py
 
       - name: Build, and check the artifact rather than the rules

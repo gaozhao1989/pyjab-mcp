@@ -40,17 +40,21 @@ What fails
 * a marker with no entry in ``acknowledged.yaml`` -- nobody has looked;
 * an entry for a marker that is no longer in the changelog -- the file has drifted, and a
   stale acknowledgement is a claim about a change that no longer exists;
-* (with ``--strict``) a changelog that could not be read at all. Without it, an unreadable
-  source is reported as ``UNAVAILABLE`` and the check passes: "I could not read it" is not
-  "nothing was marked", and a check that goes red every time the network
-  hiccups is a check people learn to ignore.
+* an explicitly named ``--changelog PATH`` that cannot be read -- the caller asked about
+  *that* file, so falling through to another changelog would answer a different question
+  and report it as "checked, and it is fine";
+* (with ``--strict``) a changelog that could not be read at all when the caller named no
+  source. Without it, an unreadable source is reported as ``UNAVAILABLE`` and the check
+  passes: "I could not read it" is not "nothing was marked", and a check that goes red every
+  time the network hiccups is a check people learn to ignore. The release pipeline, where it
+  matters most, passes ``--strict``.
 
 Usage
 -----
 
     python tools/check_pyjab_changelog.py                    # find the changelog, report
     python tools/check_pyjab_changelog.py --strict           # unreadable is a failure
-    python tools/check_pyjab_changelog.py --changelog CHANGELOG.rst
+    python tools/check_pyjab_changelog.py --changelog CHANGELOG.rst  # that file or nothing
 """
 
 from __future__ import annotations
@@ -213,12 +217,24 @@ def check(found: Sequence[Marker], acknowledged: Dict[str, str]) -> "List[str]":
 
 
 def read_changelog(source: Optional[str] = None, *, timeout: float = 30.0) -> "Tuple[Optional[str], str]":
-    """``(text, where it came from)``.  Text is None when nothing could be read."""
+    """``(text, where it came from)``.  Text is None when nothing could be read.
+
+    An explicitly named *source* is authoritative: the caller asked a question about that
+    file, so when it cannot be read this reports None rather than falling through to
+    ``$PYJAB_CHANGELOG``, the sibling checkout or GitHub.  Reading one of those instead is
+    worse than failing -- it answers a different question and looks like a pass.  ``is not
+    None`` rather than a truth test, so ``--changelog ""`` is a named source too, and not a
+    quiet way back into the chain.
+    """
     tried: List[str] = []
 
+    if source is not None:
+        try:
+            return Path(source).read_text(encoding="utf-8"), source
+        except OSError as exc:
+            return None, f"{source} ({type(exc).__name__}: {exc})"
+
     candidates: "List[Tuple[str, object]]" = []
-    if source:
-        candidates.append((source, Path(source)))
     env_source = os.environ.get("PYJAB_CHANGELOG")
     if env_source:
         candidates.append((env_source, Path(env_source)))
@@ -244,15 +260,25 @@ def read_changelog(source: Optional[str] = None, *, timeout: float = 30.0) -> "T
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--changelog", default=None,
-                        help="path to pyjab's CHANGELOG.rst (default: the sibling checkout, "
-                             "then $PYJAB_CHANGELOG, then GitHub)")
+                        help="path to pyjab's CHANGELOG.rst. Named explicitly it is the only "
+                             "source read -- a path that cannot be read is refused. With no "
+                             "argument: $PYJAB_CHANGELOG, then the sibling checkout, then "
+                             "GitHub")
     parser.add_argument("--strict", action="store_true",
-                        help="treat an unreadable changelog as a failure")
+                        help="treat an unreadable changelog as a failure when no source was "
+                             "named (a named --changelog is always authoritative)")
     args = parser.parse_args(argv)
 
     text, where = read_changelog(args.changelog)
     if text is None:
         print(f"UNAVAILABLE: could not read pyjab's changelog. Tried: {where}")
+        if args.changelog is not None:
+            print(
+                f"\n--changelog {args.changelog} was named explicitly, so it is the only "
+                "source this run may read: the refusal holds with and without --strict. Pass "
+                "a path that can be read, or drop --changelog to use the fallback chain."
+            )
+            return 1
         print(
             "\nThis is not 'nothing is marked'. Pass --changelog, set PYJAB_CHANGELOG, or "
             "give this process network access."

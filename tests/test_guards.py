@@ -489,14 +489,18 @@ def test_reworded_marker_needs_a_new_answer():
 
 
 def test_the_changelog_guard_reports_a_source_it_could_not_read(tmp_path, capsys):
-    """'I could not read it' is not 'nothing was marked' -- AGENTS.md 2.4."""
+    """'I could not read it' is not 'nothing was marked' -- AGENTS.md 2.4.
+
+    An explicitly named source is the one case where falling through is worse than failing:
+    the sibling checkout on this machine *does* exist, so the old chain answered for that
+    file and exited 0 while the caller asked about this one.
+    """
     missing = tmp_path / "nowhere" / "CHANGELOG.rst"
 
     text, where = changelog_guard.read_changelog(str(missing))
 
-    assert text is None or isinstance(text, str)
-    if text is None:
-        assert "nowhere" in where
+    assert text is None, "a named source that cannot be read fell through to another changelog"
+    assert str(missing) in where
 
 
 def test_the_acknowledgement_file_is_a_list_of_commits_and_whats():
@@ -531,6 +535,61 @@ def test_the_changelog_guard_script_answers_for_one_explicit_file(tmp_path):
 
     assert result.returncode == 1, "an unanswered marker has to fail the check"
     assert "UNACKNOWLEDGED" in result.stdout
+
+
+def test_the_changelog_guard_refuses_an_explicit_source_it_cannot_read(tmp_path):
+    """The defect of issue #64, on the command line and without ``--strict``.
+
+    ``--changelog PATH`` used to be only the first *candidate*: a path that was not there was
+    skipped, and the guard read the sibling checkout instead and exited 0. This machine has
+    that sibling, so the old behaviour was "checked, and it is fine" about a file nobody read.
+    The empty string is here because "named" is not "truthy": ``--changelog ""`` used to be a
+    quiet way back into the chain.
+    """
+    missing = tmp_path / "nowhere" / "CHANGELOG.rst"
+    script = str(REPO_ROOT / "tools" / "check_pyjab_changelog.py")
+
+    for given in (str(missing), ""):
+        result = subprocess.run(
+            [sys.executable, script, "--changelog", given],
+            cwd=REPO_ROOT, capture_output=True, text=True, timeout=180,
+        )
+
+        assert result.returncode == 1, (
+            f"a named changelog ({given!r}) that cannot be read has to refuse, with or "
+            f"without --strict:\n{result.stdout}\n{result.stderr}"
+        )
+        assert "UNAVAILABLE" in result.stdout
+        assert "PASSED" not in result.stdout, (
+            "the guard reported a pass for a file it could not read -- it read another changelog"
+        )
+        if given:
+            assert given in result.stdout, (
+                "the refusal has to name the file that was asked for"
+            )
+        else:
+            assert "was named explicitly" in result.stdout, (
+                "the empty string is a named source too, and the refusal has to say so"
+            )
+
+
+def test_the_strict_flag_is_what_makes_an_unreadable_source_fail(tmp_path, monkeypatch, capsys):
+    """The strict/non-strict difference, made visible rather than remembered (issue #64).
+
+    With no source named the chain is deliberately advisory: a network hiccup must not redden
+    a developer's local run. The release pipeline is where that default is wrong, which is why
+    ``release.yml`` passes ``--strict`` -- pinned by the workflow case below.
+    """
+    monkeypatch.delenv("PYJAB_CHANGELOG", raising=False)
+    monkeypatch.setattr(changelog_guard, "SIBLING", tmp_path / "nowhere" / "CHANGELOG.rst")
+    monkeypatch.setattr(changelog_guard, "RAW_URL", "http://127.0.0.1:1/CHANGELOG.rst")
+
+    assert changelog_guard.main([]) == 0, "the no-argument default is report-only"
+    assert "UNAVAILABLE" in capsys.readouterr().out
+    assert changelog_guard.main(["--strict"]) == 1, (
+        "`--strict` has to turn an unreadable changelog into a failure -- it is the whole "
+        "reason the release path passes it"
+    )
 
 
 # ---------------------------------------------------------------------------------
@@ -1433,6 +1492,32 @@ def test_the_verify_job_is_exactly_the_release_checks_in_order():
     assert len(version_steps) == 1, (
         "the `version` output comes from somewhere other than exactly one step, so the "
         "pre-flight may be reading a version nobody else agrees with"
+    )
+
+
+def test_the_release_pipeline_runs_the_changelog_guard_as_strictly_as_ci_does():
+    """Issue #64 defect 2: the tag path used to run the guard without ``--strict``.
+
+    ``ci.yml``'s `guards` job passes it; `release.yml`'s `verify` did not, so an
+    unacknowledged marker or an unreadable changelog was printed and the release proceeded --
+    the one path where §1a says an unanswered marker must not be green. Read the invocation
+    rather than trusting the source, and refuse a *second*, advisory invocation too.
+    """
+    path = REPO_ROOT / ".github" / "workflows" / "release.yml"
+    workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["verify"]["steps"]
+    step = next((s for s in steps if s.get("name") == "The guards"), None)
+
+    assert step is not None, "the `verify` job's guards step was renamed or removed"
+    lines = shell_lines(step)
+    invocations = [line for line in lines if "check_pyjab_changelog.py" in line]
+
+    assert invocations == ["python tools/check_pyjab_changelog.py --strict"], (
+        f"`verify` runs the changelog guard as {invocations!r}, and this pin requires exactly "
+        "['python tools/check_pyjab_changelog.py --strict']. Without `--strict` an "
+        "unacknowledged marker, a stale acknowledgement or an unreadable changelog is printed "
+        "and the step exits 0, so the tag proceeds -- the split between ci.yml and release.yml "
+        "that issue #64 is about."
     )
 
 
