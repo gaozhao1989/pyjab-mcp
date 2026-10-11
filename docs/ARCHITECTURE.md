@@ -110,7 +110,7 @@ rule for its own module list.
 | `src/pyjab_mcp/__main__.py` | the console script: stdio only, and stdout belongs to the protocol |
 | `src/pyjab_mcp/server.py` | the MCP surface — server state, the tool functions, failure messages |
 | `src/pyjab_mcp/bridge.py` | `BridgeThread`: the one thread that owns the bridge, its pump and its work queue |
-| `src/pyjab_mcp/backend.py` | the only module that imports pyjab, plus the recorded requirements it is waiting on |
+| `src/pyjab_mcp/backend.py` | the only module that imports pyjab, plus the pyjab requirements it records — none open, and an answered one names the release that did it |
 | `src/pyjab_mcp/diagnostics.py` | the environment report, where `UNAVAILABLE` is never `0` |
 | `src/pyjab_mcp/tree.py` | tree records and the bounded renderer: what a snapshot shows, and what it says it left out |
 | `src/pyjab_mcp/handles.py` | element handles — a locator plus an expected identity, holding no JAB reference |

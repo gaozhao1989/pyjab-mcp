@@ -472,7 +472,7 @@ class TableReading:
 class PyjabBackend:
     """The real backend, built from pyjab's published API only.
 
-    What 1.9.0 makes possible, and what it does not:
+    What the pyjab this project pins makes possible, all through its published API:
 
     * **Binding a window** is public (``JABDriver(hwnd=...)`` / ``JABDriver(title=...)``) and
       is also what arms the bridge: ``JABDriver.__init__`` loads the DLL, calls
@@ -483,11 +483,12 @@ class PyjabBackend:
     * **Re-finding an element** is public (``find_element_by_xpath`` → a ``JABElement`` this
       layer owns) and ``as_record()`` is what the handle re-verifies against. The reference
       is released immediately -- see :func:`resolve_driver`.
-    * **Listing windows** is still not public. 1.9.0 ships
-      ``pyjab.inspector.bridge_without_window()``, which is exactly the missing piece, but
-      it is not in that module's ``__all__``; so the fallback is the *documented* CLI,
-      ``pyjab-inspect windows --json``. The requirement stays recorded and
-      ``java_diagnostics`` says which path answered.
+    * **Listing windows** is public too: ``pyjab.list_java_windows()`` arrived in 1.10.0 and
+      retired R1, which :data:`RETIRED_REQUIREMENTS` records. The *documented* CLI,
+      ``pyjab-inspect windows --json``, stays as the fallback for an install below the pin --
+      on 1.9.0 the function it needs (``pyjab.inspector.bridge_without_window``) exists but
+      is not in that module's ``__all__`` -- and ``java_diagnostics`` says which path
+      answered.
 
     The two functions this class delegates the pyjab-facing work to -- :func:`walk_driver`
     and :func:`resolve_driver` -- take the driver as an argument precisely so the ownership
@@ -1156,8 +1157,9 @@ def _cli_java_windows(run: Callable[[Sequence[str]], Any]) -> "List[JavaWindow]"
     Why a subprocess, and why this is acceptable as a stopgap: pyjab 1.9.0 has the function
     we need (``inspector.bridge_without_window``) but does not publish it, and the *CLI built
     on it* is public -- documented in ``docs/3-pyjab.md`` and shipped in the wheel. Using a
-    documented interface beats importing an unpublished one, and the requirement to do
-    better stays recorded.
+    documented interface beats importing an unpublished one, and the release that answered it
+    is recorded in :data:`RETIRED_REQUIREMENTS`; this path is reached only by an install below
+    the pin.
 
     The cost is real and is not hidden: a second process arms its own bridge, so a listing
     costs a process startup rather than a bridge call. It is a listing, not a hot path.

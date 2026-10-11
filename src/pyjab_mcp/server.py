@@ -130,10 +130,12 @@ class ServerState:
         """Record a window the backend has bound, under a new session id.
 
         The session is what a later call names, and the ``window_id`` inside it is what the
-        backend uses to reach the bound driver.  Sessions are not released: pyjab has no
-        non-destructive detach (``backend.REQUIREMENTS``, key ``detach``), so a bound driver
-        stays bound for the life of the process.  One driver per attached window -- never
-        one per call -- is what keeps that bounded.
+        backend uses to reach the bound driver.  Sessions are not released: no tool here
+        releases one, so a bound driver stays bound for the life of the process.  That is a
+        fact about this server's surface rather than about pyjab -- the backend can detach
+        (``JABDriver.detach()``, released in pyjab 1.10.0 and recorded in
+        ``backend.RETIRED_REQUIREMENTS``) but exposes no tool that calls it between calls.
+        One driver per attached window -- never one per call -- is what keeps that bounded.
         """
         with self._lock:
             while True:
@@ -1242,8 +1244,9 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
             handle: An element whose text to watch.
             text_equals: The text to wait for, with a handle.
             timeout: Give up after this many seconds.
-            poll_interval: Seconds between checks. Listing windows costs a process
-                (pyjab 1.9.0 has no public listing API), so a window wait polls slowly.
+            poll_interval: Seconds between checks. A window wait re-lists the Java windows
+                on every poll; on an install below the pin that listing is the
+                ``pyjab-inspect`` subprocess rather than a bridge call, so raise this.
 
         Returns:
             Whether the condition was met, how long it took, and what was seen.
