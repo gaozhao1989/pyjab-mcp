@@ -37,8 +37,9 @@ of the Attach API that is not loading an agent, outside that direction.
 `java_get_table`, `java_click`, `java_set_text`, `java_select`, `java_fill_form`,
 `java_send_keys`, `java_focus_window`, `java_wait_for`, and `java_screenshot`. It needs
 `pyjab>=1.11.0`: 1.9.0 brought the tree walk a snapshot is built on, 1.10.0 brought the public
-window listing and `JABDriver.detach()`, which is what lets a session end without terminating
-the application, and 1.11.0 brought `JABDriver.send_keys`, so `java_send_keys` sends a real
+window listing and `JABDriver.detach()`, which releases a driver's binding without terminating
+the process — this server has no tool that releases a session, so a binding lasts for the life
+of the process — and 1.11.0 brought `JABDriver.send_keys`, so `java_send_keys` sends a real
 chord, and `JABDriver.focus()`, so `java_focus_window` can bring a window forward.
 
 `java_send_keys` sends a chord to whichever window has the keyboard focus, and **attaching does
@@ -70,7 +71,7 @@ pyjab's test app, and the one that matters is the one you care about.
 
 It needs `pyjab>=1.11.0`, which brought the APIs this project spent M1 and M2 waiting on:
 `list_java_windows()`, so the window list comes from the bridge directly rather than through
-pyjab's CLI; `JABDriver.detach()`, so a session can be released **without terminating the
+pyjab's CLI; `JABDriver.detach()`, so a bound driver can be released **without terminating the
 application** — the only teardown before it killed the bound process; and, in 1.11.0,
 `JABDriver.send_keys()`, so `java_send_keys` sends a real chord, and `JABDriver.focus()`, which
 `java_focus_window` uses to bring a window forward and report whether it came forward. That
