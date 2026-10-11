@@ -234,6 +234,10 @@ with the changelog section as its notes. **It also builds the MCPB bundle and at
 release** — `tools/build_mcpb.py` from the same `dist` artifact, in a job that runs on
 `workflow_dispatch` too: there it builds and validates the bundle, uploads it as a workflow
 artifact and attaches nothing, which is how the bundle is checked *before* a tag exists.
+**A failure in that job leaves the release without its bundle**, and the job runs *after*
+`github-release`: when `tools/build_mcpb.py --validate-with-mcpb` is refused by
+`npx @anthropic-ai/mcpb validate`, the GitHub release already exists and the
+`gh release upload` step never runs. The repair is re-running the failed job, not a new tag.
 
 ## After the tag
 
