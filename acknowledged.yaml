@@ -126,6 +126,23 @@ acknowledged:
         actually executes.
       * No pin change: `pyjab>=1.9.0` already admits 1.10.0.
 
+  # Found by the guard on 2026-10-11, while issue #74 was open: pyjab published the 1.11.1
+  # section (announced, not yet on PyPI), and that section's subject is this repository's own
+  # claim. So #74 is the answer this marker asks for, and the acknowledgement lands with the
+  # change rather than before it -- alone it would claim a correction the README still lacked.
+  - commit: line:1e77ab4b0ecc
+    what: >-
+      **Answered by issue #74, in the change that closed it.** JavaFX is gone from every
+      shipped capability claim: `README.md`'s summary line and its "It works on" paragraph now
+      state that JavaFX publishes accessibility through UI Automation rather than Java Access
+      Bridge and is not supported here, and `INSTRUCTIONS` in `src/pyjab_mcp/server.py` -- the
+      text an MCP client shows a model *before any tool call* -- says the same and cites
+      pyjab#227, whose measurement (a Swing control in the same run) is what pyjab 1.11.1's own
+      section records. **No code changed and no pin change**: 1.11.1 changes nothing about
+      pyjab's library, only what it says about itself, so `pyjab>=1.11.0` already admits it. The
+      only other `javafx` hit in the tree is one caption in a maintainer note that neither ships
+      nor is a claim a reader can act on, deliberately left alone.
+
 context:
   - commit: a5dacfb
     what: >-

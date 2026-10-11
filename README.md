@@ -1,8 +1,11 @@
 # pyjab-mcp
 
-An MCP server that lets an AI agent drive **Java desktop applications** — Swing, AWT,
-JavaFX — through [pyjab](https://pypi.org/project/pyjab/), which reads the JVM's own
-accessibility tree via Java Access Bridge.
+An MCP server that lets an AI agent drive **Java desktop applications** — Swing and AWT
+— through [pyjab](https://pypi.org/project/pyjab/), which reads the JVM's own
+accessibility tree via Java Access Bridge. **JavaFX is not supported**: it publishes its
+accessibility through UI Automation rather than Java Access Bridge, so a JavaFX window is
+not a Java window as far as JAB is concerned
+([pyjab#227](https://github.com/gaozhao1989/pyjab/issues/227)).
 
 <!-- The MCP Registry proves ownership of the PyPI package by finding this exact line in the
      README *of the published package*, so it cannot be added after a release. Keep it. -->
@@ -174,10 +177,11 @@ names, values, states and the actions a control supports. That is what this serv
 it sets the boundary of what it can reach.
 
 **It works on** Java applications that expose accessibility — Swing and AWT applications and
-applets **running as desktop applications**, and JavaFX where the accessibility bridge is
-present. Buttons, menus, tables, trees, lists, text fields and their values are all readable
-and actionable, and `java_get_table` reads a table's cells through the table's own interface
-rather than the pixels.
+applets **running as desktop applications**. **JavaFX is not supported**: it publishes its
+accessibility through UI Automation rather than Java Access Bridge. Buttons, menus, tables,
+trees, lists, text fields and their values are all readable and actionable, and
+`java_get_table` reads a table's cells through the table's own interface rather than the
+pixels.
 
 **It cannot reach**, because the information is not there to read:
 
