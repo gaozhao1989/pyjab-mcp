@@ -2319,3 +2319,70 @@ def test_no_shipped_file_in_this_repository_cites_a_local_only_path():
     there; on a machine that has them it is the check that a new rule has no false positives.
     """
     assert references_guard.check(REPO_ROOT) == []
+
+
+def test_a_citation_written_with_windows_separators_is_a_problem(tmp_path, monkeypatch):
+    """#49: the same citation as a Windows reader sees it, which the token regex used to miss.
+
+    A backslash escapes only in some Markdown; in the `.py` docstrings, `.toml` and `.in` files
+    this guard also reads, `references\\manifest-schema.md` is a Windows path and nothing
+    escapes it. A reader there can no more open the local-only file than one reading the
+    forward-slash form, so the separators are normalised before the citation is resolved.
+    """
+    root = reference_tree(tmp_path, monkeypatch, {
+        "tools/build_mcpb.py": '"""See references\\manifest-schema.md for the fields."""\n',
+        ".agents/skills/build-mcpb/references/manifest-schema.md": "# the local copy\n",
+    })
+
+    problems = references_guard.check(root)
+
+    assert problems, "the Windows spelling is the same citation to a reader there"
+    assert "tools/build_mcpb.py" in problems[0]
+    assert "references/manifest-schema.md" in problems[0]
+
+
+def test_a_windows_separated_citation_is_fine_when_a_shipped_file_of_that_name_exists(
+    tmp_path, monkeypatch
+):
+    """The `every match is local-only` clause, for the spelling the fix added.
+
+    Normalising the separators widens what the guard can see, and widening what a guard sees is
+    how a guard acquires false positives: the clause that keeps the forward-slash form silent
+    has to hold for the backslash form too.
+    """
+    root = reference_tree(tmp_path, monkeypatch, {
+        "tools/build_mcpb.py": "See references\\manifest-schema.md for the fields.\n",
+        "references/manifest-schema.md": "# the shipped copy\n",
+        ".agents/skills/build-mcpb/references/manifest-schema.md": "# the local copy\n",
+    })
+
+    assert references_guard.check(root) == []
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "See references/manifest schema.md for the fields.",
+        "See references/manifest-sch\u00e9ma.md for the fields.",
+        "See /tmp/x/references/manifest-schema.md for the fields.",
+        "See C:\\x\\references\\manifest-schema.md for the fields.",
+        "See references/\nmanifest-schema.md for the fields.",
+    ],
+    ids=["space", "non-ascii", "absolute", "drive-letter", "split-lines"],
+)
+def test_a_name_that_is_not_a_citation_of_this_tree_stays_silent(
+    tmp_path, monkeypatch, spelling
+):
+    """The negative rows of #49, pinned because the fix widens the token regex.
+
+    A filename with a space, a non-ASCII name, an absolute path, a drive letter and a path split
+    across two lines each fail to name a location in this tree, so each resolves to nothing and
+    the guard says nothing. Widening the separators must not turn a lookup that found nothing
+    into a complaint, which is a false positive a maintainer would have to work around.
+    """
+    root = reference_tree(tmp_path, monkeypatch, {
+        "tools/build_mcpb.py": spelling + "\n",
+        ".agents/skills/build-mcpb/references/manifest-schema.md": "# the local copy\n",
+    })
+
+    assert references_guard.check(root) == []
