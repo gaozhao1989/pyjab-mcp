@@ -98,6 +98,43 @@ acknowledged:
       deliberately not added in #56, because a new contract test is not part of a patch release
       that only moves the pin and retires R4/R5.
 
+  # Follow-up, same id: the trigger the first entry pre-registered has now been answered, and
+  # against the **released artifact** rather than against intent. The two entries above are kept
+  # verbatim, as the record of what was true when they were written.
+  - commit: line:504876b8fb65
+    what: >-
+      Follow-up, 2026-10-11: **the trigger is answered, and it finds nothing to pin.** Decided
+      from the released **1.11.0** artifact -- PyPI probed without the proxy (`pip index versions
+      pyjab` -> 1.11.0, and the installed wheel is 1.11.0) and `as_record()` read in both the
+      downloaded sdist and the installed wheel, where the two are identical:
+
+          "children_count": self.children_count,
+
+      * **The key cannot be absent.** It is an unconditional key of a `dict` literal, and the
+        only field `as_record()` guards is `bounds`; nothing there removes, renames or defaults
+        it.
+      * **The value cannot be `None`.** `children_count` is `self._acc_info().childrenCount`
+        (`JABElement.children_count`, sdist line 132), and `_acc_info` is
+        `_get_accessible_context_info`, which raises `JABException` when
+        `getAccessibleContextInfo` returns 0. The field is an int in a ctypes structure: there is
+        no sentinel and no `None` path.
+      * So "the property refused" is an **exception out of `as_record()`**, not a `0` in the
+        record. `JABTree.__iter__` yields `child.as_record()` with no per-node guard, and
+        `backend.walk_driver` catches only `StopIteration`, so a refusal aborts the walk rather
+        than becoming a record whose `children_count` is missing or `None`.
+
+      The reader's `int(raw.get("children_count") or 0)` (`src/pyjab_mcp/tree.py`) therefore never
+      sees the collapse it was written against: for a record `as_record()` produced, the two
+      states are already apart by the time that line runs. It stays as it is -- a mapping that did
+      not come from `as_record()` (the L1 fake, a future caller) can still be partial, and
+      defaulting a partial record is what `Record.from_pyjab` documents. **No contract test was
+      added**, because there is no behaviour left to pin beyond the key presence the existing
+      `test_as_record_still_returns_the_fields_a_handle_verifies_against` already asserts; #58's
+      step 3 is to record the answer instead. One residual, stated plainly: if a future pyjab
+      ever *defaults* `children_count` to `0` inside `as_record()`, the collapse would come back
+      and nothing here would notice -- that would be a new marker, and this entry is where that
+      is written down.
+
   # Keyed by `line:<digest>` rather than a commit, because pyjab's marker for this change
   # carries a release rather than a hash. That is the point of the fallback: the marker was
   # reworded (it used to name commit 8ec88a3, before the release section existed), so the id
