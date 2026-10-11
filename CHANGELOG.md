@@ -8,7 +8,104 @@ under **Unreleased** until it is tagged.
 
 ## Unreleased
 
-Nothing yet.
+**A batch about the gap between what this project says and what it can show.** Seven changes. Two
+of them change what happens when the server runs: attaching to the same window twice no longer
+retires a session that named it, and a new tool answers a question this server used to work
+around. The other five are corrections to what the repository says about itself — a capability
+claim a measurement had already refuted, four guards that answered a different question than the
+one they were asked, a question about pyjab's data that had been pre-registered for the release
+that would answer it, an artifact named after a file it does not hold, and a constraint stated
+without its reason. Those five have something in common: each was a sentence a reader could check,
+and would have found false.
+
+### Added
+
+* **`java_focus_window` brings a window forward and reports which fact actually happened.** "I
+  asked for focus" and "the window is in front" are two different facts, and the tool answers with
+  the second: pyjab 1.11.0's `JABDriver.focus()` reports whether the window *is* the foreground
+  window afterwards, because Windows' own call returns nothing useful. So there are three answers
+  rather than two. The window **is** now in front, and a chord should land in it. The window did
+  **not** come forward, which is reported as a normal result and not a failed call — Windows
+  refuses foreground activation from a non-interactive session, a service or a scheduled task, and
+  no amount of retrying changes that — and the reply points at the tools that do not need the
+  window in front, `java_send_keys`' chord excepted. And if pyjab's answer is neither `True` nor
+  `False`, the server says it **cannot tell**, rather than filing that under "it did not come
+  forward". One caveat belongs with it: when the window is not already in front, the activation
+  sends a keystroke first, which goes to whatever currently has focus. `java_send_keys`' reply no
+  longer advises clicking something harmless to get focus, because there is now a real answer to
+  "the chord did not arrive", and `docs/ARCHITECTURE.md`'s tool table carries the new row. The
+  call is probed rather than assumed, so an install below the pin is told which release has it.
+  (issue #57)
+
+### Fixed
+
+* **The README and the server's instructions no longer claim JavaFX.** Three shipped places said
+  this server reaches JavaFX — the README's summary line, its "It works on" paragraph, and the
+  `INSTRUCTIONS` string an MCP client shows a model before any tool call, which is the one that
+  matters most, because a model told JavaFX is reachable will try it. It is not reachable: JavaFX
+  on Windows publishes its accessibility through **UI Automation**, not Java Access Bridge, so a
+  JavaFX window is not a Java window as far as JAB is concerned. The measurement is pyjab's rather
+  than this project's — a JavaFX window whose contents were known, against an equivalent Swing
+  application as the control in the same run
+  ([pyjab#227](https://github.com/gaozhao1989/pyjab/issues/227)) — and pyjab's own 1.11.1 section
+  records the same correction to its own README. Reaching JavaFX would need a UI Automation client
+  inside pyjab, which is a different mechanism rather than a version to wait for, so the wording
+  now states the mechanism and what is supported instead of predicting what happens when this
+  server is pointed at a JavaFX target. No code and no pin change: 1.11.1 changes nothing about
+  pyjab's library, only what it says about itself. (issues #74, #79)
+
+* **Attaching to the same window twice no longer invalidates a session that named it.** One JAB
+  context per window is deliberate, so a second attach to a window already bound released the
+  earlier binding — correctly — and then issued a **new** window id. A session still named the old
+  one, and every later call on it answered `window 'w1' is not attached`, though the caller had
+  done nothing wrong and could only find out by calling it. The id is reused now when the handle
+  is already bound, so attaching twice is idempotent for the id a caller holds; the earlier
+  binding is **still released**, which is the part that must not change. A different window still
+  gets a fresh id. (issue #71)
+
+* **Four guards refuse an argument or an input they cannot honour instead of answering a
+  different question.** Each of these exited 0 while checking something else: an unknown argument
+  to `tools/check_pyjab_api_surface.py` — a typo of its one real flag — ran the whole repository
+  check, because the argument was never read; `--record ""` to
+  `tools/check_changelog_immutable.py` read as falsy and ran the plain check, which is the
+  opposite operation; a pyjab API surface check ran without the installed version, so the one
+  verdict that needs it was skipped while the report still said `PASSED` — "I could not read it"
+  was reported as "nothing is wrong"; and a missing
+  `tools/released_changelog_sections.json` printed `released sections recorded: 0` and passed,
+  which turns the released-section freeze off with a green exit. All four now fail, naming the
+  input they could not honour. (issue #65)
+
+* **The `children_count` question is answered, and a case now catches a re-collapse.** The record
+  reader writes `int(raw.get("children_count") or 0)`, so a missing or `None` value would read as
+  `0` and a refused property read would be indistinguishable from having no children. The trigger
+  this project pre-registered for pyjab 1.11.0 has now fired and the answer is that the two cannot
+  collapse: `as_record()` returns an unconditional `children_count` key, its value is an `int` from
+  the accessibility structure, and a refused read raises before that dictionary is built — so a
+  refusal aborts the walk rather than becoming a record that reads as empty. A contract case now
+  reads the value expression rather than the key name and refuses anything but a bare attribute
+  read, which is the shape a re-collapse would take; it parses source text, so it needs no bridge
+  and runs in every leg of the default suite as well as the weekly drift job. (issue #58)
+
+* **The release workflow's artifact says what it holds.** The L3 job's last step was called
+  "Upload the log" and produced an artifact called `e2e-log`, whose path is the fixture's Java
+  source; downloading it yields `PyjabTestApp.java` and no log. The log is the job's console
+  output, which `pytest -v -s` puts there and GitHub already keeps. The step and the artifact are
+  now named for the application a failing run was driving — `e2e-app-src` — so someone debugging a
+  live-window failure no longer goes looking for a log and finds a `.java` file. Nothing a user
+  runs changes. (issue #69)
+
+### Changed
+
+* **The README says what the no-injection constraint is for.** It stated the property — this
+  server never modifies, restarts or injects into the target application — without saying what
+  that buys. One comparison paragraph now names the alternative mechanism, an agent attached to an
+  already-running JVM or named with `-javaagent` at startup, which puts a tool's code inside a
+  process it did not launch and does not control; this server loads nothing into the application
+  and reads the accessibility tree through Java Access Bridge from outside it. It also says where
+  the JDK has a direction on that mechanism: [JEP 451](https://openjdk.org/jeps/451) shipped in
+  JDK 21 as the preparation stage, an already-running JVM now warns when an agent is loaded, and
+  the release that would disallow it by default has not been named. No competitor is named and no
+  claim is made about what users want. (issue #76)
 
 ## [0.2.1] - 2026-10-11
 
