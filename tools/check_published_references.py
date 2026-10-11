@@ -26,6 +26,14 @@ that suffix-matches a file in this tree is a problem **when every file it matche
 local-only**. If a shipped file of that name exists, the reader can open that one and there is
 nothing to report -- which is what keeps the rule from firing on `docs/CLIENTS.md`.
 
+That second half is a claim about *this* tree, and it can only be checked where the local-only
+files are: CI checks out none of them, so there every citation resolves against nothing and the
+resolving half cannot complain, while the name half still fires. The guard's own "0 on this
+repository" test therefore passes vacuously in CI, and the run that exercises the resolving half
+is a maintainer's, on a machine that has the notes. That is issue #48's limit, recorded rather
+than solved: committing a generated index of local-only paths so CI could resolve against it was
+considered and deferred.
+
 Three shapes are deliberately not flagged, because none of them names a location in this tree:
 
 * a **bare filename** (`manifest-schema.md`, `SKILL.md`) -- with no directory there is nothing
@@ -38,7 +46,9 @@ Three shapes are deliberately not flagged, because none of them names a location
 A leading `./` or `../` is dropped before resolving, because `../references/x.md` is still a
 citation of a file the reader cannot open. A citation inside a fenced code block is not special
 either: a reader still reads it. What makes the difference is whether it resolves, not how it
-is written.
+is written -- so Windows separators are normalised too, because `references\\manifest-schema.md`
+is the same citation to a reader on Windows, and in a `.py` docstring or a `.toml` it is a path
+rather than an escape.
 
 Two kinds of exemption, both because the rule would otherwise forbid the mechanism that keeps
 the rule:
@@ -101,8 +111,8 @@ NOT_SHIPPED = tuple(name.rstrip("/") for name in LOCAL_ONLY)
 
 #: A path-like citation: a directory component, then a dotted filename. The directory is
 #: required on purpose, and the dotted filename is too -- see the module docstring on bare
-#: filenames and directories.
-RELATIVE_CITATION = re.compile(r"[\w.\-]+/[\w.\-/]*\.[A-Za-z0-9]+")
+#: filenames and directories. Either separator is accepted, and normalised before resolving.
+RELATIVE_CITATION = re.compile(r"[\w.\-]+[/\\][\w.\-/\\]*\.[A-Za-z0-9]+")
 
 
 def files_to_check(root: Path = REPO_ROOT) -> "List[Path]":
@@ -172,7 +182,7 @@ def relative_references(
     found: "List[Tuple[int, str]]" = []
     for number, line in enumerate(text.splitlines(), start=1):
         for match in RELATIVE_CITATION.finditer(line):
-            cited = re.sub(r"^(?:\.\.?/)+", "", match.group(0))
+            cited = re.sub(r"^(?:\.\.?/)+", "", match.group(0).replace("\\", "/"))
             resolved = [
                 path for path in index if path == cited or path.endswith("/" + cited)
             ]
