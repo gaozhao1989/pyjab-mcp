@@ -58,12 +58,14 @@ the path above has `\\` where Windows uses `\`.
 
 ### The `.mcpb` bundle, where there is no config file to edit
 
-Every release carries `pyjab-mcp-<version>.mcpb`. Claude Desktop installs a bundle by opening
-the file — the mechanism Anthropic's own packaging guide documents is **dragging the `.mcpb`
-onto the Claude Desktop window** — and after that the server appears in the same list as the
-`mcpServers` entries above. There is no JSON to edit, no virtual environment and no `PATH`
-problem, because the bundle carries the server, its dependencies and its entry script, and
-Claude starts it with the `python` on your `PATH`.
+The bundle is attached to the release that introduces it, and to every release after that. It is
+`pyjab-mcp-<version>.mcpb`. Claude Desktop installs a bundle by opening the file — the mechanism
+Anthropic's own packaging guide documents is **dragging the `.mcpb` onto the Claude Desktop
+window** — and after that the server appears in the same list as the `mcpServers` entries above.
+There is no JSON to edit and no virtual environment to manage, because the bundle carries the
+server, its dependencies and its entry script; but the interpreter it starts is still the
+`python` on your `PATH`, so a machine with CPython installed but not on `PATH` needs it added —
+`where python` prints the one that will be used.
 
 Two things the bundle does not change, and both are why it is worth reading this before
 installing it:

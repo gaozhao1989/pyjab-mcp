@@ -635,6 +635,108 @@ def test_the_bundles_declared_python_support_is_what_it_vendors(declared_bundle,
         )
 
 
+# ---------------------------------------------------------------------------------
+# What the bundle's text promises, in the two pages a user reads
+# ---------------------------------------------------------------------------------
+#
+# Two claims a reader acts on, and neither is visible to a test that reads only the code or the
+# artifact. The installer launches the bare `python` on `PATH`, and the bundle travels with the
+# release that introduces it -- not with the three releases a reader can visit today, which carry
+# no assets at all. Both live in prose, and prose is what a later rewrite changes without
+# noticing, so they are read here from the two shipped pages and from the manifest's
+# `long_description`: the text the host shows at install time, and the one nobody re-reads.
+
+#: The statement that the interpreter is the one `PATH` resolves, rather than any interpreter the
+#: machine happens to have installed. Anchored on the two names it has to contain -- in either
+#: order, in one sentence -- so the wording around them is free and the fact is what is pinned.
+INTERPRETER_ON_PATH = re.compile(r"`python`[^.]{0,80}`PATH`|`PATH`[^.]{0,80}`python`")
+
+#: The one-line check that answers "which interpreter will it use?" on the Windows the bundle
+#: runs on.
+PATH_CHECK = "where python"
+
+#: What a shipped page has to say about *which* releases carry the bundle. Fixed wording rather
+#: than a shape: the claim is about the past and the future at once, and a paraphrase is a
+#: decision somebody has to make here rather than one a rewrite can make silently.
+AVAILABILITY_SENTENCE = (
+    "The bundle is attached to the release that introduces it, and to every release after that."
+)
+
+#: The claim both pages used to make, and which is false for every release a reader can visit:
+#: `gh release view` returns `[]` for the assets of v0.1.0, v0.1.1 and v0.1.2. Anchored on the
+#: universal quantifier next to both `carries` and the bundle, so "Every release carries" and
+#: "Every release also carries" are refused while a sentence about a changelog section is not.
+#: The gap after `carries` allows a period, because the bundle's own name has one in it
+#: (`pyjab-mcp-<version>.mcpb`); a pattern that could not cross it would miss the very sentence
+#: this is written for.
+EVERY_RELEASE_CARRIES = re.compile(
+    r"every release[^.]{0,40}carries[^\n]{0,60}(?:mcpb|bundle)", re.IGNORECASE
+)
+
+
+def shipped_page_section(page: str, heading: str) -> str:
+    """One section of a shipped page, sliced by heading rather than by line number.
+
+    Line numbers move whenever the prose above them does, and this pin is about the text a
+    bundle installer reads rather than about where that text happens to sit.
+    """
+    text = (REPO_ROOT / page).read_text(encoding="utf-8")
+    assert heading in text, (
+        f"{page} no longer has a {heading!r} heading, so the bundle's text has no single place "
+        "to be checked"
+    )
+    start = text.index(heading)
+    end = text.find("\n## ", start)
+    return text[start:] if end == -1 else text[start:end]
+
+
+def test_the_bundle_pages_say_which_interpreter_runs_it_and_which_releases_carry_it(
+    declared_bundle,
+):
+    """The two claims the bundle's text makes, in the three places a user meets them.
+
+    `declared_bundle` is the built artifact, so the manifest half is read out of the zip a host
+    would install rather than from the packer's own constant: a constant and the file it writes
+    can disagree, and only one of the two is what a user sees.
+    """
+    pages = {
+        "README.md": shipped_page_section("README.md", "### Or install the bundle"),
+        "docs/CLIENTS.md": shipped_page_section("docs/CLIENTS.md", "### The `.mcpb` bundle"),
+    }
+    described = " ".join(bundle_manifest(declared_bundle)["long_description"].split())
+
+    for page, section in pages.items():
+        flat = " ".join(section.split())
+        assert INTERPRETER_ON_PATH.search(flat), (
+            f"{page} no longer says the interpreter it launches is the `python` on `PATH`. The "
+            "manifest launches bare `python`, so a machine with CPython installed but not on "
+            "`PATH` gets a client that shows no tools -- and no refusal that names the cause, "
+            "because nothing started an interpreter to print one."
+        )
+        assert PATH_CHECK in flat, (
+            f"{page} no longer gives the check that shows which interpreter that is "
+            f"(`{PATH_CHECK}`), which is the only way a user can see it before installing."
+        )
+        assert AVAILABILITY_SENTENCE in flat, (
+            f"{page} no longer says which releases carry the bundle. The three published "
+            "releases carry no assets at all, so the sentence has to name the release that "
+            "introduces it rather than make a claim about every release."
+        )
+        assert not EVERY_RELEASE_CARRIES.search(flat), (
+            f"{page} claims that every release carries the bundle again. v0.1.0, v0.1.1 and "
+            "v0.1.2 carry no assets, and none of them ever will."
+        )
+
+    assert INTERPRETER_ON_PATH.search(described), (
+        "the manifest's `long_description` no longer says the interpreter is the `python` on "
+        "`PATH`. That is the text the host shows at install time, and the one nobody re-reads."
+    )
+    assert PATH_CHECK in described, (
+        f"the manifest's `long_description` no longer gives `{PATH_CHECK}`, which is the check "
+        'that turns "no tools appeared" into a named cause.'
+    )
+
+
 def test_the_closure_check_reads_the_target_interpreter_not_the_build_one(tmp_path):
     """The check that closes the 3.10 defect, proved to look at the target's markers.
 

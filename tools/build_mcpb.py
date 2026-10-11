@@ -187,6 +187,10 @@ rather than by guessing at pixels.
   That is not a choice: `pydantic-core`, `cffi`, `rpds-py`, `cryptography` and `pywin32`
   ship compiled wheels tagged for one minor each, so a tree built for one cannot be imported
   by another. The `pip install` path has no such bound.
+* **That CPython has to be the `python` on `PATH`** -- the host launches the bare `python` it
+  resolves there, and there is no `user_config` fallback. CPython installed but not on `PATH` is
+  a client that shows no tools, and this file's own refusal cannot name the cause: no
+  interpreter ran to print it. `where python` prints the one that will be used.
 * **A JDK with Java Access Bridge enabled** -- `"%JAVA_HOME%\\bin\\jabswitch" -enable`.
 * **A Java application that is already running.** This server only ever attaches to
   applications it did not launch; nothing here starts or restarts your app.
