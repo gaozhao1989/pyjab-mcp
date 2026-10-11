@@ -165,6 +165,51 @@ async def test_attach_window_passes_the_hwnd_through():
     assert next(iter(state.sessions.values())).hwnd == 0x10002
 
 
+async def test_attaching_the_same_window_twice_leaves_the_first_session_working(monkeypatch):
+    """#71 at the surface the caller sees: attach twice, then use the **first** session.
+
+    This is the trap the L3 chord test walked into by accident. A second
+    ``java_attach_window`` for the same window used to release the earlier binding *and* issue
+    a new window id, while session A still named the old one -- so every later call on session
+    A answered ``window 'w1' is not attached`` and the caller had done nothing wrong. The
+    backend now reuses the id, so session A keeps working.
+
+    The real backend is driven here, with ``pyjab.jabdriver`` stubbed, because the fake
+    backend's ``attach`` never releases anything and so cannot show the trap at all.
+    """
+    from pyjab_mcp.backend import PyjabBackend
+    from tests._fakedriver import install_fake_jabdriver
+
+    install_fake_jabdriver(monkeypatch)
+    # The real pump imports pyjab's Windows modules, which do not exist here, and the pump is
+    # not what this test is about. The bridge is stopped below so the stub is not pulled out
+    # from under a thread that is still running.
+    monkeypatch.setattr(PyjabBackend, "pump", lambda _self: None)
+    state = ServerState(open_backend=PyjabBackend)
+    server = create_server(state=state)
+
+    try:
+        first = await server.call_tool("java_attach_window", {"hwnd": 0x10001})
+        first_session = (await text_of(first)).split(" ", 1)[0]
+        second = await server.call_tool("java_attach_window", {"hwnd": 0x10001})
+        second_session = (await text_of(second)).split(" ", 1)[0]
+
+        assert first_session != second_session, "each attach is still its own session"
+        assert state.session(first_session).window_id == state.session(second_session).window_id, (
+            "both sessions have to name the same window id -- that reuse is the fix"
+        )
+
+        result = await server.call_tool("java_snapshot", {"session_id": first_session})
+
+        assert result.is_error is False, (
+            "the first session named a window that is still attached, so its calls must work"
+        )
+        text = await text_of(result)
+        assert "push button" in text and "[e:" in text, text
+    finally:
+        await state.stop()
+
+
 async def test_attach_window_reports_a_window_that_cannot_be_bound():
     backend = FakeBackend(attach_error=PyjabUnavailable("no window titled 'Nope' appeared"))
     server, _state = make_server(backend)

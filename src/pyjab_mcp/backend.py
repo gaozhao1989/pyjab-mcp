@@ -559,17 +559,26 @@ class PyjabBackend:
             ) from exc
 
         # Attaching the same window twice would hold two contexts for it, and the second is
-        # pure waste: release the one already bound to this handle first.
+        # pure waste: release the one already bound to this handle first -- one JAB context per
+        # window.  The window **id is reused** rather than replaced, because the id is what a
+        # caller holds: issuing a fresh one retired a window a session still named, and every
+        # later call on that session failed with "not attached" though the caller had done
+        # nothing wrong (issue #71).  Attaching twice is idempotent for the id; the release
+        # stays here, inside the backend, where the caller cannot see it.
+        handle = int(driver.hwnd or 0)
+        window_id = ""
         for existing, bound in list(self._drivers.items()):
-            if int(getattr(bound, "hwnd", 0) or 0) == int(driver.hwnd or 0):
+            if int(getattr(bound, "hwnd", 0) or 0) == handle:
+                window_id = window_id or existing
                 self.detach(existing)
 
-        self._counter += 1
-        window_id = f"w{self._counter}"
+        if not window_id:
+            self._counter += 1
+            window_id = f"w{self._counter}"
         self._drivers[window_id] = driver
         return AttachedWindow(
             window_id=window_id,
-            hwnd=int(driver.hwnd or 0),
+            hwnd=handle,
             title=str(driver.title or title),
             pid=driver.pid,
         )

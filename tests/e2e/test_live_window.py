@@ -718,8 +718,10 @@ async def test_a_chord_reaches_the_window_and_the_application_reacts(live, bound
     anyway; a runner's desktop can still steal focus in between, so there is one bounded retry
     rather than a sleep or a wider timeout. That retry brings the window forward with an
     interactive click, which is the workaround `java_send_keys`' own reply documents; it
-    deliberately does not attach again, because an attach releases the earlier binding and
-    the chord would then be sent on a window id the backend no longer holds.
+    deliberately does not attach again, because attaching is not a focus mechanism at all.
+    (It used to be worse than useless: a re-attach released the earlier binding *and* issued a
+    new window id, retiring the session that named the window -- #71. The id is stable now,
+    and the reason not to attach is the one above.)
     """
     from pyjab_mcp.backend import probe_public_api
     from pyjab_mcp.handles import locator_for
@@ -774,12 +776,15 @@ async def test_a_chord_reaches_the_window_and_the_application_reacts(live, bound
             # give a window focus** (measured in pyjab#180; pyjab's own send_keys says a
             # caller that wants the chord to land calls focus() first, and this server has
             # no focus tool yet -- #57). The retry used to attach again, which was therefore
-            # no focus mechanism at all -- and re-attaching **releases the earlier binding
-            # for that hwnd**, so the second chord was sent on a window id the backend no
-            # longer held and the run reported "window 'w9' is not attached" instead of the
-            # chord not arriving. The workaround java_send_keys' own reply documents is an
-            # interactive call, so the retry clicks the one control in this fixture that has
-            # no listener: bringing the window forward without changing the status field.
+            # no focus mechanism at all -- and re-attaching **released the earlier binding
+            # for that hwnd** and issued a new window id, so the second chord was sent on a
+            # window id the backend no longer held and the run reported "window 'w9' is not
+            # attached" instead of the chord not arriving. #71 made that id stable, so this
+            # retry could attach now without losing the session -- and it still would not
+            # focus anything, which is why it does not. The workaround java_send_keys' own
+            # reply documents is an interactive call, so the retry clicks the one control in
+            # this fixture that has no listener: bringing the window forward without changing
+            # the status field.
             harmless = handle_in(await tool(
                 server, "java_find", {"session_id": session_id, "name": "Ordinary button"}
             ))
