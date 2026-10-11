@@ -716,12 +716,13 @@ async def test_a_chord_reaches_the_window_and_the_application_reacts(live, bound
     pyjab's own `send_keys` says so and recommends `focus()` first). The chord is sent
     immediately after a fresh attach, which is the window a quiet runner gives focus to
     anyway; a runner's desktop can still steal focus in between, so there is one bounded retry
-    rather than a sleep or a wider timeout. That retry brings the window forward with an
-    interactive click, which is the workaround `java_send_keys`' own reply documents; it
-    deliberately does not attach again, because attaching is not a focus mechanism at all.
-    (It used to be worse than useless: a re-attach released the earlier binding *and* issued a
-    new window id, retiring the session that named the window -- #71. The id is stable now,
-    and the reason not to attach is the one above.)
+    rather than a sleep or a wider timeout. That retry now asks for focus with
+    `java_focus_window` -- the capability issue #57 built -- instead of clicking a harmless
+    control, which was the only route before that tool existed and activated whatever it landed
+    on. It deliberately does not attach again, because attaching is not a focus mechanism at
+    all. (It used to be worse than useless: a re-attach released the earlier binding *and*
+    issued a new window id, retiring the session that named the window -- #71. The id is stable
+    now, and the reason not to attach is the one above.)
     """
     from pyjab_mcp.backend import probe_public_api
     from pyjab_mcp.handles import locator_for
@@ -753,6 +754,7 @@ async def test_a_chord_reaches_the_window_and_the_application_reacts(live, bound
         f"anything: {before!r}"
     )
 
+    focus_reply = "(the first attempt fired the accelerator, so no retry was needed)"
     for attempt in (1, 2):
         # The evidence before the assertion (§3). When this failed on the 0.2.1 release
         # commit the log said only "window 'w9' is not attached" (windows-gui run
@@ -772,30 +774,165 @@ async def test_a_chord_reaches_the_window_and_the_application_reacts(live, bound
             f"field reads {after!r}"
         )
         if attempt == 1:
-            # The chord goes to whatever holds the keyboard focus, and **attaching does not
-            # give a window focus** (measured in pyjab#180; pyjab's own send_keys says a
-            # caller that wants the chord to land calls focus() first, and this server has
-            # no focus tool yet -- #57). The retry used to attach again, which was therefore
-            # no focus mechanism at all -- and re-attaching **released the earlier binding
-            # for that hwnd** and issued a new window id, so the second chord was sent on a
-            # window id the backend no longer held and the run reported "window 'w9' is not
-            # attached" instead of the chord not arriving. #71 made that id stable, so this
-            # retry could attach now without losing the session -- and it still would not
-            # focus anything, which is why it does not. The workaround java_send_keys' own
-            # reply documents is an interactive call, so the retry clicks the one control in
-            # this fixture that has no listener: bringing the window forward without changing
-            # the status field.
-            harmless = handle_in(await tool(
-                server, "java_find", {"session_id": session_id, "name": "Ordinary button"}
-            ))
-            await tool(server, "java_click", {
-                "session_id": session_id, "handle": harmless, "simulate": True,
-            })
+            # The chord goes to whatever holds the keyboard focus, and attaching does not give
+            # a window focus (pyjab#180). The retry asks the window to come forward through the
+            # tool built for it and reports what that answered, so a failure below carries the
+            # reason rather than only the symptom.
+            focus_reply = await tool(
+                server, "java_focus_window", {"session_id": session_id}
+            )
+            print(f"[L3] retry: java_focus_window reported: {focus_reply}")
 
     pytest.fail(
         f"the chord never reached the window on either attempt: the status field still reads "
         f"{after!r}. Session {session_id} still resolves to {state.session(session_id)}, so "
         f"this is not a stale window id: either send_keys does nothing, or the window never "
         f"had focus -- and the second is the failure mode the tool tells users about. "
-        f"JAB saw:\n{dump}"
+        f"java_focus_window reported: {focus_reply!r}. JAB saw:\n{dump}"
     )
+
+
+@pytest.mark.asyncio
+async def test_focus_reports_which_fact_happened_and_the_chord_follows_the_report(
+        live, accessibility_enabled, boundary_window, boundary_classes: Path):
+    """L3 for `java_focus_window`: the report and the keyboard focus have to agree.
+
+    The tool's subject is the pairing between what it says and what is true, and this is the
+    only layer that can check the second half: `java_send_keys` sends `alt+y` to whichever window
+    holds the keyboard focus, and the fixture's menu accelerator writes "the accelerator fired"
+    into its status field when it arrives. So the report is falsifiable here -- a tool that
+    answered "is now the foreground window" while the window did not have the focus would leave
+    the status field alone, and the run goes red.
+
+    **Both truthful answers are accepted**, because whether Windows grants the foreground is a
+    property of the runner rather than of the tool: pyjab returns `True` or `False`, and the
+    negative one is a normal answer (`SetForegroundWindow` is refused; pyjab#180). What is
+    required of the *tool* is:
+
+    * the reply is one of those two verdicts -- it never claims a state it cannot back;
+    * **if** it says the window came forward, the chord must land with no `java_click` in
+      between (the assertion a lying "came forward" fails);
+    * if it says the window did not come forward, the reply has to say so as a normal answer
+      rather than as a failure, and this test makes no claim that the chord landed.
+
+    The negative *text* is asserted from the reply's shape whenever the runner refuses -- which
+    the first dispatch of this test observed (run 38152545039). It is not demanded, because a
+    runner that grants the foreground is not a broken runner.
+
+    **Two windows are read before the chord, and the target's status is written by this test
+    first.** The first dispatch read a fresh instance's status field and got a value matching
+    neither window ('clicked the first one', where a fresh app starts at 'nothing clicked yet'
+    and the shared one read 'the accelerator fired' at 15:46:40), which nothing in pyjab's
+    source explains. So this version writes a known value into the window it is about to assert
+    on by clicking one of its own duplicate buttons, requires that value back, and prints the
+    status of both windows before the chord: if that anomaly recurs, the log says which window
+    the value came from rather than leaving it unexplained.
+    """
+    from pyjab_mcp.backend import probe_public_api
+    from pyjab_mcp.handles import locator_for
+    from pyjab_mcp.server import ServerState, create_server
+
+    if not probe_public_api().has("public way to bring a window to the foreground"):
+        pytest.skip(
+            "this pyjab has no public focus; it was released in 1.11.0, so a supported "
+            "install has it"
+        )
+
+    bridge, backend = live
+    state = ServerState(bridge=bridge)
+    server = create_server(state=state)
+
+    async def status_of(window_id: str) -> str:
+        """The fixture's one text component, read through the bridge thread.
+
+        A window that does not have exactly one text component fails here with what JAB did
+        report, rather than reading whichever node came first.
+        """
+        walk = call(bridge, backend.walk, window_id, max_depth=12)
+        nodes = [i for i, node in enumerate(walk.nodes) if node.record.role == "text"]
+        assert len(nodes) == 1, (
+            f"one text component per fixture window, and this one has {len(nodes)}. JAB saw:\n"
+            f"{boundary_tree(bridge, backend, window_id)}"
+        )
+        return call(bridge, backend.text, window_id, locator_for(walk, nodes[0]))
+
+    # The witness: the shared boundary window, used by the chord test above and already running.
+    # It is read and never asserted on -- its only job is to make "which window did that value
+    # come from" answerable in the log.
+    witness = await tool(server, "java_attach_window", {"title": BOUNDARY_TITLE})
+    witness_session = witness.split(" ", 1)[0]
+    witness_window_id = state.session(witness_session).window_id
+
+    # The target: a fresh instance, started under its own title. It is the newest window, which
+    # is where the runner is willing to put the foreground.
+    target_title = "pyjab-mcp focus app"
+    process = start_app(target_title, boundary_classes, BOUNDARY_CLASS)
+    try:
+        wait_for_window(bridge, backend, target_title)
+        attached = await tool(server, "java_attach_window", {"title": target_title})
+        session_id = attached.split(" ", 1)[0]
+        window_id = state.session(session_id).window_id
+        print(f"\n[L3] target {state.session(session_id)}; witness {BOUNDARY_TITLE!r}")
+
+        # A known state, written *in the window under test* by this test, so the accelerator
+        # below is a change rather than whatever the chord test left behind -- and so the read
+        # path itself is checked before it is trusted.
+        found = await tool(
+            server, "java_find", {"session_id": session_id, "name": "Duplicate button"}
+        )
+        handles = re.findall(r"\[(e:[0-9a-f]+)\]", found)
+        assert len(handles) == 2, f"the fixture has two same-named buttons: {handles}"
+        await tool(server, "java_click", {"session_id": session_id, "handle": handles[1]})
+        dump = boundary_tree(bridge, backend, window_id)
+        before = await status_of(window_id)
+        try:
+            witness_status = repr(await status_of(witness_window_id))
+        except Exception as exc:  # noqa: BLE001 - evidence not taken is not a failure here
+            witness_status = f"(unreadable: {type(exc).__name__}: {exc})"
+        print(
+            f"[L3] status before the chord: target({target_title!r})={before!r} "
+            f"witness({BOUNDARY_TITLE!r})={witness_status}"
+        )
+        assert before == "clicked the second one", (
+            f"the status field must read the value the click above just wrote, or nothing below "
+            f"is evidence: it reads {before!r}, and the witness window reads {witness_status}"
+        )
+
+        # The reply, printed before anything is asserted about it (§3).
+        reply = await tool(server, "java_focus_window", {"session_id": session_id})
+        print(f"\n[L3] java_focus_window on {target_title!r} reported: {reply}")
+
+        # No java_click, no simulate, no locator: the chord and nothing else.
+        await tool(server, "java_send_keys", {"session_id": session_id, "keys": "alt+y"})
+        after = await status_of(window_id)
+        print(f"\n[L3] status after the chord: target({target_title!r})={after!r}")
+
+        came_forward = "is now the foreground window" in reply
+        did_not = "is not the foreground window" in reply
+        assert came_forward or did_not, (
+            f"the reply must be one of the two truthful answers -- the window came forward, or "
+            f"it did not and the reply says so -- and this is neither: {reply!r}"
+        )
+
+        if came_forward:
+            assert after == "the accelerator fired", (
+                f"java_focus_window reported the window had come forward and the chord did not "
+                f"reach it: the report and the keyboard focus disagree, which is the one "
+                f"failure this test exists to catch. focus said {reply!r}; the status field "
+                f"reads {after!r}. JAB saw:\n{dump}"
+            )
+            print(
+                "\n[L3] the report said the window came forward and alt+y landed in it, "
+                "with no java_click in between"
+            )
+        else:
+            assert "normal answer" in reply, (
+                "a window that did not come forward has to be reported as a normal answer "
+                f"rather than a failed call, with the reason: {reply!r}"
+            )
+            print(
+                f"[L3] the report said the window did NOT come forward (a normal answer); the "
+                f"status field reads {after!r}, and this run makes no claim that it did"
+            )
+    finally:
+        stop_app(process)

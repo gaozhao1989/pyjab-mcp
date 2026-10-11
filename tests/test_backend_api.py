@@ -56,6 +56,7 @@ def test_the_installed_pyjab_has_what_the_pin_buys():
 
         has_detach = hasattr(JABDriver, "detach")
         has_send_keys = hasattr(JABDriver, "send_keys")
+        has_focus = hasattr(JABDriver, "focus")
         has_foreground = hasattr(Win32Utils, "set_window_foreground")
     else:
         # Importing jabdriver and win32utils off Windows raises pyjab's own descriptive
@@ -65,12 +66,15 @@ def test_the_installed_pyjab_has_what_the_pin_buys():
         win32_source = (package / "common" / "win32utils.py").read_text(encoding="utf-8")
         has_detach = "def detach" in driver_source
         has_send_keys = "def send_keys" in driver_source
+        has_focus = "def focus(self)" in driver_source
         has_foreground = "def set_window_foreground" in win32_source
 
     if not has_detach:
         missing.append("JABDriver.detach() -- releasing a session needs it (1.10.0)")
     if not has_send_keys:
         missing.append("JABDriver.send_keys() -- java_send_keys needs it (1.11.0)")
+    if not has_focus:
+        missing.append("JABDriver.focus() -- java_focus_window needs it (1.11.0)")
     if not has_foreground:
         missing.append("Win32Utils.set_window_foreground() -- R5's answer (1.11.0)")
 
@@ -418,6 +422,55 @@ def test_a_chord_pyjab_does_not_recognise_is_an_error_rather_than_a_no_op():
 
     assert "banana" in str(caught.value)
     assert driver.keys_sent == [], "nothing was sent"
+
+
+def test_focus_hands_the_window_forward_and_returns_what_pyjab_said():
+    """The return value is passed through untouched -- the tool layer is where it is read.
+
+    Coercing to `bool` here would turn a pyjab answer that is not a verdict into "it did not
+    come forward", which is the collapse AGENTS §2.4 forbids.
+    """
+    from pyjab_mcp.backend import focus_driver
+    from tests._fakedriver import FakeDriver
+
+    for answer in (True, False, None):
+        driver = FakeDriver()
+        driver.focus_result = answer
+
+        assert focus_driver(driver) is answer
+        assert driver.focus_calls == 1
+
+
+def test_the_gap_is_reported_when_pyjab_has_no_public_focus():
+    """Feature-detected, like every other capability: an older pyjab gets the release it needs."""
+    from pyjab_mcp.backend import PyjabApiGap, focus_driver
+    from tests._fakedriver import FakeDriver
+
+    class WithoutIt(FakeDriver):
+        focus = None
+
+    with pytest.raises(PyjabApiGap) as caught:
+        focus_driver(WithoutIt())
+
+    assert "1.11.0" in str(caught.value), "the release that has it is the actionable part"
+    assert "focus" in str(caught.value)
+    assert "predates it" in str(caught.value)
+
+
+def test_the_backend_focuses_the_window_a_session_names():
+    """``PyjabBackend.focus`` resolves the driver exactly as its other calls do."""
+    from tests._fakedriver import FakeDriver
+
+    backend = PyjabBackend()
+    driver = FakeDriver()
+    backend._drivers["w1"] = driver
+
+    assert backend.focus("w1") is True
+    assert driver.focus_calls == 1
+
+    with pytest.raises(PyjabUnavailable) as caught:
+        backend.focus("w2")
+    assert "not attached" in str(caught.value)
 
 
 def test_the_probe_reports_the_foreground_capability():

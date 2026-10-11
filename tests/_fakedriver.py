@@ -259,6 +259,10 @@ class FakeDriver:
         self.detached = False
         #: Every chord a test caused, in order.
         self.keys_sent: List[str] = []
+        #: What ``focus()`` answers: ``True``, ``False``, or something that is not a verdict.
+        self.focus_result: Any = True
+        #: How many times ``focus()`` was called.
+        self.focus_calls = 0
         self.outstanding = 0
         self.handed_out = 0
         self.walk_calls: List[Dict[str, Any]] = []
@@ -361,6 +365,17 @@ class FakeDriver:
         call to a method that does not exist.
         """
         self.detached = True
+
+    def focus(self) -> Any:
+        """pyjab's ``JABDriver.focus``: bring the window forward, and answer whether it is now.
+
+        The return value is the whole point of the real method, so this fake makes it
+        *configurable* rather than hard-coded: ``focus_result`` is what a test sets to get
+        ``True``, ``False``, or something that is not a verdict at all -- the third answer the
+        tool layer has to keep apart from ``False``.
+        """
+        self.focus_calls += 1
+        return self.focus_result
 
     # -- convenience -----------------------------------------------------------------
 

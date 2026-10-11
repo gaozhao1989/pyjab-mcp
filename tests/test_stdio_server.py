@@ -111,6 +111,7 @@ async def test_the_console_script_answers_a_real_mcp_handshake():
                 "java_select",
                 "java_fill_form",
                 "java_send_keys",
+                "java_focus_window",
                 "java_wait_for",
                 "java_screenshot",
             ]

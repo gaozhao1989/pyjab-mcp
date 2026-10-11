@@ -177,6 +177,16 @@ SURFACE: Dict[Touchpoint, Entry] = {
         "which release has it (backend.predates_the_pin) instead of raising an "
         "AttributeError. See RETIRED_REQUIREMENTS key 'send_keys'.",
     ),
+    ("pyjab.jabdriver", "JABDriver.focus"): Entry(
+        PUBLIC, "1.11.0",
+        "Probed with getattr and called only when it is there: R5's answer, and what "
+        "java_focus_window calls. It brings the bound window to the foreground and returns "
+        "**whether the window is the foreground window afterwards** -- False is a normal "
+        "answer rather than an error, because Windows refuses foreground activation from a "
+        "non-interactive session. The return value is passed through uncoerced, so the tool "
+        "keeps 'it did not come forward' apart from 'pyjab answered something that is not a "
+        "verdict'. See RETIRED_REQUIREMENTS key 'bring_to_foreground'.",
+    ),
     ("pyjab.jabdriver", "JABDriver.detach"): Entry(
         PUBLIC, "1.10.0",
         "Releases the root element's JAB reference and forgets the window, **without "
@@ -401,6 +411,7 @@ DRIVER_PARAMETERS: Dict[str, Dict[str, Dict[str, Touchpoint]]] = {
     "src/pyjab_mcp/backend.py": {
         "walk_driver": {"driver": ("pyjab.jabdriver", "JABDriver")},
         "resolve_driver": {"driver": ("pyjab.jabdriver", "JABDriver")},
+        "focus_driver": {"driver": ("pyjab.jabdriver", "JABDriver")},
     },
 }
 
