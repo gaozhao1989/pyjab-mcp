@@ -541,19 +541,99 @@ GUARD_SCRIPTS = (
     "check_pyjab_api_surface.py",
     "check_documented_surface.py",
     "check_local_only_files.py",
+    # Report-only, and exits 0 with nothing required: that is its whole point.
     "check_pyjab_readiness.py",
+    "check_changelog_immutable.py",
+    "check_published_references.py",
 )
 
 
 @pytest.mark.parametrize("script", GUARD_SCRIPTS)
 def test_the_guard_script_runs_and_exits_zero(script):
-    """The functions above can pass while the command line is broken."""
+    """The functions above can pass while the command line is broken.
+
+    This is the **argument-free** subset: each script here exits 0 against this repository
+    with no arguments, which is why the cases are bare.  The other five of the 11 guards in
+    `tools/` are covered differently, and naming the split is the point (issue #40) -- a
+    list whose *scope* is unnamed is read as wider than it is.
+
+    * `check_dist_contents.py` and `check_release_version.py` need an input only a release
+      produces -- a built sdist and wheel, and a tag the tree agrees with.  Their *refusing*
+      forms are the two cases right below, with their arguments; their *passing* forms are
+      CI's: `python -m build` then `--dist dist` in `ci.yml`'s `package` job, and
+      `check_release_version.py "$TAG"` in `release.yml`'s `verify` job.  A test that built
+      an sdist here would be measuring `build` rather than the guard.
+    * `check_pyjab_changelog.py`, `check_release_l3.py` and `check_release_unpublished.py`
+      already have their own command-line cases with arguments further down this file
+      (`test_the_changelog_guard_script_answers_for_one_explicit_file`,
+      `test_the_l3_gate_script_is_what_the_workflow_runs` and
+      `test_the_unpublished_gate_script_is_what_the_workflow_runs`), so they are in neither
+      list here.  For the changelog guard a bare case would be worse than none: with no
+      `--changelog` it reads the sibling checkout, then `$PYJAB_CHANGELOG`, then GitHub, and
+      without `--strict` an *unreadable* changelog prints `UNAVAILABLE` and exits 0 -- a
+      green that cannot tell "every marker is answered" from "nothing was read"
+      (AGENTS.md 2.4).  The network-reading form runs in CI instead (`--strict`, in
+      `ci.yml`'s `guards` job, where the network is).
+
+    One entry *within* this list is narrower than the rest, and the difference is the one
+    issue #48 is about: `check_published_references.py` resolves a citation against the
+    files on disk, and CI checks out none of the local-only ones, so there it runs the name
+    half only and exits 0 **by vacuity**.  This case therefore may not be read as the
+    resolving half being proved by CI.
+    `test_no_shipped_file_in_this_repository_cites_a_local_only_path`, below, is where that
+    difference is visible -- on a machine that has the files, which is not a CI runner.
+    """
     result = subprocess.run(
         [sys.executable, str(REPO_ROOT / "tools" / script)],
         cwd=REPO_ROOT, capture_output=True, text=True, timeout=180,
     )
 
     assert result.returncode == 0, f"{script} exited {result.returncode}:\n{result.stdout}\n{result.stderr}"
+
+
+#: The two guards above whose *passing* form needs a built artifact or a real tag, as
+#: ``(script, argv from tmp_path, the line the refusal has to carry)``.  The argv is a
+#: function of ``tmp_path`` because the hermetic input *is* the temporary directory: what
+#: `check_dist_contents.py` must report when nothing has been built, and what
+#: `check_release_version.py` must report for a tag no file in this tree agrees with.
+GUARD_SCRIPTS_REFUSING = (
+    pytest.param(
+        "check_release_version.py",
+        lambda tmp_path: ("v9.9.9",),
+        "CANNOT RELEASE v9.9.9",
+        id="release-version-against-this-tree",
+    ),
+    pytest.param(
+        "check_dist_contents.py",
+        lambda tmp_path: ("--dist", str(tmp_path / "nowhere")),
+        "NO DIST DIRECTORY",
+        id="dist-contents-with-nothing-built",
+    ),
+)
+
+
+@pytest.mark.parametrize("script, arguments, complaint", GUARD_SCRIPTS_REFUSING)
+def test_the_guard_script_that_needs_arguments_refuses_a_wrong_one(
+    tmp_path, script, arguments, complaint
+):
+    """A green command line proves nothing for a guard that needs a release to go green.
+
+    What has to hold either way is the argument form and the refusal -- the exit status and
+    the line that names what is wrong -- so both are asserted, and they are the ones the
+    pipeline that does supply the real input depends on.
+    """
+    result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "tools" / script), *arguments(tmp_path)],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=180,
+    )
+
+    assert result.returncode == 1, (
+        f"{script} exited {result.returncode} on an input it has to refuse:\n"
+        f"{result.stdout}\n{result.stderr}"
+    )
+    assert complaint in result.stdout, (
+        f"{script} refused, but not with {complaint!r}:\n{result.stdout}\n{result.stderr}"
+    )
 
 
 # ---------------------------------------------------------------------------------
