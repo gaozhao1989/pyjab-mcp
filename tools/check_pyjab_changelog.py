@@ -9,9 +9,18 @@ So a pyjab change can break this project without anything in that repository goi
 pyjab's own suite passes, its release goes out, and the first evidence here is a tool that
 misbehaves for a user.
 
-pyjab's changelog carries a marker line for changes it judges to matter here:
+pyjab's changelog carries a marker line for changes it judges to matter here -- a line that
+**begins** with the phrase, after any indentation:
 
-    * **Something changed.** ... ``Affects: pyjab-mcp``
+    **Affects: pyjab-mcp** -- a thing changed, and this is why it matters there.
+
+The phrase also occurs inside ordinary sentences, and that is prose about the convention
+rather than the convention itself:
+
+    could reach. **No separate ``Affects: pyjab-mcp`` marker is needed**: this is the same
+
+Reading that mention as a marker is what turned `guards` red on `main`, so "the line begins
+with it" is the rule rather than a detail of how the marker is spelled.
 
 A marker is a human judgement and can be forgotten or wrong, which is why this is only one
 of the two halves of the drift mechanism -- the load-bearing one is the contract tests in
@@ -66,9 +75,16 @@ SIBLING = Path(
 
 RAW_URL = "https://raw.githubusercontent.com/gaozhao1989/pyjab/master/CHANGELOG.rst"
 
-#: The marker itself.  Tolerant about backticks and case, because it is written by hand in
-#: somebody else's repository and this side has to read whatever they wrote.
-MARKER = re.compile(r"affects:\s*`?pyjab-mcp`?", re.IGNORECASE)
+#: The marker itself, which has to **begin** the line.  That anchor is the rule this check
+#: is meant to make mechanical -- a marker is a line beginning ``Affects: pyjab-mcp`` --
+#: and it is what separates a marker from a sentence that merely mentions one.  What stays
+#: tolerant is the spelling *at that position*, because the line is written by hand in
+#: somebody else's repository: leading indentation, an optional reStructuredText bullet,
+#: emphasis around the phrase and backticks around the name are all read.
+MARKER = re.compile(
+    r"^\s*(?:[*+-]\s+)?(?:\*\*|__)?affects:\s*`?pyjab-mcp`?(?:\*\*|__)?",
+    re.IGNORECASE,
+)
 
 #: A commit-ish token on the marker line, which is how an acknowledgement names the change.
 COMMIT = re.compile(r"\b([0-9a-f]{7,40})\b")
