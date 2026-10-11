@@ -318,6 +318,62 @@ def test_the_local_only_guard_accepts_a_prune_for_a_directory(tmp_path):
     assert problems == []
 
 
+def test_the_local_only_guard_refuses_a_tree_where_git_cannot_be_asked(tmp_path, capsys):
+    """Issue #84: with no ``.git`` the guard printed PASSED having never run ``git check-ignore``.
+
+    An extracted sdist has ``.gitignore`` and ``MANIFEST.in`` and no ``.git``, and it is exactly
+    the artifact a maintainer inspects when asking "did anything local-only get shipped?".  In
+    that tree ``_git_ignores`` returns ``None``, and the caller only complained about ``False``,
+    so the guard printed a summary sentence about git without invoking git (AGENTS.md 2.4).
+
+    The tree's two files cover every path on the list, so the refusal is the *only* problem
+    that can be reported: without that, the text half would fail on its own and the exit code
+    would be 1 for a reason that has nothing to do with git.
+    """
+    (tmp_path / ".gitignore").write_text(
+        "".join(f"/{path}\n" for path in local_guard.LOCAL_ONLY), encoding="utf-8"
+    )
+    (tmp_path / "MANIFEST.in").write_text(
+        "".join(
+            f"prune {path}\n" if path.endswith("/") else f"exclude {path}\n"
+            for path in local_guard.LOCAL_ONLY
+        ),
+        encoding="utf-8",
+    )
+
+    assert local_guard.main(repo=tmp_path) == 1
+
+    out = capsys.readouterr().out
+    assert "git is not available" in out, "the refusal has to name what could not be read"
+    assert "check-ignore" in out, "and the check that never ran"
+    assert "PASSED" not in out, "a guard that could not ask git must not report the git half"
+
+
+def test_the_local_only_guard_asks_git_about_a_path_that_is_not_on_disk(tmp_path, monkeypatch):
+    """Issue #84, measured second instance: the git half was skipped when the path was absent.
+
+    ``check()`` asked git only when ``(repo / path).exists()``, so in a fresh worktree or a CI
+    checkout -- where none of the local-only paths are on disk -- ``git check-ignore`` was never
+    run, and PASSED was vacuous there as well.  Git answers for an absent path (measured), so the
+    question is about the pattern, not about the file.
+    """
+    (tmp_path / ".gitignore").write_text("AGENTS.md\n", encoding="utf-8")
+    (tmp_path / "MANIFEST.in").write_text("exclude AGENTS.md\n", encoding="utf-8")
+    asked = []
+
+    def recording_ignores(path, repo=tmp_path):
+        asked.append(path)
+        return True
+
+    monkeypatch.setattr(local_guard, "_git_ignores", recording_ignores)
+
+    assert local_guard.check(repo=tmp_path, local_only=("AGENTS.md",)) == []
+    assert "AGENTS.md" in asked, (
+        "an absent path still has a .gitignore pattern to ask git about; "
+        f"git was asked about {asked!r} instead"
+    )
+
+
 # ---------------------------------------------------------------------------------
 # tools/check_dist_contents.py
 # ---------------------------------------------------------------------------------
