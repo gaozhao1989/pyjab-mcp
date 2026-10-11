@@ -48,11 +48,12 @@ logger = logging.getLogger(__name__)
 SERVER_NAME = "pyjab_mcp"
 
 INSTRUCTIONS = (
-    "Drives Java desktop applications (Swing/AWT/JavaFX) through Java Access Bridge, via "
+    "Drives Java desktop applications (Swing/AWT) through Java Access Bridge, via "
     "pyjab. It never modifies, restarts or injects into the target application. Start with "
     "java_diagnostics if anything looks wrong: it reports which part of the environment is "
     "missing instead of failing silently. All tools must run on the same Windows machine as "
-    "the application."
+    "the application. JavaFX is not supported: it publishes accessibility through UI "
+    "Automation rather than Java Access Bridge, so JAB never sees the window (pyjab#227)."
 )
 
 
