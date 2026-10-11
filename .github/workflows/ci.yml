@@ -1,6 +1,6 @@
 name: CI
 
-# Four jobs, and what each of them can and cannot prove:
+# Five jobs, and what each of them can and cannot prove:
 #
 #   * `tests` -- the portable suite on three platforms. It installs the real pyjab and the
 #     real mcp SDK, so a broken import, a bad pin or a package that only works in a
@@ -9,6 +9,16 @@ name: CI
 #     separate step so a failure names the rule it broke.
 #   * `package` -- builds the sdist and wheel and checks the *artifact*: what is inside it,
 #     and whether the console script survives.
+#   * `mcpb-build` and `mcpb-runs` -- the built `.mcpb` is *executed*, not inspected. Every
+#     other statement about the bundle in this repository is a statement about its *shape*
+#     (the manifest validates, the members are right, the version is injected), and the last
+#     blocking defect lived exactly in the gap: the `cp310` tree was missing
+#     `exceptiongroup`, so a 3.10 user's server died at startup while every static check
+#     passed -- issue #37. One job builds the bundle and uploads it; four legs on
+#     windows-latest unpack it and drive a real MCP handshake through the bundle's own
+#     `server/entry.py`, with the interpreter of the leg. What this proves is that the
+#     bundle starts and answers `tools/list`; what it does **not** prove is anything about
+#     Java -- no JDK, no bridge, no window.
 #   * a `windows-gui` job is still deliberately absent. It is the only layer that can drive
 #     a live application, and pyjab's wording about its own equivalent applies verbatim: a
 #     green run of this file says nothing about a live application, and a red one blocks
@@ -138,3 +148,87 @@ jobs:
           # proves the wheel's entry point reaches real code without waiting for a client.
           /tmp/check-wheel/bin/python -c "from pyjab_mcp.server import create_server; print('server', create_server().name)"
           /tmp/check-wheel/bin/python -c "import importlib.metadata as m; print('version', m.version('pyjab-mcp'))"
+
+  # The bundle, *executed* rather than inspected -- the dynamic half of issue #37.
+  #
+  # Why two jobs and not one: the bundle is built once and run four times, because the claim
+  # being measured is per minor. `tools/build_mcpb.py` vendors one dependency tree per
+  # supported CPython (`server/vendor/cp3XX`), the compiled wheels in them are tagged for one
+  # minor each, and the last blocking defect was in exactly *one* of those trees: `cp310` was
+  # missing `exceptiongroup`, so a 3.10 server died at import while every static check passed.
+  # A single leg on one minor would not have caught it, and rebuilding the bundle four times
+  # would cost four times as much for the same artifact.
+  mcpb-build:
+    name: the MCPB bundle builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the build tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # `--wheel`, because the packer reads `dist/*.whl` and nothing else: the sdist is the
+      # `package` job's subject, and building it here would only cost time.
+      - name: Build the wheel
+        run: python -m build --wheel
+
+      # The packer resolves the closure for win_amd64 and each supported minor, so this is a
+      # Windows bundle even though it is built here. It is also where the per-tree marker
+      # closure is checked, which is the *static* half of #37's defect class.
+      - name: Build the MCPB bundle
+        run: python tools/build_mcpb.py --dist dist --out dist
+
+      # `if-no-files-found: error` rather than the default warning: a builder that produced
+      # nothing would otherwise be green, and the four legs would fail with a message about
+      # the environment variable instead of about the build.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcpb
+          path: dist/*.mcpb
+          if-no-files-found: error
+
+  mcpb-runs:
+    name: the MCPB bundle runs (py${{ matrix.python-version }}, win)
+    needs: [mcpb-build]
+    runs-on: windows-latest
+    strategy:
+      # Every leg reports: one minor's tree failing is the information, and cancelling the
+      # others would hide whether it is one tree or all of them.
+      fail-fast: false
+      matrix:
+        # The minors the bundle vendors a tree for, read out of pyproject.toml's classifiers
+        # by the packer. All four, because the defect this job exists for was in one.
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # The *client* half of the handshake, and the checkout's own registration for the
+      # expected tool list. The server under test is deliberately not what is installed:
+      # that is the unpacked bundle, run by this same interpreter with no site-packages, so
+      # this leg exercises its own `vendor/cp3XX` tree and cannot fall back on these.
+      - name: Install the test process's own dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mcpb
+          path: bundle
+
+      # The artifact's filename carries the version, which this job cannot know before the
+      # bundle is built, so the variable is a pattern; `tests/test_mcpb_bundle.py` requires
+      # exactly one file to match and fails, rather than skips, on anything else. There is no
+      # `if:` and no `continue-on-error` on this step: the test is the gate.
+      - name: Run the bundle's own entry script on this interpreter
+        env:
+          PYJAB_MCP_BUNDLE: ${{ github.workspace }}/bundle/*.mcpb
+        run: python -m pytest tests/test_mcpb_bundle.py

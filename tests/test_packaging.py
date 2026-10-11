@@ -454,6 +454,58 @@ def test_the_bundle_carries_no_local_only_file_and_no_bytecode(bundle):
     )
 
 
+def test_the_bundle_carries_no_build_machine_path(bundle):
+    """``pip install --target`` records the local wheel it used; a stranger gets that path.
+
+    Found by the reviewer of #37 on the *real* bundle: four copies, one per vendored tree,
+    each ``server/vendor/cp3XX/pyjab_mcp-<version>.dist-info/direct_url.json`` naming the
+    builder's ``dist/`` directory. Nothing imports it, which is exactly why the rule has to be
+    mechanical -- and this is the end-to-end half, read out of the archive the host installs.
+    """
+    leaked = sorted(
+        member for member in bundle_members(bundle) if member.endswith("/" + "direct_url.json")
+    )
+
+    assert leaked == [], (
+        f"the bundle carries {len(leaked)} direct_url.json file(s), and each one records where "
+        f"the machine that built the bundle kept the wheel: {leaked}"
+    )
+
+
+def test_the_packer_refuses_a_staged_tree_that_carries_a_build_machine_path(tmp_path):
+    """The predicate behind the assertion above, proved able to fail rather than trusted."""
+    import tools.build_mcpb as packer
+
+    dist_info = tmp_path / "server" / "vendor" / "cp310" / "pyjab_mcp-0.1.2.dist-info"
+    dist_info.mkdir(parents=True)
+    (dist_info / "direct_url.json").write_text(
+        '{"url": "file:///home/runner/work/pyjab-mcp/pyjab-mcp/dist/pyjab_mcp-0.1.2-py3-none-any.whl"}',
+        encoding="utf-8",
+    )
+
+    problems = packer.staged_problems(tmp_path)
+
+    assert any("BUILD MACHINE PATH IN THE BUNDLE" in problem for problem in problems), problems
+
+
+def test_staging_a_tree_drops_the_recorded_wheel_path(tmp_path):
+    """The removal that lets a correct build pass the refusal above -- and only that file."""
+    import tools.build_mcpb as packer
+
+    dist_info = tmp_path / "cp310" / "pyjab_mcp-0.1.2.dist-info"
+    dist_info.mkdir(parents=True)
+    recorded = dist_info / "direct_url.json"
+    recorded.write_text('{"url": "file:///build/machine/dist/pyjab_mcp-0.1.2-py3-none-any.whl"}',
+                        encoding="utf-8")
+    (dist_info / "METADATA").write_text("Name: pyjab-mcp\n", encoding="utf-8")
+
+    removed = packer.drop_build_machine_paths(tmp_path)
+
+    assert removed == ["cp310/pyjab_mcp-0.1.2.dist-info/direct_url.json"], removed
+    assert not recorded.exists()
+    assert (dist_info / "METADATA").is_file(), "only pip's record of the path is removed"
+
+
 def test_the_packer_refuses_a_staged_tree_that_carries_a_local_only_file(tmp_path):
     """The artifact-level check, proved able to fail rather than trusted.
 
