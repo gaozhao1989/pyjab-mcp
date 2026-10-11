@@ -105,11 +105,14 @@ Working on the server itself is `pip install -e ".[dev]"` — see [Working on it
 
 ### Or install the bundle: one file, no build step
 
-Every release also carries `pyjab-mcp-<version>.mcpb` — the built wheel, its dependencies
-vendored for each supported CPython minor, and one entry script, in a single file. Download it
-from the [releases page](https://github.com/gaozhao1989/pyjab-mcp/releases) and hand it to the
-client: Claude Desktop installs a `.mcpb` by opening it, and
-[docs/CLIENTS.md](docs/CLIENTS.md) has the details.
+v0.1.0–v0.1.2 predate the bundle and carry no assets; every release cut since carries one. It is
+`pyjab-mcp-<version>.mcpb` — the built wheel and its dependency closure, installed together into
+one tree per supported CPython minor, plus one entry script, in a single file. Each tree carries
+the package itself, so the file holds one copy of `pyjab_mcp` per minor rather than one wheel
+beside the trees. Download it from the
+[releases page](https://github.com/gaozhao1989/pyjab-mcp/releases) and hand it to the client:
+Claude Desktop installs a `.mcpb` by opening it, and [docs/CLIENTS.md](docs/CLIENTS.md) has the
+details.
 
 **The bundle changes none of the requirements above, and it narrows one of them to the
 interpreters it actually carries.** It bundles no Python interpreter and no JDK: this server
@@ -121,6 +124,13 @@ because it carries one dependency tree **per supported minor**, since `pydantic-
 `rpds-py`, `cryptography` and `pywin32` ship compiled wheels tagged for one minor each. Started
 on any other interpreter it stops with a sentence naming the interpreter it found and the ones
 the file carries, rather than an `ImportError` from a native module.
+
+**The interpreter has to be the `python` on `PATH`.** The manifest declares no `user_config`
+fallback, so the client runs whatever `python` resolves to there — and a machine with CPython
+installed but not on `PATH` gets a client that shows no tools, with nothing in it that names the
+cause: no interpreter ever starts, so the bundle's own refusal cannot run. `where.exe python`
+prints the interpreter that will be used; if it prints nothing, put the installation's directory
+on `PATH`.
 
 **MCPB enforces no permissions.** There is no manifest-level sandbox — a bundled server runs
 with the full privileges of the user who installed it, exactly as it would if you had started

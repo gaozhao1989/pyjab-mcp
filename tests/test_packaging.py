@@ -162,9 +162,12 @@ def test_server_json_satisfies_the_registry_schema_it_names():
 def test_the_registry_accepts_server_json():
     """The authority on the schema is the registry, so this asks it when asked to.
 
-    Off by default because it needs a downloaded binary and a network round trip, and it is
-    *on* in the release workflow, where publishing metadata the registry rejects would
-    otherwise be discovered after PyPI already had the package.
+    Off by default because it needs a downloaded binary and a network round trip, and nothing
+    under `.github/` sets `PYJAB_MCP_REGISTRY`, so this test runs only when a person sets it.
+    The release's protection is the same validator run directly: `publish-registry.yml` has a
+    `mcp-publisher validate` step of its own before `publish`, which is why a schema rejection
+    cannot reach PyPI. That is not this test. Run this one by hand with `PYJAB_MCP_REGISTRY=1`
+    and `mcp-publisher` on `PATH`; `docs/RELEASING.md` documents it.
     """
     import shutil
     import subprocess
@@ -685,6 +688,167 @@ def test_the_bundles_declared_python_support_is_what_it_vendors(declared_bundle,
             f"{page} no longer says the `pip install` path is `3.10 or newer`, so the only "
             f"range it states is the bundle's ({stated!r}) and the two read as the same claim."
         )
+
+
+# ---------------------------------------------------------------------------------
+# What the bundle's text promises, in the pages a user reads
+# ---------------------------------------------------------------------------------
+#
+# Three claims a reader acts on, and none is visible to a test that reads only the code or the
+# artifact: the installer launches the bare `python` on `PATH`, so that interpreter has to
+# exist; `where.exe python` is how a user sees which one it is; and v0.1.0-v0.1.2 carry no
+# assets at all, so no text may claim the bundle is on releases that predate it.
+#
+# The first two are pinned as the **sentences this repository agreed to**, verbatim, in all
+# three places an installer reads: the README's bundle section, the client guide's, and the
+# manifest's `long_description` -- what the host shows at install time. A wording change is then
+# a deliberate edit here rather than something a rewrite does by accident, and a paraphrase
+# around two nearby names cannot satisfy it: an earlier version of this pin asked only for
+# `python` near `PATH`, which "The interpreter does *not* have to be the `python` on `PATH`"
+# also supplies. The availability sentence is pinned the same way in both pages, and the
+# *false* form of it is refused by a rule deliberately broader than one wording.
+
+#: The agreed sentence about the interpreter, verbatim, in all three places. No trailing period
+#: on purpose, so the same string can lead a bold paragraph, a bullet, and a clause in the guide.
+INTERPRETER_ON_PATH = "The interpreter has to be the `python` on `PATH`"
+
+#: The check that answers "which interpreter will it use?" on the Windows the bundle runs on.
+#: `where.exe`, not `where`: in PowerShell `where` is an alias for `Where-Object`, so the bare
+#: verb filters objects instead of printing a path.
+PATH_CHECK = "where.exe python"
+
+#: The agreed sentence about which releases carry the bundle, verbatim in both pages. It names
+#: the three releases that have none -- the earlier wording ("the release that introduces it")
+#: described a release nobody could identify while every release on the releases page carried no
+#: assets -- and the second clause is true today (no release has been cut since) and after the
+#: release that does carry one.
+AVAILABILITY_SENTENCE = (
+    "v0.1.0–v0.1.2 predate the bundle and carry no assets; every release cut since carries one."
+)
+
+#: An "every release" applied to something. The subject may carry up to three words between the
+#: quantifier and the noun, which is what "every published release" and "every GitHub release"
+#: need; a possessive ("every release's notes") is not a claim about what a release carries, so
+#: it is excluded rather than flagged.
+UNIVERSAL_RELEASE = re.compile(
+    r"\b(?:every|each|all|any)\s+(?:\w+\s+){0,3}releases?\b(?!['’])", re.IGNORECASE
+)
+
+#: The bundle, by any of the names these pages use for it.
+BUNDLE = re.compile(r"bundle|mcpb", re.IGNORECASE)
+
+
+def shipped_page_section(page: str, heading: str) -> str:
+    """One heading's own text, to the next heading of the same or a higher level.
+
+    Line numbers move whenever the prose above them does, and slicing to the next `##` alone
+    would let a later `###` inside the same H2 block stand in for the section this is about.
+    """
+    text = (REPO_ROOT / page).read_text(encoding="utf-8")
+    assert heading in text, (
+        f"{page} no longer has a {heading!r} heading, so the bundle's text has no single place "
+        "to be checked"
+    )
+    start = text.index(heading)
+    following = re.search(r"(?m)^#{2,6}\s", text[start + len(heading):])
+    end = start + len(heading) + following.start() if following else len(text)
+    return text[start:end]
+
+
+def mutable_changelog_text() -> str:
+    """`CHANGELOG.md` without the sections that are already released.
+
+    A released section is published inside its sdist and frozen by hash, so its text is not this
+    pin's to police. The *next* release's notes are written under `## Unreleased`, and a claim
+    there is published by the release this change is preparing: the false one this test was
+    written for sat in exactly that section. "Released" is read through the immutable guard's own
+    `load_record()` and `sections()` rather than re-derived, so there is one definition of it.
+    """
+    import tools.check_changelog_immutable as immutable
+
+    text = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    for version, section in immutable.sections(text).items():
+        if version in immutable.load_record():
+            text = text.replace(section, "")
+    return text
+
+
+def universal_release_claims(flat: str) -> "list[str]":
+    """Sentences that say *every* release carries the bundle, which v0.1.0-v0.1.2 do not.
+
+    One sentence at a time, split where a period is followed by whitespace and a sentence
+    opening -- so `pyjab-mcp-<version>.mcpb` and `v0.1.2` are not cut in half -- and a sentence is
+    a complaint when it both quantifies over releases and mentions the bundle. The agreed
+    sentence is removed first: it contains "every release cut since carries one", which is true
+    and is pinned by its own assertion, so it cannot be what this looks for. That removal is also
+    why this does not exempt a generic "since"/"after": "every release since v0.1.0 carries the
+    bundle" reads like the truth and is false, because v0.1.1 and v0.1.2 carry nothing.
+    """
+    without_agreed = flat.replace(AVAILABILITY_SENTENCE, "")
+    return [
+        sentence.strip()
+        for sentence in re.split(r"(?<=\.)\s+(?=[A-Z*`])", without_agreed)
+        if UNIVERSAL_RELEASE.search(sentence) and BUNDLE.search(sentence)
+    ]
+
+
+def test_the_bundle_pages_say_which_interpreter_runs_it_and_which_releases_carry_it(
+    declared_bundle,
+):
+    """The claims the bundle's text makes, in the places a user meets them.
+
+    `declared_bundle` is the built artifact, so the manifest half is read out of the zip a host
+    would install rather than from the packer's own constant: a constant and the file it writes
+    can disagree, and only one of the two is what a user sees.
+    """
+    pages = {
+        "README.md": shipped_page_section("README.md", "### Or install the bundle"),
+        "docs/CLIENTS.md": shipped_page_section("docs/CLIENTS.md", "### The `.mcpb` bundle"),
+    }
+    described = " ".join(bundle_manifest(declared_bundle)["long_description"].split())
+
+    for page, section in pages.items():
+        flat = " ".join(section.split())
+        assert INTERPRETER_ON_PATH in flat, (
+            f"{page}'s bundle section no longer carries {INTERPRETER_ON_PATH!r}. The manifest "
+            "launches bare `python`, so a machine with CPython installed but not on `PATH` gets "
+            "a client that shows no tools -- and no refusal that names the cause, because "
+            "nothing started an interpreter to print one."
+        )
+        assert PATH_CHECK in flat, (
+            f"{page}'s bundle section no longer gives the check that shows which interpreter "
+            f"that is ({PATH_CHECK!r}), the only way a user can see it before installing."
+        )
+        assert AVAILABILITY_SENTENCE in flat, (
+            f"{page}'s bundle section no longer carries {AVAILABILITY_SENTENCE!r}. Which "
+            "releases carry the bundle is a deliberate claim, not something a rewrite should be "
+            "able to change silently."
+        )
+
+    assert INTERPRETER_ON_PATH in described, (
+        f"the manifest's `long_description` no longer carries {INTERPRETER_ON_PATH!r}. That is "
+        "the text the host shows at install time, and the one nobody re-reads."
+    )
+    assert PATH_CHECK in described, (
+        f"the manifest's `long_description` no longer gives {PATH_CHECK!r}, the check that "
+        'turns "no tools appeared" into a named cause.'
+    )
+
+    claimed: "list[str]" = []
+    for page in ("README.md", "docs/CLIENTS.md"):
+        flat = " ".join((REPO_ROOT / page).read_text(encoding="utf-8").split())
+        claimed += [f"{page}: {sentence}" for sentence in universal_release_claims(flat)]
+    flat_changelog = " ".join(mutable_changelog_text().split())
+    claimed += [
+        f"CHANGELOG.md (unreleased): {sentence}"
+        for sentence in universal_release_claims(flat_changelog)
+    ]
+
+    assert claimed == [], (
+        "a shipped page claims that every release carries the bundle, and the three published "
+        "releases carry no assets at all: " + " | ".join(claimed) + ". Name the releases that "
+        "predate it instead -- v0.1.0-v0.1.2 predate the bundle and carry no assets."
+    )
 
 
 def test_the_closure_check_reads_the_target_interpreter_not_the_build_one(tmp_path):
