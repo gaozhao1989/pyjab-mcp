@@ -1,0 +1,44 @@
+name: Market and feedback scan
+
+# The maintainer asked for a market and user-feedback scan **every two weeks**, as a work order for the
+# `market-researcher` role rather than a standing agent. This workflow is only the **reminder**: it
+# opens one issue, so the cadence is mechanical instead of remembered (AGENTS.md 8) and lands in the
+# one list this project reads before starting work (AGENTS.md 1b). The research itself is a work order;
+# `.agents/briefs/market-researcher.md` is the brief and `.github/market-scan-template.md` is what the
+# issue says.
+#
+# Why an issue rather than a failing job: a scheduled job that goes red is a job people learn to
+# ignore. Why a job at all: a cadence kept by hand is a cadence until someone is in a hurry.
+
+on:
+  schedule:
+    # The 1st and 15th at 06:00 UTC -- fourteen to seventeen days apart, which is what "every two
+    # weeks" looks like in cron, and predictable enough to plan around.
+    - cron: "0 6 1,15 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Open the scan issue, unless one is already open
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Idempotent by title: a scan that has not been done yet must not accumulate a second
+          # reminder, and the title carries the date it was opened rather than the date it is due.
+          open=$(gh issue list --state open --search "Market and feedback scan in:title" \
+                   --json number --jq 'length')
+          if [ "$open" -gt 0 ]; then
+            echo "a scan issue is already open (${open}); not opening another"
+            exit 0
+          fi
+          gh issue create \
+            --title "Market and feedback scan, opened $(date -u +%Y-%m-%d)" \
+            --body-file .github/market-scan-template.md
