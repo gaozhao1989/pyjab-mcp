@@ -712,10 +712,14 @@ async def test_a_chord_reaches_the_window_and_the_application_reacts(live, bound
     macOS suite cannot, and neither can a fake driver.
 
     The accelerator is the observable. `setAccelerator` only fires while the window has the
-    keyboard focus, and nothing here focuses anything — that is pyjab's design, and the tool's
-    reply says so. Attaching brings the window forward, so the chord is sent immediately after
-    a fresh attach; a runner's desktop can still steal focus between the two, which is why
-    there is one bounded retry rather than a sleep or a wider timeout.
+    keyboard focus -- and **attaching does not give a window focus** (measured in pyjab#180;
+    pyjab's own `send_keys` says so and recommends `focus()` first). The chord is sent
+    immediately after a fresh attach, which is the window a quiet runner gives focus to
+    anyway; a runner's desktop can still steal focus in between, so there is one bounded retry
+    rather than a sleep or a wider timeout. That retry brings the window forward with an
+    interactive click, which is the workaround `java_send_keys`' own reply documents; it
+    deliberately does not attach again, because an attach releases the earlier binding and
+    the chord would then be sent on a window id the backend no longer holds.
     """
     from pyjab_mcp.backend import probe_public_api
     from pyjab_mcp.handles import locator_for
@@ -748,17 +752,45 @@ async def test_a_chord_reaches_the_window_and_the_application_reacts(live, bound
     )
 
     for attempt in (1, 2):
+        # The evidence before the assertion (§3). When this failed on the 0.2.1 release
+        # commit the log said only "window 'w9' is not attached" (windows-gui run
+        # 38146175566), which named neither the session that resolved to w9 nor what the
+        # backend was holding at that moment.
+        print(
+            f"\n[L3] attempt {attempt}: session {session_id} -> {state.session(session_id)}; "
+            f"the backend holds {sorted(backend._drivers)}"
+        )
         await tool(server, "java_send_keys", {"session_id": session_id, "keys": "alt+y"})
         after = call(bridge, backend.text, window_id, status_locator)
         if after == "the accelerator fired":
             print(f"\n[L3] alt+y reached the window and fired the accelerator (attempt {attempt})")
             return
-        # The window may have lost focus between attaching and sending. Attach again, which
-        # brings it forward, and try once more.
-        await tool(server, "java_attach_window", {"title": BOUNDARY_TITLE})
+        print(
+            f"[L3] attempt {attempt}: the chord did not fire the accelerator; the status "
+            f"field reads {after!r}"
+        )
+        if attempt == 1:
+            # The chord goes to whatever holds the keyboard focus, and **attaching does not
+            # give a window focus** (measured in pyjab#180; pyjab's own send_keys says a
+            # caller that wants the chord to land calls focus() first, and this server has
+            # no focus tool yet -- #57). The retry used to attach again, which was therefore
+            # no focus mechanism at all -- and re-attaching **releases the earlier binding
+            # for that hwnd**, so the second chord was sent on a window id the backend no
+            # longer held and the run reported "window 'w9' is not attached" instead of the
+            # chord not arriving. The workaround java_send_keys' own reply documents is an
+            # interactive call, so the retry clicks the one control in this fixture that has
+            # no listener: bringing the window forward without changing the status field.
+            harmless = handle_in(await tool(
+                server, "java_find", {"session_id": session_id, "name": "Ordinary button"}
+            ))
+            await tool(server, "java_click", {
+                "session_id": session_id, "handle": harmless, "simulate": True,
+            })
 
     pytest.fail(
-        f"the chord never reached the window: the status field still reads {after!r}. "
-        f"Either send_keys does nothing, or the window never had focus -- and the second is "
-        f"the failure mode the tool tells users about. JAB saw:\n{dump}"
+        f"the chord never reached the window on either attempt: the status field still reads "
+        f"{after!r}. Session {session_id} still resolves to {state.session(session_id)}, so "
+        f"this is not a stale window id: either send_keys does nothing, or the window never "
+        f"had focus -- and the second is the failure mode the tool tells users about. "
+        f"JAB saw:\n{dump}"
     )
