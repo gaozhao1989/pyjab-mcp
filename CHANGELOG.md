@@ -60,7 +60,8 @@ under **Unreleased** until it is tagged.
   ships one, `tools/check_pyjab_readiness.py` says READY and a `java_focus_window` tool is an
   hour of work.
 
-* **`pyjab-mcp` ships as an MCPB bundle, attached to every GitHub release.** The remaining
+* **`pyjab-mcp` ships as an MCPB bundle.** v0.1.0–v0.1.2 predate the bundle and carry no assets;
+  every release cut since carries one. The remaining
   distribution item was a file a user can install without a build step, and the packer is
   `tools/build_mcpb.py` rather than a `run:` block so that what it produces is pinned offline by
   `tests/test_packaging.py` — the version it declares is read from `pyjab_mcp.__version__` and
