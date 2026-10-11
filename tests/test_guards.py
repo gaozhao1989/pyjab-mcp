@@ -1628,6 +1628,30 @@ BUNDLE_RUN_STEPS = (
 #: them, and a leg that is missing is exactly how the `cp310` gap stayed invisible.
 BUNDLE_MINORS = ["3.10", "3.11", "3.12", "3.13"]
 
+#: A bundle-shaped zip whose entry script writes this marker and exits, for the pin that has to
+#: prove the test's *body* ran. Nothing about it speaks MCP, so the handshake fails -- which is
+#: the point: the marker is what says the failure came from the stub entry point rather than
+#: from something in the test above it.
+STUB_MARKER = "STUB ENTRY POINT RAN"
+STUB_ENTRY = (
+    "import sys\n"
+    f"sys.stderr.write({STUB_MARKER!r} + chr(10))\n"
+    "raise SystemExit(3)\n"
+)
+
+
+def minimal_bundle(path: Path) -> Path:
+    """A ``.mcpb`` with a manifest, a stub entry script, and a tree for *this* interpreter.
+
+    Enough for ``tests/test_mcpb_bundle.py`` to get past its member assertions and spawn the
+    script, which is all this fixture is for. The tree is empty: the stub never imports from it.
+    """
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("manifest.json", json.dumps({"manifest_version": "0.4"}))
+        archive.writestr(f"server/vendor/{bundle_test.interpreter_tag()}/", "")
+        archive.writestr("server/entry.py", STUB_ENTRY)
+    return path
+
 
 def ci_workflow() -> dict:
     """`.github/workflows/ci.yml`, parsed."""
@@ -1882,22 +1906,35 @@ def test_the_bundle_test_skips_only_without_the_variable_and_fails_on_a_broken_o
     assert bundle_test.BUNDLE_ENV in str(broken.value)
 
 
-def test_the_bundle_test_file_cannot_be_left_skipped_by_anything_else():
-    """Run the file the job runs, with the variable unset, and read *why* it skipped.
+def test_the_bundle_test_file_cannot_be_left_skipped_by_anything_else(tmp_path):
+    """Run the file the job runs, and read *why* it stopped -- three ways, not two.
 
-    The two pins above call one helper, and a helper can be bypassed above it: a
+    The pins above call one helper, and a helper can be bypassed above it: a
     `pytestmark = pytest.mark.skip(...)`, or a `skipif` decorator, leaves both of them passing
     and the job green with no bundle executed. Only running the file sees that, and the reason
     it prints is what distinguishes "no bundle here" from "somebody switched it off".
+
+    The third case exists because the first version of this pin had *two* and could not tell
+    two different worlds apart: `assert "1 failed" in stdout` is satisfied both by "the variable
+    is set and the bundle is absent" and by "the test itself is broken". That was measured the
+    expensive way -- the test called the sync tool-surface authority from inside its own running
+    event loop, all four `mcpb-runs` legs failed with
+    `RuntimeError: asyncio.run() cannot be called from a running event loop`, and this pin and
+    the whole suite were green. So the reasons are asserted, and a *real* minimal bundle is
+    handed over so the test's body -- unpack, members, the authority, the spawn -- runs here
+    rather than only on four Windows runners.
     """
     test_file = "tests/test_mcpb_bundle.py"
     environment = dict(os.environ)
     environment.pop(bundle_test.BUNDLE_ENV, None)
 
-    skipped = subprocess.run(
-        [sys.executable, "-m", "pytest", test_file, "-q", "-rs", "-p", "no:cacheprovider"],
-        cwd=REPO_ROOT, capture_output=True, text=True, env=environment, timeout=600,
-    )
+    def run():
+        return subprocess.run(
+            [sys.executable, "-m", "pytest", test_file, "-q", "-p", "no:cacheprovider"],
+            cwd=REPO_ROOT, capture_output=True, text=True, env=environment, timeout=600,
+        )
+
+    skipped = run()
     assert skipped.returncode == 0, (
         f"with {bundle_test.BUNDLE_ENV} unset the file has to skip, and it exited "
         f"{skipped.returncode}:\n{skipped.stdout[-2000:]}\n{skipped.stderr[-2000:]}"
@@ -1911,17 +1948,39 @@ def test_the_bundle_test_file_cannot_be_left_skipped_by_anything_else():
         "reporting green.\n" + skipped.stdout[-2000:]
     )
 
+    # Set, pointing nowhere: a failure, and the failure has to be *this* one. The reason is
+    # what separates it from a test that broke before it ever looked at the variable.
     environment[bundle_test.BUNDLE_ENV] = str(REPO_ROOT / "no-such-bundle.mcpb")
-    failed = subprocess.run(
-        [sys.executable, "-m", "pytest", test_file, "-q", "-p", "no:cacheprovider"],
-        cwd=REPO_ROOT, capture_output=True, text=True, env=environment, timeout=600,
-    )
-    assert failed.returncode != 0, (
+    absent = run()
+    output = absent.stdout + absent.stderr
+    assert absent.returncode != 0, (
         f"with {bundle_test.BUNDLE_ENV} set to a file that is not there, the file exited 0 -- "
-        "the same hole, one layer down:\n" + failed.stdout[-2000:]
+        "the same hole, one layer down:\n" + absent.stdout[-2000:]
     )
-    assert "1 failed" in failed.stdout, (
-        f"expected one failure rather than a skip or an error:\n{failed.stdout[-2000:]}"
+    assert "1 failed" in absent.stdout, (
+        f"expected one failure rather than a skip or an error:\n{absent.stdout[-2000:]}"
+    )
+    assert "matches 0 file(s)" in output, (
+        "the failure is not the bundle being absent: the message `bundle_path()` writes for "
+        "that case is missing, so something else failed first and this pin cannot tell the two "
+        "apart.\n" + output[-2000:]
+    )
+
+    # Set, pointing at a real (minimal) bundle: the test's *body* runs. Its entry script writes
+    # a marker and exits without speaking MCP, so the run still fails -- and the marker is what
+    # proves the body got as far as spawning it.
+    environment[bundle_test.BUNDLE_ENV] = str(minimal_bundle(tmp_path / "stub.mcpb"))
+    spawned = run()
+    output = spawned.stdout + spawned.stderr
+    assert spawned.returncode != 0, (
+        "a bundle whose entry point cannot start has to fail the test, and it exited "
+        f"0:\n{spawned.stdout[-2000:]}"
+    )
+    assert STUB_MARKER in output, (
+        "the stub entry point's marker is not in the output, so the test never spawned the "
+        "bundle's own server: the body failed before it got there. That is exactly how the "
+        "first version of `tests/test_mcpb_bundle.py` passed this pin while every CI leg was "
+        f"red.\n{output[-2000:]}"
     )
 
 

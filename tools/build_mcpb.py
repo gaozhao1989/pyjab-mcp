@@ -108,6 +108,16 @@ SERVER_DIR = "server"
 VENDOR_DIR = "server/vendor"
 ENTRY_IN_BUNDLE = "server/entry.py"
 
+#: The one file a ``pip install --target`` writes that records where the *build machine* kept
+#: the wheel: ``{"url": "file:///home/runner/work/<repo>/<repo>/dist/<wheel>"}``. Inert for
+#: imports, and still the builder's absolute path travelling inside an artifact a stranger
+#: installs -- one copy per vendored tree. Measured on a built bundle: four copies under
+#: ``pyjab_mcp-*.dist-info/``, and no other file in 6630 members carries a build-machine path.
+#: :func:`drop_build_machine_paths` removes it while a tree is staged, and
+#: :func:`staged_problems` refuses it so a build that stopped removing it fails rather than
+#: shipping the path.
+DIRECT_URL = "direct_url.json"
+
 #: The wheel platform this packer builds for, and the *only* one it will.
 #:
 #: Not a default that a flag may change: the manifest declares `"platforms": ["win32"]`, the
@@ -392,12 +402,14 @@ def check_manifest(document: Dict[str, object]) -> List[str]:
 
 
 def staged_problems(root: Path) -> List[str]:
-    """Why this staged tree must not be zipped: a local-only file, or a build artefact.
+    """Why this staged tree must not be zipped: a local-only file, a build artefact, or a path.
 
     The bundle is a thing a stranger installs. A maintainer note that only exists on this
     machine must never travel inside it, and neither must a ``__pycache__`` -- both are the
     same class of accident as publishing them in an sdist, and this is the artifact-level
-    check rather than the rules-level one.
+    check rather than the rules-level one. ``direct_url.json`` is the third form of the same
+    thing: it is not local-only and it is not bytecode, it is *this machine's directory*
+    written into a file the user receives.
     """
     problems: List[str] = []
     for path in sorted(root.rglob("*")):
@@ -414,6 +426,13 @@ def staged_problems(root: Path) -> List[str]:
             problems.append(
                 f"BUILD ARTEFACT IN THE BUNDLE: {relative}. Compiled bytecode is "
                 "platform- and version-locked, and it is not what was reviewed."
+            )
+        if path.is_file() and path.name == DIRECT_URL:
+            problems.append(
+                f"BUILD MACHINE PATH IN THE BUNDLE: {relative}. pip writes this to record the "
+                "local wheel it installed from, so it names a directory on whatever machine "
+                "built the bundle -- one copy per vendored tree. Staging a tree removes it; "
+                "this check is what says the removal ran."
             )
     return problems
 
@@ -837,6 +856,22 @@ def install_tree(target: Path, wheel: Path, version: str, platform: str,
         pip_install(target, version, platform, [wheel], offline=True)
 
 
+def drop_build_machine_paths(tree: Path) -> List[str]:
+    """Delete the ``direct_url.json`` files under *tree*, returning what was removed.
+
+    Not a tidy-up. The file is pip recording the path it installed the wheel *from*, so it
+    names a directory on the machine doing the build, and nothing reads it -- which is exactly
+    why it would go unnoticed in an artifact a stranger installs. :func:`staged_problems`
+    refuses it, and this is what makes a correct build able to pass that refusal.
+    """
+    removed: List[str] = []
+    for path in sorted(tree.rglob(DIRECT_URL)):
+        if path.is_file():
+            path.unlink()
+            removed.append(path.relative_to(tree).as_posix())
+    return removed
+
+
 def validate_with_mcpb(bundle: Path, run=subprocess.run) -> List[str]:
     """Check the *artifact* with Anthropic's CLI: the manifest inside it, and the archive.
 
@@ -984,11 +1019,14 @@ def build(
         if problems:
             raise SystemExit("INVALID MANIFEST:\n" + "\n".join(f"  {p}" for p in problems))
 
+        dropped: List[str] = []
         for minor in versions:
             tree = staging / VENDOR_DIR / interpreter_tag(minor)
             install_tree(tree, wheel, minor, platform, dependencies)
             if dependencies:
                 fill_closure(tree, minor, platform)
+            # After the fill, not before: anything pip installs from a local path records one.
+            dropped += drop_build_machine_paths(tree)
 
         problems = staged_problems(staging)
         if problems:
@@ -1001,6 +1039,14 @@ def build(
 
     if with_mcpb:
         print("\n".join(validate_with_mcpb(bundle)))
+
+    # Printed because it is a removal, and a removal nothing reports is a removal nobody can
+    # see in the log. `--skip-dependencies` still records one per tree: that install is a
+    # local wheel path too.
+    print(
+        f"  removed {len(dropped)} {DIRECT_URL} file(s) -- pip's record of the local wheel path, "
+        "which names this build machine and is not something the bundle may carry"
+    )
 
     size = bundle.stat().st_size / (1024 * 1024)
     print(f"  manifest.json  version {version}, from pyjab_mcp.__version__")

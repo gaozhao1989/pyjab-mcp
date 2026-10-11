@@ -112,10 +112,21 @@ under **Unreleased** until it is tagged.
   effect rather than by presence: the step's command, the variable it sets and the value, the
   artifact it downloads, all four matrix legs, the absence of an `if:` on the jobs or the step and
   of a `paths:` filter on the workflow, and the skip/fail boundary itself — proved by running the
-  test file with the variable unset and then with it pointing at a file that is not there. What
+  test file with the variable unset, then with it pointing at a file that is not there, and then
+  at a real minimal bundle so the test's *body* runs in the pin rather than only on a runner. What
   this proves is that the bundle **starts and answers `tools/list`** on Windows with a plain
   interpreter; it is not L3, it uses no JDK and no Java Access Bridge, and it exercises no tool
   call against a real window — `docs/RELEASING.md` says so where the release procedure is read.
+
+* **The bundle no longer ships the path of the machine that built it.** `pip install --target`
+  records the wheel's local path in a `direct_url.json` beside each installed distribution, so
+  every vendored tree carried a copy naming the builder's `dist/` directory — measured on a real
+  bundle: four files under `server/vendor/cp3XX/pyjab_mcp-<version>.dist-info/`, and no other
+  member in 6630 holds a build-machine path. Nothing imports it, which is exactly why it needed a
+  rule rather than an eye: staging a tree now removes it, `tools/build_mcpb.py` prints how many
+  it removed, and `staged_problems()` refuses the bundle if one is ever back — the same place
+  that already refuses a maintainer note and `__pycache__`. `tests/test_packaging.py` reads the
+  built archive for it, tests the removal, and tests the refusal.
 
 
 ## [0.1.2] - 2026-10-10
