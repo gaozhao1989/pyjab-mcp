@@ -71,9 +71,11 @@ from typing import Dict, List, NamedTuple, Optional, Sequence, Set
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # `packaging` is what evaluates a PEP 508 marker, and the closure check below cannot be written
-# without it. It is a declared dependency of `build` and `twine`, both of which are in
-# `[project.optional-dependencies].dev`, so the job that runs this script installs `".[dev]"`
-# rather than naming it a second time -- see the `mcpb` job in `.github/workflows/release.yml`.
+# without it. It is named in `[project.optional-dependencies].dev` **for its own sake** rather
+# than relied on as a dependency of `build` and `twine`: those two do carry it today, and the day
+# either stopped, this script would fail naming a missing module rather than a missing
+# declaration. The jobs that run it install `".[dev]"`, so that one line covers both -- see the
+# `mcpb` jobs in `.github/workflows/ci.yml` and `.github/workflows/release.yml`.
 # Asserting that here, rather than at the first use, is what makes "the check silently did not
 # run" impossible: a missing `packaging` is a refusal, not a skipped step.
 try:
