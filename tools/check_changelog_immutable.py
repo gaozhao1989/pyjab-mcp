@@ -29,6 +29,11 @@ Keeping it current
 Run it **after** tagging: `--record` reads the section out of the tag rather than the working
 copy, so what gets frozen is what shipped. It refuses a version with no tag, refuses one
 already recorded to a different value, and refuses a section it cannot find.
+
+Nothing here substitutes a different question for an input it cannot honour: `--record ""` is
+refused rather than read as "no `--record`" (the opposite operation, and a green one), and a
+record file that cannot be read is refused rather than reported as "0 sections recorded" and
+a pass -- which is the difference between "nothing is recorded" and "I could not read it".
 """
 
 from __future__ import annotations
@@ -77,7 +82,14 @@ def digest(section: str) -> str:
 
 def load_record() -> "dict[str, str]":
     if not RECORD.exists():
-        return {}
+        raise SystemExit(
+            f"FAILED: the changelog-immutability record {RECORD} is not there, so this "
+            "guard cannot tell 'no released section is recorded' from 'the record could not "
+            "be read'.\n"
+            "  With nothing to compare it would print 'released sections recorded: 0' and "
+            "PASSED, which turns the freeze off with a green exit. Restore it from git "
+            "before trusting a green run."
+        )
     return json.loads(RECORD.read_text(encoding="utf-8"))
 
 
@@ -168,7 +180,15 @@ def main(argv: "list[str] | None" = None) -> int:
         help="freeze the section for VERSION, read from its tag",
     )
     args = parser.parse_args(argv)
-    if args.record:
+    if args.record is not None:
+        if not args.record:
+            print(
+                "FAILED: --record was given an empty string, which names no release to "
+                "freeze.\n"
+                "  It used to read as falsy and run the plain check instead -- the "
+                "opposite\n  operation, and a green one."
+            )
+            return 1
         return record(args.record)
     return check()
 
