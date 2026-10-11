@@ -127,12 +127,15 @@ acknowledged:
       sees the collapse it was written against: for a record `as_record()` produced, the two
       states are already apart by the time that line runs. It stays as it is -- a mapping that did
       not come from `as_record()` (the L1 fake, a future caller) can still be partial, and
-      defaulting a partial record is what `Record.from_pyjab` documents. **No contract test was
-      added**, because there is no behaviour left to pin beyond the key presence the existing
-      `test_as_record_still_returns_the_fields_a_handle_verifies_against` already asserts; #58's
-      step 3 is to record the answer instead. One residual, stated plainly: if a future pyjab
-      ever *defaults* `children_count` to `0` inside `as_record()`, the collapse would come back
-      and nothing here would notice -- that would be a new marker, and this entry is where that
+      defaulting a partial record is what `Record.from_pyjab` documents. **A contract case was
+      added for the half a source reading can see**: `tests/contract/test_pyjab_contract.py` now
+      reads `as_record()`'s returned dict with `ast` and refuses any `children_count` value that is
+      not a bare attribute, so a future `self.children_count or 0` is caught on every platform and
+      on every pull request rather than at the next release. It says nothing about a live bridge --
+      that the property raises is read from the released source and recorded here, and no test in
+      this repository executes it. One residual, stated plainly: if a future pyjab ever *defaults*
+      `children_count` to `0` inside `as_record()`, the collapse would come back, that source check
+      is what would catch it, and a marker would come with it -- this entry is where the reasoning
       is written down.
 
   # Keyed by `line:<digest>` rather than a commit, because pyjab's marker for this change
