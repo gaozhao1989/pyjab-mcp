@@ -374,9 +374,9 @@ CHANGELOG_WITH_MARKERS = """\
 Changed
 ~~~~~~~
 
-* **A thing moved.** ``Affects: pyjab-mcp`` and it says why.
+* **Affects: pyjab-mcp** -- a thing moved, and it says why.
 
-* **A thing with a commit.** ``Affects: pyjab-mcp`` (a5dacfb)
+  **Affects: pyjab-mcp** -- a thing with a commit. (a5dacfb)
 
 Unreleased
 ----------
@@ -386,6 +386,48 @@ Added
 
 * **A note that mentions pyjab-mcp** without the marker word.
 """
+
+#: Verbatim from pyjab's ``CHANGELOG.rst``, in its released 1.11.0 section: a sentence about
+#: the marker convention, in the paragraph under the marker it points at.  ``guards`` went
+#: red on ``main`` because the check read this sentence as a marker of its own.
+PYJAB_SENTENCE_MENTIONING_THE_MARKER = (
+    "  could reach. **No separate ``Affects: pyjab-mcp`` marker is needed**: this is the same\n"
+    "  ``RuntimeError`` the entry above already marks, with a more specific message.\n"
+)
+
+
+def test_a_sentence_mentioning_the_marker_is_not_a_marker():
+    """The real regression, from pyjab's own changelog.
+
+    A marker begins the line; this sentence merely contains the phrase.  Against the
+    unanchored pattern this returned one marker, and one unacknowledged marker fails the
+    ``guards`` job.
+    """
+    assert changelog_guard.markers(PYJAB_SENTENCE_MENTIONING_THE_MARKER) == []
+
+
+def test_a_marker_and_a_sentence_about_it_are_told_apart():
+    """The pair as pyjab wrote it, so "no markers at all" cannot pass this.
+
+    The note above is a marker and the sentence below it is not, and the check has to say
+    exactly that: the sentence on its own cannot tell a fixed check from one that stopped
+    finding markers altogether.
+    """
+    text = (
+        "1.11.0 - 2026-10-11\n"
+        "-------------------\n"
+        "\n"
+        "  **Affects: pyjab-mcp**, first released in **1.11.0**. A JAB call that returns\n"
+        "  falsy now raises ``RuntimeError`` from inside the call.\n"
+        "\n"
+        "  could reach. **No separate ``Affects: pyjab-mcp`` marker is needed**: this is the\n"
+        "  same ``RuntimeError`` the entry above already marks.\n"
+    )
+
+    found = changelog_guard.markers(text)
+
+    assert len(found) == 1
+    assert found[0].line.startswith("**Affects: pyjab-mcp**")
 
 
 def test_the_changelog_guard_finds_markers_and_ignores_mentions():
@@ -425,8 +467,8 @@ def test_the_changelog_guard_catches_an_acknowledgement_whose_marker_has_gone():
 
 def test_reworded_marker_needs_a_new_answer():
     """The content-derived id is what makes that true rather than aspirational."""
-    first = changelog_guard.markers("* something. Affects: pyjab-mcp\n")[0]
-    second = changelog_guard.markers("* something else. Affects: pyjab-mcp\n")[0]
+    first = changelog_guard.markers("* **Affects: pyjab-mcp** and something.\n")[0]
+    second = changelog_guard.markers("* **Affects: pyjab-mcp** and something else.\n")[0]
 
     assert first.id != second.id
     assert changelog_guard.check([second], {first.id: "answered the old wording"})
