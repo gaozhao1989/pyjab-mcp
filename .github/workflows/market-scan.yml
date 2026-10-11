@@ -2,8 +2,8 @@ name: Market and feedback scan
 
 # The maintainer asked for a market and user-feedback scan **every two weeks**, as a work order for the
 # `market-researcher` role rather than a standing agent. This workflow is only the **reminder**: it
-# opens one issue, so the cadence is mechanical instead of remembered (AGENTS.md 8) and lands in the
-# one list this project reads before starting work (AGENTS.md 1b). The research itself is a work order
+# opens one issue, so the cadence is mechanical instead of remembered (a rule kept by hand is kept until someone is in a hurry) and lands in the
+# one list this project reads before starting work (the list this project reads before starting work). The research itself is a work order
 # for the market-researcher role in this project's local roster; `.github/market-scan-template.md` is
 # what the issue says, and it is self-contained on purpose -- this file ships in the sdist, so it must
 # not point a reader at a file they cannot open (tools/check_published_references.py enforces that).
