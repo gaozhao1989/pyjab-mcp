@@ -5,7 +5,7 @@ that a marker in somebody else's changelog is a judgement that can be forgotten 
 These tests are not: they assert the exact shapes the code here reads, so a change that
 breaks this project fails a job whether or not anyone wrote anything down.
 
-What is pinned, and why exactly these three:
+What is pinned, and why exactly these four:
 
 * **the walk** -- ``JABElement.walk`` returning something with a truncation flag, and
   yielding ``(depth, record)`` pairs. A snapshot that cannot tell "cut short" from "this is
@@ -13,6 +13,11 @@ What is pinned, and why exactly these three:
 * **the record fields** -- ``as_record()``'s keys. A handle stores them and checks them
   again later; a renamed field would silently make every handle unverifiable, or worse,
   verifiable against nothing.
+* **that ``children_count`` is not defaulted** -- ``Record.from_pyjab`` writes
+  ``int(raw.get("children_count") or 0)``, so a value pyjab defaulted reads as ``0`` and "the
+  property refused" collapses into "there are no children" (issue #58). The key-name check
+  above cannot see that: a defaulting *expression* keeps the key. This one reads the value,
+  with ``ast`` over the installed source, so it needs no bridge and runs on every platform.
 * **the message pump** -- that ``pump_messages`` exists on ``Win32Utils`` and is public.
   This is the thread-affinity rule that makes the whole executor legal, and it is a method
   name, which is exactly the kind of thing a refactor moves.
@@ -20,14 +25,18 @@ What is pinned, and why exactly these three:
 Nothing here needs Windows to *define*, but the imports do: ``pyjab.jabelement`` and
 ``pyjab.jabdriver`` raise ``ImportError`` off Windows by design, so off Windows these are
 skipped rather than passed. The scheduled `pyjab-drift` workflow runs them on
-``windows-latest`` against ``pyjab@master``, which is where they earn their place.
+``windows-latest`` against ``pyjab@master``, which is where they earn their place. The
+``children_count`` check below is the exception that proves the rule: it reads the installed
+source as text, so it runs in every leg of the default suite **and** in the drift job.
 """
 
 from __future__ import annotations
 
+import ast
 import importlib.metadata
 import inspect
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -137,6 +146,107 @@ def test_as_record_still_returns_the_fields_a_handle_verifies_against():
             f"as_record() no longer returns {field!r}, which tree.Record.from_pyjab reads "
             "and handles verify against"
         )
+
+
+#: A synthetic ``as_record`` whose ``children_count`` is **defaulted**.  It exists so the refusal
+#: below is exercised rather than assumed -- a check whose failure path has never run will not
+#: run the day it matters: without it, "the check can fail"
+#: is a claim about code nobody has ever made fail.
+_DEFAULTING_AS_RECORD = '''
+def as_record(self) -> dict:
+    return {
+        "role": self.role_en_us,
+        "children_count": self.children_count or 0,
+    }
+'''
+
+
+def _as_record_source() -> str:
+    """``JABElement.as_record``'s source text, read without importing the module it lives in.
+
+    ``pyjab.jabelement`` raises ``ImportError`` off Windows by design, so reaching this through
+    ``inspect.getsource`` would confine everything built on it to a Windows runner.  The file the
+    installed distribution ships is readable on every platform, and an AST does not care where
+    the text came from -- which is what lets this check run in all eight legs of the default
+    suite as well as in the weekly drift job.
+    """
+    import pyjab
+
+    path = Path(pyjab.__file__).parent / "jabelement.py"
+    assert path.is_file(), (
+        f"pyjab's jabelement.py is not at {path} (pyjab is installed at {pyjab.__file__}), so "
+        "the shape of JABElement.as_record() could not be read"
+    )
+    return path.read_text(encoding="utf-8")
+
+
+def _children_count_value(source: str) -> ast.expr:
+    """The expression ``as_record``'s returned dict maps ``"children_count"`` to.
+
+    Takes the source as a string rather than an element so its refusal can be driven from a
+    synthetic ``as_record`` -- mutating an installed third-party package to prove a test can
+    fail is how a mutation gets left behind.
+    """
+    functions = [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef) and node.name == "as_record"
+    ]
+    assert len(functions) == 1, (
+        f"expected exactly one ``as_record`` in the source read, found {len(functions)}. This "
+        "check reads its returned dict, so anything else has to be looked at rather than passed"
+    )
+
+    found = [
+        value
+        for node in ast.walk(functions[0])
+        if isinstance(node, ast.Return) and isinstance(node.value, ast.Dict)
+        for key, value in zip(node.value.keys, node.value.values)
+        if isinstance(key, ast.Constant) and key.value == "children_count"
+    ]
+    assert len(found) == 1, (
+        "expected exactly one 'children_count' entry in the dict(s) ``as_record`` returns, "
+        f"found {len(found)}. tree.Record.from_pyjab reads that entry and handles verify "
+        "against it, so a restructure here has to be looked at rather than passed"
+    )
+    return found[0]
+
+
+def _refuse_a_defaulting_children_count(source: str) -> None:
+    """Raise unless ``children_count`` is a bare attribute read, not a defaulted expression.
+
+    ``tree.Record.from_pyjab`` writes ``int(raw.get("children_count") or 0)``, so a value pyjab
+    had already defaulted would read as ``0`` and "the property refused" would collapse into
+    "there are no children" -- the collapse issue #58's trigger pre-registered.  In pyjab 1.11.0
+    the property raises ``JABException`` on a refused read, which is what keeps the two states
+    apart at run time; this is the half of that a source reading can see, and it is the half that
+    can execute before a release rather than after one.
+    """
+    node = _children_count_value(source)
+    if not isinstance(node, ast.Attribute):
+        raise AssertionError(
+            "as_record()'s 'children_count' value is now "
+            f"{ast.dump(node)} rather than a bare attribute read. A defaulting expression here "
+            "(``self.children_count or 0``, a conditional, a literal) makes a refused read "
+            "indistinguishable from 'no children' by the time tree.Record.from_pyjab sees it"
+        )
+
+
+def test_as_record_does_not_default_children_count_when_the_read_refuses():
+    """Issue #58, pinned without a bridge: the value is a pass-through, not a default.
+
+    The test above asserts the *name* is still in the source, and it would stay green if pyjab
+    wrote ``"children_count": self.children_count or 0`` -- which is exactly the collapse #58 was
+    filed about, since the reader here writes ``int(raw.get("children_count") or 0)``.  This reads
+    the value expression instead.
+    """
+    _refuse_a_defaulting_children_count(_as_record_source())
+
+
+def test_the_children_count_check_fails_on_a_defaulting_expression():
+    """The refusal above, exercised rather than assumed -- a check's failure path has to run."""
+    with pytest.raises(AssertionError, match="rather than a bare attribute read"):
+        _refuse_a_defaulting_children_count(_DEFAULTING_AS_RECORD)
 
 
 @windows_only
