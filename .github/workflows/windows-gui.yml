@@ -77,11 +77,13 @@ jobs:
           PYJAB_TEST_APP_SRC: ${{ github.workspace }}\app-src
         run: python -m pytest tests/e2e -v -s
 
-      - name: Upload the log
+      # Not a log: the log is the job's console output, which `-s` above puts the snapshot in.
+      # This uploads the application the failing run was driving, so the failure is reproducible.
+      - name: Upload the test application's source
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-log
+          name: e2e-app-src
           path: |
             app-src
           if-no-files-found: ignore

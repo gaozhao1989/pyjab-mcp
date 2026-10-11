@@ -1044,7 +1044,7 @@ def test_nothing_in_windows_gui_can_leave_the_run_green_without_running():
 
     None of those turns the *run* red. ``tools/check_release_l3.py`` reads the run's
     ``conclusion``, so a release gate that trusts it would accept a green run in which nothing
-    was driven -- which is the risk #30 is about. The only exemption is the log upload, whose
+    was driven -- which is the risk #30 is about. The only exemption is the artifact upload, whose
     ``if: always()`` exists so the evidence survives a failure.
 
     If a legitimate ``if:`` or ``continue-on-error`` is ever wanted elsewhere here, the answer is
@@ -1077,7 +1077,7 @@ def test_nothing_in_windows_gui_can_leave_the_run_green_without_running():
             ):
                 offenders.append(f"{where} is conditional: {step['if']}")
     assert offenders == [], (
-        "nothing in windows-gui.yml may be skippable or non-fatal except the log upload, whose "
+        "nothing in windows-gui.yml may be skippable or non-fatal except the artifact upload, whose "
         "`if: always()` is how the evidence survives a failure -- and this is a release gate, so "
         f"the constraint is deliberate: {offenders}"
     )
