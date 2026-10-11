@@ -55,6 +55,12 @@ dev = [
     # how pyjab's ci.yml and release.yml drifted and a release failed after its tag.
     "build>=1.2",
     "twine>=5.0",
+    # `tools/build_mcpb.py` evaluates PEP 508 markers with this, and that closure check is
+    # deliberately not optional (issue #36). It used to arrive only through `build` and `twine`
+    # above, so the day either stopped carrying it the packer would fail naming a missing module
+    # rather than the missing declaration. Named here for that reason, not because it is new --
+    # it is already installed by the two lines above (issue #41).
+    "packaging>=24",
     # `tools/check_pyjab_changelog.py` reads `acknowledged.yaml`, which is the record of
     # what was done about each pyjab change marked as affecting this project (AGENTS.md 1a).
     "PyYAML>=6.0",
