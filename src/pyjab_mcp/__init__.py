@@ -9,9 +9,9 @@ the machines that only ever run the test suite.
 Import it inside functions. ``pyjab/inspector.py`` in the parent project does the same and
 says why.
 
-``0.1.1`` is the current release: 15 tools that read and drive a Java desktop application
-through the JVM's own accessibility tree. See the README for what they are and what the
-substrate cannot reach.
+The package drives a Java desktop application through the JVM's own accessibility tree: 16
+tools that read and drive it. See the README for what they are and what the substrate cannot
+reach.
 """
 
 __version__ = "0.2.1"

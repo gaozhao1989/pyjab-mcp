@@ -253,6 +253,37 @@ def test_the_documented_surface_guard_catches_an_undocumented_module(tmp_path):
     assert any("UNDOCUMENTED MODULE" in problem for problem in problems)
 
 
+def test_the_documented_surface_guard_reads_a_release_mark_as_shipping(tmp_path):
+    """A tool that lands after the plan's milestones names the release, not a milestone.
+
+    It is still a claim that the tool is in the code now, so an unregistered one is a MISSING
+    TOOL -- which is what makes the release mark a mark rather than an escape from the check.
+    """
+    page = tmp_path / "ARCHITECTURE.md"
+    page.write_text(
+        MINIMAL_ARCHITECTURE.replace(
+            "| act | `java_click` | M7 |",
+            "| act | `java_click` | M7 |\n| act | `java_focus_window` | 0.3.0 — new tool |",
+        ),
+        encoding="utf-8",
+    )
+
+    shipped = docs_guard.check(
+        architecture=page, package=REPO_ROOT / "src" / "pyjab_mcp",
+        registered=["java_diagnostics", "java_list_windows", "java_attach_window",
+                    "java_snapshot", "java_screenshot", "java_focus_window"],
+    )
+    assert not any("java_focus_window" in problem for problem in shipped), shipped
+
+    unregistered = docs_guard.check(
+        architecture=page, package=REPO_ROOT / "src" / "pyjab_mcp",
+        registered=["java_diagnostics"],
+    )
+    assert any("MISSING TOOL: java_focus_window" in problem for problem in unregistered), (
+        "a release mark is not a way for a documented tool to be absent from the server"
+    )
+
+
 # ---------------------------------------------------------------------------------
 # tools/check_local_only_files.py
 # ---------------------------------------------------------------------------------

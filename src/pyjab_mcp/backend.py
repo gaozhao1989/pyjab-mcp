@@ -305,25 +305,31 @@ def _probe_foreground() -> Fact:
     """Whether an attached window can be brought to the foreground through public API.
 
     The candidate names are the shapes it could take, and pyjab 1.11.0 has
-    ``Win32Utils.set_window_foreground`` -- R5's answer, with ``JABDriver.focus()`` and
-    ``JABElement.focus()`` alongside it and returning whether the window came forward.  The
-    gap this project measured upstream as pyjab#180 is closed; when no candidate is found the
-    install is below the pin, and the fact names the release that has it.
+    ``JABDriver.focus()`` -- ``java_focus_window``'s call, with ``Win32Utils.set_window_foreground``
+    and ``JABElement.focus()`` alongside it -- each returning whether the window came forward.
+    The gap this project measured upstream as pyjab#180 is closed; when no candidate is found
+    the install is below the pin, and the fact names the release that has it.
     """
     name = "public way to bring a window to the foreground"
     try:
-        from pyjab.common.win32utils import Win32Utils  # noqa: PLC0415 - Windows only
         from pyjab.jabdriver import JABDriver  # noqa: PLC0415 - Windows only
+        from pyjab.common.win32utils import Win32Utils  # noqa: PLC0415 - Windows only
         from pyjab.jabelement import JABElement  # noqa: PLC0415 - Windows only
     except ImportError as exc:
         return Fact(name, UNKNOWN, f"cannot be imported here: {exc}")
+    # JABDriver.focus() first: it is the name the tool calls (focus_driver), so the row says
+    # what this server actually uses rather than a sibling with the same answer. The rest stay
+    # as the shapes the capability could take, because the probe is what makes a newer pyjab
+    # work without a change here.
     candidates = (
+        (JABDriver, "focus"),
         (Win32Utils, "set_window_foreground"),
         (Win32Utils, "bring_to_foreground"),
         (Win32Utils, "foreground_window"),
         (JABDriver, "bring_to_foreground"),
         (JABDriver, "set_foreground"),
         (JABDriver, "activate"),
+        (JABElement, "focus"),
         (JABElement, "bring_to_foreground"),
         (JABElement, "set_foreground"),
     )
@@ -415,6 +421,9 @@ class Backend(Protocol):
 
     def send_keys(self, window_id: str, keys: str) -> None:
         """Send a keyboard chord to whichever window has the keyboard focus."""
+
+    def focus(self, window_id: str) -> Any:
+        """Ask for the attached window to come forward; see :func:`focus_driver`."""
 
     def close(self) -> None:
         """Release what this backend holds, without touching the applications it observes."""
@@ -632,6 +641,15 @@ class PyjabBackend:
     def send_keys(self, window_id: str, keys: str) -> None:
         """Send a keyboard chord.  See :func:`send_keys_driver`."""
         return send_keys_driver(self._driver(window_id), keys)
+
+    def focus(self, window_id: str) -> Any:
+        """Bring the attached window forward.  See :func:`focus_driver`.
+
+        Returns pyjab's own answer, deliberately **not** coerced to a bool here: the tool
+        layer is where "came forward", "did not" and "pyjab answered something this server
+        does not understand" have to stay three answers rather than two.
+        """
+        return focus_driver(self._driver(window_id))
 
     def close(self) -> None:
         """Detach every bound window, releasing its JAB reference and leaving it running.
@@ -951,10 +969,11 @@ def send_keys_driver(driver: Any, keys: str) -> None:
     gets wrong:
 
     * **Nothing is focused and nothing is clicked.** The chord goes to whatever currently has
-      the keyboard focus, which is normally the attached window because attaching brought it
-      forward. pyjab's own note says why it is built that way: clicking a control to focus its
-      window would activate that control, and avoiding that is usually the whole point of a
-      shortcut.
+      the keyboard focus, and **attaching does not bring a window forward** (measured in
+      gaozhao1989/pyjab#180) -- so a caller that needs the chord to land calls
+      :func:`focus_driver` first and reads its answer. pyjab's own note says why pyjab does not
+      do it here: clicking a control to focus its window would activate that control, and
+      avoiding that is usually the whole point of a shortcut.
     * **An unknown key name raises ``ValueError``** rather than doing nothing. That is
       deliberate on pyjab's side -- a shortcut that silently does nothing, or sends the wrong
       key, acts on somebody else's application and cannot be taken back.
@@ -963,6 +982,35 @@ def send_keys_driver(driver: Any, keys: str) -> None:
     if send is None:
         raise PyjabApiGap(predates_the_pin("send_keys"))
     send(keys)
+
+
+def focus_driver(driver: Any) -> Any:
+    """Bring *driver*'s window forward and return pyjab's answer to whether it got there.
+
+    pyjab 1.11.0 released ``JABDriver.focus()`` (with ``JABElement.focus()`` and
+    ``Win32Utils.set_window_foreground()`` alongside it), which is what R5 was waiting on.
+    Before it the only route was the private ``_set_window_foreground``, which this project
+    does not import, and -- as measured in gaozhao1989/pyjab#180 -- **attaching does not
+    focus** while an interactive call does.
+
+    The **return value is the point**, and it is passed through rather than interpreted here:
+
+    * ``True`` -- the window is the foreground window afterwards;
+    * ``False`` -- it is not.  That is a normal answer and not an error: Windows refuses
+      foreground activation from a non-interactive session (a service, a scheduled task), and
+      pyjab returns the state it left behind rather than raising, because
+      ``SetForegroundWindow`` has no useful return of its own;
+    * anything else -- pyjab's answer is not a verdict, and the tool layer says so rather than
+      filing it under ``False``.  "I could not tell" is not "it did not come forward"
+      (§2.4), so the coercion to ``bool`` deliberately does not happen here.
+
+    Probed with ``getattr`` rather than imported, like every other pyjab capability: an
+    install below the pin is told which release has it instead of raising ``AttributeError``.
+    """
+    focus = getattr(driver, "focus", None)
+    if focus is None:
+        raise PyjabApiGap(predates_the_pin("bring_to_foreground"))
+    return focus()
 
 
 def screenshot_driver(driver: Any, *, locator: Optional[str] = None,

@@ -35,6 +35,7 @@ TOOL_ORDER = [
     "java_select",
     "java_fill_form",
     "java_send_keys",
+    "java_focus_window",
     "java_wait_for",
     "java_screenshot",
 ]
@@ -732,9 +733,10 @@ async def test_send_keys_sends_the_chord_when_pyjab_provides_the_api():
     assert result.is_error is False
     assert backend.keys_sent == ["alt+y"]
     text = await text_of(result)
-    assert "click something harmless" in text, (
-        "the focus semantics are the part a caller gets wrong, so the reply says what to do "
-        "about them rather than only that nothing was focused"
+    assert "java_focus_window" in text, (
+        "the focus semantics are the part a caller gets wrong, so the reply points at the tool "
+        "that can settle them rather than leaving the reader with a workaround that used to be "
+        "the only route"
     )
 
 
@@ -773,6 +775,79 @@ async def test_a_chord_the_installed_pyjab_does_not_recognise_is_an_input_error(
         "this is an argument problem, not an environment one, so the environment hint would "
         "send the reader the wrong way"
     )
+
+
+async def test_focus_reports_that_the_window_came_forward():
+    """The return value is the tool's whole point, so the first answer is the one it returns."""
+    server, state, backend, session_id, _handle = await acting_server(focus_result=True)
+
+    result = await server.call_tool("java_focus_window", {"session_id": session_id})
+
+    assert result.is_error is False
+    assert backend.focused == [state.session(session_id).window_id]
+    text = await text_of(result)
+    assert "is now the foreground window" in text, text
+
+
+async def test_focus_reports_that_the_window_did_not_come_forward():
+    """`False` is a result, not a failed call -- Windows refuses foreground from a service.
+
+    Reporting it as an error would be wrong twice over: nothing failed, and a model that reads
+    `is_error` would retry something no amount of retrying changes.
+    """
+    server, _state, _backend, session_id, _handle = await acting_server(focus_result=False)
+
+    result = await server.call_tool("java_focus_window", {"session_id": session_id})
+
+    assert result.is_error is False, "the window not coming forward is an answer, not a failure"
+    text = await text_of(result)
+    assert "did NOT" in text and "not the foreground window" in text, text
+    assert "normal answer" in text, "and why it is normal, so the reader does not retry"
+    assert "java_send_keys" in text, "and what it means for the chord that needs the focus"
+
+
+async def test_focus_does_not_file_an_unrecognised_answer_under_false():
+    """AGENTS §2.4: "I could not tell" is not the same measurement as "it did not come forward"."""
+    server, _state, _backend, session_id, _handle = await acting_server(focus_result=None)
+
+    result = await server.call_tool("java_focus_window", {"session_id": session_id})
+
+    assert result.is_error is False
+    text = await text_of(result)
+    assert "neither True nor False" in text, text
+    assert "cannot say" in text, text
+    assert "did NOT" not in text, (
+        "an answer that is not a bool must not be reported as the window refusing to come "
+        "forward -- that is the collapse this project's measurement rule exists to stop"
+    )
+
+
+async def test_focus_answers_with_the_release_when_the_api_is_absent():
+    """An older pyjab: the probe finds nothing, and the release it needs is the answer.
+
+    No workaround, deliberately: the whole point of the requirement record is that a missing
+    API is a reported state rather than a silent substitute.
+    """
+    server, _state, _backend, session_id, _handle = await acting_server(
+        focus_error=PyjabApiGap(predates_the_pin("bring_to_foreground")),
+    )
+
+    with pytest.raises(ToolError) as caught:
+        await server.call_tool("java_focus_window", {"session_id": session_id})
+
+    message = str(caught.value)
+    assert "1.11.0" in message, "the release that has the API, not just 'missing'"
+    assert "pip install -U pyjab" in message
+    assert "focus" in message, "and the name of what is missing"
+
+
+async def test_focus_needs_a_known_session():
+    server, _state, _backend, _session_id, _handle = await acting_server()
+
+    with pytest.raises(ToolError) as caught:
+        await server.call_tool("java_focus_window", {"session_id": "s:nope"})
+
+    assert "unknown session" in str(caught.value)
 
 
 async def test_an_unexpected_failure_still_tells_the_model_what_to_do():

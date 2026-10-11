@@ -271,7 +271,7 @@ def manifest(version: str, minors: Sequence[str]) -> Dict[str, object]:
       node-semver rejects the comma, while the host is a Node application. A range it mis-reads
       could refuse a correct install, so the requirement is stated in ``long_description`` (a
       manifest field) and pinned against the zip by ``tests/test_packaging.py`` instead;
-    * ``tools`` / ``prompts`` -- the surface is the 15 registered tools, which
+    * ``tools`` / ``prompts`` -- the surface is the registered tools, which
       `docs/ARCHITECTURE.md` is the record of; listing them a second time here is a second
       place for them to go stale.
     """

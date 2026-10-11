@@ -51,6 +51,8 @@ class FakeBackend:
         act_error: Optional[BaseException] = None,
         screenshots: Optional[Dict[Any, bytes]] = None,
         keys_error: Optional[BaseException] = None,
+        focus_result: Any = True,
+        focus_error: Optional[BaseException] = None,
     ) -> None:
         self.owner = threading.get_ident()
         self.windows = list(windows)
@@ -86,6 +88,12 @@ class FakeBackend:
         #: Every chord a tool call sent, in order.
         self.keys_sent: "list[str]" = []
         self.keys_error = keys_error
+        #: What the next ``focus()`` answers: ``True``, ``False``, or not a verdict.
+        self.focus_result = focus_result
+        self.focus_error = focus_error
+        self.focus_calls = 0
+        #: Every window id a tool asked to bring forward, in order.
+        self.focused: "list[str]" = []
 
     def bind(self, owner: int) -> "FakeBackend":
         """Declare which thread owns this backend.
@@ -213,6 +221,20 @@ class FakeBackend:
         self.keys_sent.append(keys)
         if self.keys_error is not None:
             raise self.keys_error
+
+    def focus(self, window_id: str) -> Any:
+        """The real backend's ``focus``: whatever pyjab answered, passed through.
+
+        ``focus_result`` is an argument rather than a constant because the tool layer has to
+        tell three answers apart -- came forward, did not, and pyjab said something that is not
+        a verdict -- and a fake that only ever said ``True`` could not show that.
+        """
+        self._check("focus")
+        self.focus_calls += 1
+        self.focused.append(window_id)
+        if self.focus_error is not None:
+            raise self.focus_error
+        return self.focus_result
 
     def close(self) -> None:
         self._check("close")

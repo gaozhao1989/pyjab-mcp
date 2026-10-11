@@ -1065,12 +1065,12 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
         to avoid exactly that.
 
         So if a call seems to do nothing, the window probably does not have focus — and
-        **attaching does not focus it** (measured in pyjab#180). pyjab 1.11.0 can bring a
-        window forward (`Win32Utils.set_window_foreground`, `JABDriver.focus()`), but this
-        server does not expose that as a tool yet — that is
-        [#57](https://github.com/gaozhao1989/pyjab-mcp/issues/57) — so today the way to give a
-        window focus is an interactive call: `java_click` something harmless in it, then send
-        the chord.
+        **attaching does not focus it** (measured in pyjab#180). Call
+        `java_focus_window(session_id=...)` first and read what it reports: it says whether the
+        window *came forward*, which is the fact this tool needs. (Before that tool existed
+        this reply said to click something harmless first; that workaround is gone from the
+        shipped text, because it activated whatever it landed on and went through a locator
+        that could have gone stale — which is the thing a shortcut exists to avoid.)
 
         Chords are written with `+` between key names and are case-insensitive:
         `ctrl`, `alt`, `shift`, `tab`, `enter`, `escape`, `spacebar`, the arrow keys, and
@@ -1117,12 +1117,86 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
             raise _tool_error(exc) from exc
         return (
             f"Sent {keys!r}. The chord goes to whichever window has the keyboard focus, and "
-            "nothing focused one for you: pyjab 1.11.0 can bring a window forward, but this "
-            "server does not expose that as a tool yet "
-            "(https://github.com/gaozhao1989/pyjab-mcp/issues/57), so if the application did "
-            "not react, click something harmless in it first — an interactive call is what "
-            "brings a window forward. Then check the result with java_get_text, "
-            "java_snapshot or java_wait_for."
+            "this call did not focus anything: attaching does not bring a window forward "
+            "(pyjab#180). If the application did not react, call java_focus_window first and "
+            "read what it reports — it says whether the window actually came forward, and a "
+            "chord sent while it did not may have gone to another window. Then check the "
+            "result with java_get_text, java_snapshot or java_wait_for."
+        )
+
+    @server.tool(
+        name="java_focus_window",
+        annotations=ToolAnnotations(destructive_hint=True, open_world_hint=True),
+    )
+    async def java_focus_window(session_id: str) -> str:
+        """Bring an attached window to the front, and report whether it actually came forward.
+
+        Use it before `java_send_keys`, whose chord goes to whichever window has the keyboard
+        focus: **attaching a window does not give it focus** (measured in pyjab#180), so a
+        shortcut can otherwise land somewhere else entirely.
+
+        **The reply is the point, not the action.** "I asked for focus" and "the window is now
+        in front" are two different facts, and this tool answers with the second one. It does so
+        by reading back the state pyjab left behind, because Windows' `SetForegroundWindow` has
+        no useful return of its own. So there are three answers, not two:
+
+        * the window **is** the foreground window now;
+        * it **is not** — a normal answer rather than a failure, because Windows refuses
+          foreground activation from a non-interactive session (a service, a scheduled task) and
+          no amount of retrying changes that. An error would be wrong here: nothing failed, and
+          the caller has a fact it can act on;
+        * pyjab answered something that is neither `True` nor `False`, so this server **cannot
+          say** — reported as such rather than filed under "did not come forward", because "I
+          could not tell" is not a measurement.
+
+        It is not free: **when the window is not already in front**, pyjab sends a space
+        keystroke first, which is what Windows' foreground-activation rules require of a process
+        that wants the foreground — and that keystroke goes to whatever currently has the focus.
+        A caller that cannot tolerate a stray keystroke elsewhere should not call this.
+
+        This needs pyjab 1.11.0, which released `JABDriver.focus()`. The call is probed rather
+        than assumed, like every pyjab capability here: an install below the pin is told which
+        release has it instead of raising an `AttributeError`.
+
+        Args:
+            session_id: From java_attach_window.
+
+        Returns:
+            Whether the window is now the foreground window, said plainly, with the next step.
+
+        Errors:
+            ``is_error`` only for an unknown session, or a pyjab below the pin — which names the
+            release that has the API. "It did not come forward" is a result, not an error.
+        """
+        try:
+            bridge = await state.started_bridge()
+            attached = state.session(session_id)
+            result = await bridge.call_backend("focus", attached.window_id)
+        except Exception as exc:  # noqa: BLE001
+            raise _tool_error(exc) from exc
+
+        where = f"hwnd={attached.hwnd} {attached.title!r}"
+        if result is True:
+            return (
+                f"{where} is now the foreground window. A java_send_keys chord goes to whichever "
+                "window has the keyboard focus, so it should land in this one."
+            )
+        if result is False:
+            return (
+                f"{where} was asked to come forward and it did NOT: it is not the foreground "
+                "window. That is a normal answer rather than a failed call — Windows refuses "
+                "foreground activation from a non-interactive session (a service or a scheduled "
+                "task), and no amount of retrying changes it. java_send_keys sends its chord to "
+                "whichever window does have the keyboard focus, so a chord may go elsewhere; the "
+                "accessibility-action tools (java_click, java_set_text, java_select without "
+                "simulate) do not need the window in front."
+            )
+        return (
+            f"{where} was asked to come forward, and pyjab's focus() answered {result!r} — which "
+            "is neither True nor False. This server cannot say whether the window came forward, "
+            "and will not report that as 'it did not'. Windows' SetForegroundWindow has no "
+            "useful return of its own, so pyjab reports the state left behind; an answer that is "
+            "not a bool is not that state. java_diagnostics reports which pyjab API was found."
         )
 
     # -----------------------------------------------------------------------------

@@ -136,6 +136,7 @@ is not, or registered without being documented.
 | observe | `java_get_table` | M4 |
 | act | `java_click`, `java_set_text`, `java_select`, `java_fill_form` | M5 |
 | act | `java_send_keys` | M5 — sends a chord where pyjab provides one, probed rather than assumed, and answers with requirement R4 where it does not |
+| act | `java_focus_window` | 0.3.0 — brings a window forward and reports whether it came forward, because "asked for focus" and "got focus" are two different facts (issue #57) |
 | wait | `java_wait_for` | M6 |
 | observe | `java_screenshot` | M6 |
 
@@ -145,9 +146,9 @@ platform bridge that does not carry that information.
 
 **Status.** M1 to M6 have shipped: `java_diagnostics`, `java_list_windows`,
 `java_attach_window`, `java_snapshot`, `java_find`, `java_get_element`, `java_get_text`,
-`java_get_table`, `java_click`, `java_set_text`, `java_select`, `java_fill_form`, and
-`java_send_keys` — which is registered so that asking for a shortcut gets the requirement it
-is waiting on rather than "no such tool".
+`java_get_table`, `java_click`, `java_set_text`, `java_select`, `java_fill_form`,
+`java_send_keys`, and `java_focus_window` — the last one after the plan's milestones, which is
+why its `ships` cell names the release rather than a milestone.
 
 Every action verifies first and acts on the element it verified, inside one element lifetime,
 so there is no window between the check and the action in which the tree could move. When the
@@ -172,11 +173,14 @@ listing comes from the bridge, with pyjab's documented `pyjab-inspect windows --
 the fallback for an install below the pin — and `JABDriver.detach()` releases a window
 **without terminating its process**, which is what lets a session end without killing the
 application it was observing. The last two, R4 and R5, were answered by pyjab 1.11.0:
-`JABDriver.send_keys` is the chord primitive `java_send_keys` needs, and
-`Win32Utils.set_window_foreground` is the public way to bring a window forward that R5 was
-waiting on. Both call sites still probe rather than assume, which is the same mechanism that
-made the window listing and `detach()` start working the day 1.10.0 landed: an install below
-the floor is told which release has the API instead of raising an `AttributeError`.
+`JABDriver.send_keys` is the chord primitive `java_send_keys` needs, and `JABDriver.focus()`
+(with `Win32Utils.set_window_foreground` alongside it) is the public way to bring a window
+forward that R5 was waiting on — which `java_focus_window` now uses, and whose **return value**
+it reports, because pyjab answers with whether the window *is* the foreground window rather
+than with whether the request was made. Both call sites still probe rather than assume, which is
+the same mechanism that made the window listing and `detach()` start working the day 1.10.0
+landed: an install below the floor is told which release has the API instead of raising an
+`AttributeError`.
 
 `java_snapshot` reads a bounded part of the tree — pyjab 1.9.0's `JABElement.walk`, which
 releases every JAB reference as it advances — and gives each rendered element a handle.

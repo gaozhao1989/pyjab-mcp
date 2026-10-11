@@ -17,17 +17,21 @@ which is what makes this usable against a production Java client that you cannot
 
 ## Status
 
-**Released on PyPI** — 15 tools: `java_diagnostics`, `java_list_windows`,
+**Released on PyPI** — 16 tools: `java_diagnostics`, `java_list_windows`,
 `java_attach_window`, `java_snapshot`, `java_find`, `java_get_element`, `java_get_text`,
 `java_get_table`, `java_click`, `java_set_text`, `java_select`, `java_fill_form`,
-`java_wait_for`, `java_screenshot`, and `java_send_keys`. It needs `pyjab>=1.11.0`: 1.9.0
-brought the tree walk a snapshot is built on, 1.10.0 brought the public window listing and
-`JABDriver.detach()`, which is what lets a session end without terminating the application,
-and 1.11.0 brought `JABDriver.send_keys`, so `java_send_keys` sends a real chord.
+`java_send_keys`, `java_focus_window`, `java_wait_for`, and `java_screenshot`. It needs
+`pyjab>=1.11.0`: 1.9.0 brought the tree walk a snapshot is built on, 1.10.0 brought the public
+window listing and `JABDriver.detach()`, which is what lets a session end without terminating
+the application, and 1.11.0 brought `JABDriver.send_keys`, so `java_send_keys` sends a real
+chord, and `JABDriver.focus()`, so `java_focus_window` can bring a window forward.
 
-`java_send_keys` sends a chord to whichever window has the keyboard focus. It probes for the
-API rather than assuming it, so an install below the pin is told which release has it instead
-of failing with an `AttributeError`.
+`java_send_keys` sends a chord to whichever window has the keyboard focus, and **attaching does
+not give a window focus** ([pyjab#180](https://github.com/gaozhao1989/pyjab/issues/180)).
+`java_focus_window` is the missing half: it brings the window forward and, because *asked for
+focus* and *got focus* are different facts, it reports **whether the window actually came
+forward** rather than assuming it did. It probes for the API rather than assuming it, so an
+install below the pin is told which release has it instead of failing with an `AttributeError`.
 
 **Two elements can share a name**, which is why a handle carries where an element *is* as well as
 what it is called: searching by name returns every match, each gets its own handle, and the
@@ -53,10 +57,10 @@ It needs `pyjab>=1.11.0`, which brought the APIs this project spent M1 and M2 wa
 `list_java_windows()`, so the window list comes from the bridge directly rather than through
 pyjab's CLI; `JABDriver.detach()`, so a session can be released **without terminating the
 application** — the only teardown before it killed the bound process; and, in 1.11.0,
-`JABDriver.send_keys()`, so `java_send_keys` sends a real chord. The same release made
-`Win32Utils.set_window_foreground()` public; this server has no `java_focus_window` tool yet
-([#57](https://github.com/gaozhao1989/pyjab-mcp/issues/57)), so `java_send_keys` still says to
-click something harmless when the window has not got the focus.
+`JABDriver.send_keys()`, so `java_send_keys` sends a real chord, and `JABDriver.focus()`, which
+`java_focus_window` uses to bring a window forward and report whether it came forward. That
+return value is why the tool exists at all: what a caller needs to know before sending a chord
+is where the keyboard focus actually is, not that focus was requested.
 
 A handle from `java_snapshot` is a position, not a reference. A later call re-finds the
 element and checks its role, name, position and bounds before doing anything, so a window
