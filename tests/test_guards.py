@@ -2218,3 +2218,104 @@ def test_an_unreleased_changelog_section_is_checked(tmp_path, monkeypatch):
     problems = references_guard.check(root)
 
     assert problems and "CHANGELOG.md" in problems[0]
+
+
+def test_a_shipped_file_citing_a_local_only_file_by_relative_name_is_a_problem(
+    tmp_path, monkeypatch
+):
+    """The #38 shape: a relative path with no `.agents/` prefix, which name matching misses.
+
+    This is the case `tools/build_mcpb.py` went through -- it cited `references/manifest-schema.md`
+    while that file existed only under `.agents/skills/build-mcpb/`, and the guard stayed green.
+    """
+    root = reference_tree(tmp_path, monkeypatch, {
+        "tools/build_mcpb.py": '"""See references/manifest-schema.md for the fields."""\n',
+        ".agents/skills/build-mcpb/references/manifest-schema.md": "# the local copy\n",
+    })
+
+    problems = references_guard.check(root)
+
+    assert problems, "a relative citation of a local-only file is the same failure"
+    assert "tools/build_mcpb.py" in problems[0]
+    assert "references/manifest-schema.md" in problems[0]
+
+
+def test_a_relative_name_is_fine_when_a_shipped_file_of_that_name_exists(
+    tmp_path, monkeypatch
+):
+    """The false-positive guard, and the case that decides whether this rule is usable.
+
+    A reader who can open the file has not been sent to nothing. An implementation that
+    reports the citation anyway would complain about every path that happens to have a copy
+    under `.agents/`, and a guard that cries wolf gets switched off.
+    """
+    root = reference_tree(tmp_path, monkeypatch, {
+        "tools/build_mcpb.py": "See references/manifest-schema.md for the fields.\n",
+        "references/manifest-schema.md": "# the shipped copy\n",
+        ".agents/skills/build-mcpb/references/manifest-schema.md": "# the local copy\n",
+    })
+
+    assert references_guard.check(root) == []
+
+
+def test_a_relative_name_that_resolves_to_a_shipped_file_is_fine(tmp_path, monkeypatch):
+    """A citation of a file the reader can open, anywhere in the tree, is not a complaint."""
+    root = reference_tree(tmp_path, monkeypatch, {
+        "README.md": "Start with src/pyjab_mcp/server.py, then docs/CLIENTS.md.\n",
+        "src/pyjab_mcp/server.py": "# the server\n",
+        "docs/CLIENTS.md": "# the clients\n",
+    })
+
+    assert references_guard.check(root) == []
+
+
+def test_a_bare_filename_does_not_name_a_location_so_it_is_not_flagged(
+    tmp_path, monkeypatch
+):
+    """`manifest-schema.md` alone could be anywhere, including beside the reader.
+
+    Resolution needs a directory component; without one there is nothing to resolve. This is
+    deliberate, not an oversight: flagging every filename that also exists under `.agents/`
+    would fire on ordinary prose.
+    """
+    root = reference_tree(tmp_path, monkeypatch, {
+        "tools/build_mcpb.py": '"""The fields the manifest accepts are in manifest-schema.md."""\n',
+        ".agents/skills/build-mcpb/references/manifest-schema.md": "# the local copy\n",
+    })
+
+    assert references_guard.check(root) == []
+
+
+def test_a_citation_inside_a_code_fence_is_still_read_by_a_reader(
+    tmp_path, monkeypatch
+):
+    """A fence is not an exemption: whoever copies the path out of it still cannot open it."""
+    root = reference_tree(tmp_path, monkeypatch, {
+        "docs/CLIENTS.md": "```\nreferences/manifest-schema.md\n```\n",
+        ".agents/skills/build-mcpb/references/manifest-schema.md": "# the local copy\n",
+    })
+
+    problems = references_guard.check(root)
+
+    assert problems and "references/manifest-schema.md" in problems[0]
+
+
+def test_a_leading_parent_does_not_hide_the_citation(tmp_path, monkeypatch):
+    """`../references/x.md` is the same citation with a prefix, so the prefix is dropped."""
+    root = reference_tree(tmp_path, monkeypatch, {
+        "tools/build_mcpb.py": '"""See ../references/manifest-schema.md."""\n',
+        ".agents/skills/build-mcpb/references/manifest-schema.md": "# the local copy\n",
+    })
+
+    problems = references_guard.check(root)
+
+    assert problems and "references/manifest-schema.md" in problems[0]
+
+
+def test_no_shipped_file_in_this_repository_cites_a_local_only_path():
+    """The rule on this tree, where the maintainer notes exist to be resolved against.
+
+    In CI the local-only files are absent (they are gitignored), so this passes by vacuity
+    there; on a machine that has them it is the check that a new rule has no false positives.
+    """
+    assert references_guard.check(REPO_ROOT) == []

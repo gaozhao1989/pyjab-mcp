@@ -17,6 +17,29 @@ The rule this makes mechanical:
     A file that ships may state a rule, explain a decision, or link to a public document.
     It may not cite a local-only file as somewhere to read more.
 
+The rule is about what the reader can open, not about how the path is spelled, and matching the
+local-only paths by name was not enough. A shipped `tools/build_mcpb.py` cited
+`references/manifest-schema.md`, which exists **only** inside the local skill tree -- no
+`.agents/` prefix, so name matching stayed green while the reader was sent to a file they
+cannot open. So every path-like citation is also *resolved*: a token with a directory component
+that suffix-matches a file in this tree is a problem **when every file it matches is
+local-only**. If a shipped file of that name exists, the reader can open that one and there is
+nothing to report -- which is what keeps the rule from firing on `docs/CLIENTS.md`.
+
+Three shapes are deliberately not flagged, because none of them names a location in this tree:
+
+* a **bare filename** (`manifest-schema.md`, `SKILL.md`) -- with no directory there is nothing
+  to resolve, and flagging every filename that happens to exist under `.agents/` would make the
+  rule unusable;
+* a **directory** (`references/`) -- resolution is to a file, and a directory is not one;
+* a **URL** -- the host is part of the token, so a link can never suffix-match a path here. A
+  link to a public document is what the rule asks for.
+
+A leading `./` or `../` is dropped before resolving, because `../references/x.md` is still a
+citation of a file the reader cannot open. A citation inside a fenced code block is not special
+either: a reader still reads it. What makes the difference is whether it resolves, not how it
+is written.
+
 Two kinds of exemption, both because the rule would otherwise forbid the mechanism that keeps
 the rule:
 
@@ -76,6 +99,11 @@ EXEMPT = frozenset({
 #: is about what a reader who has *only* the repository or *only* the sdist can open.
 NOT_SHIPPED = tuple(name.rstrip("/") for name in LOCAL_ONLY)
 
+#: A path-like citation: a directory component, then a dotted filename. The directory is
+#: required on purpose, and the dotted filename is too -- see the module docstring on bare
+#: filenames and directories.
+RELATIVE_CITATION = re.compile(r"[\w.\-]+/[\w.\-/]*\.[A-Za-z0-9]+")
+
 
 def files_to_check(root: Path = REPO_ROOT) -> "List[Path]":
     """Every shipped file that carries prose, minus the build output and the exemptions."""
@@ -94,13 +122,62 @@ def files_to_check(root: Path = REPO_ROOT) -> "List[Path]":
 
 
 def references(text: str) -> "List[Tuple[int, str]]":
-    """``(line number, the local-only path named)`` for each mention in *text*."""
+    """``(line number, the local-only path named)`` for each mention in *text*.
+
+    This is the spelling half: a path is named in full, as `AGENTS.md` or `.agents/skills/x`.
+    The resolving half is `relative_references`.
+    """
     names = [name.rstrip("/") for name in LOCAL_ONLY if name != ".agents/"] + [".agents"]
     pattern = re.compile("|".join(re.escape(name) for name in names))
     found = []
     for number, line in enumerate(text.splitlines(), start=1):
         for match in pattern.finditer(line):
             found.append((number, match.group(0)))
+    return found
+
+
+def repository_files(root: Path = REPO_ROOT) -> "List[str]":
+    """Every file under *root* as a relative POSIX path, build output excluded.
+
+    The local-only files are the point of being here: resolving a citation means asking what
+    the citation *could* mean in this tree, which is exactly the content that is not shipped.
+    """
+    found: "List[str]" = []
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        if any(part in SKIP_DIRS or part.endswith(".egg-info") for part in path.parts):
+            continue
+        found.append(path.relative_to(root).as_posix())
+    return found
+
+
+def is_local_only(relative: str) -> bool:
+    """True when *relative* is one of the paths that are deliberately kept local."""
+    return any(
+        relative == name or relative.startswith(name + "/") for name in NOT_SHIPPED
+    )
+
+
+def relative_references(
+    text: str, index: "Sequence[str]"
+) -> "List[Tuple[int, str]]":
+    """``(line number, the relative path cited)`` for each citation that resolves only local.
+
+    A citation resolves to a local-only file when some path in *index* ends with it **and**
+    every path that ends with it is under a local-only directory. The second half is what keeps
+    the rule honest: when a shipped file of that name exists, the reader can open it, and a
+    complaint would be a false positive -- and a guard with false positives gets switched off.
+    """
+    found: "List[Tuple[int, str]]" = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        for match in RELATIVE_CITATION.finditer(line):
+            cited = re.sub(r"^(?:\.\.?/)+", "", match.group(0))
+            resolved = [
+                path for path in index if path == cited or path.endswith("/" + cited)
+            ]
+            if resolved and all(is_local_only(path) for path in resolved):
+                found.append((number, cited))
     return found
 
 
@@ -134,12 +211,14 @@ def fresh_changelog_text(root: Path) -> str:
 def check(root: Path = REPO_ROOT) -> "List[str]":
     """Return one complaint per shipped file that points at a local-only path."""
     problems: "List[str]" = []
+    index = repository_files(root)
     for path in files_to_check(root):
         text = path.read_text(encoding="utf-8", errors="replace")
         if path.name == "CHANGELOG.md":
             text = fresh_changelog_text(root)
-        hits = references(text)
+        hits = references(text) + relative_references(text, index)
         if hits:
+            hits.sort(key=lambda hit: hit[0])
             relative = path.relative_to(root).as_posix()
             where = ", ".join(f"line {number} ({name})" for number, name in hits[:4])
             more = "" if len(hits) <= 4 else f", and {len(hits) - 4} more"
@@ -161,6 +240,8 @@ def main(argv: "List[str] | None" = None) -> int:
             "\n  A reader of the GitHub repository or of an installed sdist has never seen\n"
             f"  {', '.join(LOCAL_ONLY)}. State the rule where it is needed, or link to a\n"
             "  public document or issue -- do not cite a file they cannot open.\n"
+            "\n  A relative path that resolves only inside one of them (a `references/x.md`\n"
+            "  that exists only under `.agents/`) is the same failure in a different shape.\n"
             "\n  Files whose job is to name these paths (.gitignore, MANIFEST.in,\n"
             "  pyproject.toml, tools/check_local_only_files.py, tests/test_guards.py) are\n"
             "  exempt, and so are changelog sections whose hashes are already pinned."
@@ -168,7 +249,8 @@ def main(argv: "List[str] | None" = None) -> int:
         return 1
 
     print(
-        f"PASSED: no shipped file cites one of the {len(LOCAL_ONLY)} local-only path(s)."
+        f"PASSED: no shipped file cites one of the {len(LOCAL_ONLY)} local-only path(s), "
+        "by name or by a relative name that resolves only inside one."
     )
     return 0
 
