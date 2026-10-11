@@ -8,6 +8,19 @@ under **Unreleased** until it is tagged.
 
 ## Unreleased
 
+Nothing yet.
+
+## [0.3.0] - 2026-10-12
+
+**A release about the gap between what this project says and what it can show.** Eight changes, of
+which two change what happens when the server runs: attaching to the same window twice no longer
+retires a session that named it, and a new tool answers a question this server used to work around.
+The other six are corrections to what the repository says about itself -- a capability claim a
+measurement had already refuted, four guards that answered a different question than the one they were
+asked, a question about pyjab's data that had been pre-registered for the release that would answer it,
+an artifact named after a file it does not hold, a constraint stated without its reason, and a guard
+that reported PASSED for the half of itself it had never run.
+
 **A batch about the gap between what this project says and what it can show.** Seven changes. Two
 of them change what happens when the server runs: attaching to the same window twice no longer
 retires a session that named it, and a new tool answers a question this server used to work
@@ -38,6 +51,14 @@ and would have found false.
   (issue #57)
 
 ### Fixed
+
+* **`check_local_only_files` refuses a tree where git cannot be asked, instead of printing PASSED.**
+  The guard reported "every one is ignored by git and excluded from the sdist" in a tree where
+  `git check-ignore` had never run: `_git_ignores()` returns `None` when git is unavailable, and its
+  caller only complained on `False`. Worse, it also asked git only when the path existed on disk, and
+  git answers fine for a path that is not there -- so in every fresh worktree, and in every CI
+  checkout, where none of the five local-only paths exist, the call was skipped and the pass was
+  vacuous. Both are now refusals that name the half that did not run. (issue #84)
 
 * **The README and the server's instructions no longer claim JavaFX.** Three shipped places said
   this server reaches JavaFX — the README's summary line, its "It works on" paragraph, and the
