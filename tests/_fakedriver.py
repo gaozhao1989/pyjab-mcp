@@ -25,6 +25,8 @@ accounting still lives on the driver, which is the bridge in this picture.
 
 from __future__ import annotations
 
+import sys
+import types
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 
@@ -370,3 +372,35 @@ class FakeDriver:
         tree = FakeTree(items, limit=self._walk_limit)
         self.trees.append(tree)
         return tree
+
+
+def install_fake_jabdriver(monkeypatch: Any) -> "List[FakeDriver]":
+    """Stand in for the ``pyjab.jabdriver`` module, and return the drivers built through it.
+
+    ``PyjabBackend.attach`` does ``from pyjab.jabdriver import JABDriver`` inside the call, and
+    that module raises pyjab's descriptive ``ImportError`` off Windows -- so a test that wants
+    the *real* ``attach`` rather than a whole fake backend has to put a module in its place.
+    The class planted there is a :class:`FakeDriver` carrying the three attributes ``attach``
+    reads off a freshly bound driver -- ``hwnd``, ``title`` and ``pid`` -- and every instance
+    is appended to the returned list, because "the earlier binding was released" can only be
+    asserted against the instances: ``PyjabBackend`` never hands one out.
+
+    ``monkeypatch`` restores ``sys.modules`` afterwards, so the stub cannot leak into another
+    test -- which also means a bridge thread must not still be using it when the test ends.
+    """
+    instances: "List[FakeDriver]" = []
+
+    class JABDriver(FakeDriver):
+        """Whatever ``attach`` passes, plus the three attributes it then reads off it."""
+
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(items=[(0, record("push button", "OK"))])
+            self.hwnd = int(kwargs.get("hwnd") or 0x10001)
+            self.title = str(kwargs.get("title") or "Test Application")
+            self.pid = 4242
+            instances.append(self)
+
+    module = types.ModuleType("pyjab.jabdriver")
+    module.JABDriver = JABDriver
+    monkeypatch.setitem(sys.modules, "pyjab.jabdriver", module)
+    return instances

@@ -280,6 +280,40 @@ def test_the_walk_fact_is_unknown_rather_than_missing_off_windows():
         assert "cannot be imported here" in fact.detail
 
 
+def test_attaching_the_same_window_twice_reuses_the_id_the_first_session_holds(monkeypatch):
+    """#71: the window id belongs to the caller, so a re-attach must not retire it.
+
+    ``attach`` releases the earlier binding for the same ``hwnd`` on purpose -- one JAB context
+    per window -- but it used to issue a fresh id as well, and the session that named the old
+    one was then a session that could never work again: every later call on it answered
+    ``window 'w1' is not attached``.  The id is reused instead, so attach-twice is idempotent
+    for the id a caller holds, and the release stays inside the backend.
+    """
+    from tests._fakedriver import install_fake_jabdriver
+
+    drivers = install_fake_jabdriver(monkeypatch)
+    backend = PyjabBackend()
+
+    first = backend.attach(hwnd=0x10001)
+    again = backend.attach(hwnd=0x10001)
+
+    assert again.window_id == first.window_id, (
+        "a caller holds the window id; re-attaching the same window must not issue a new one"
+    )
+    assert len(drivers) == 2 and drivers[0].detached is True, (
+        "and the earlier binding is still released -- one JAB context per window, done inside "
+        "the backend where the caller cannot see it"
+    )
+    # What a session does with the id it holds still reaches a *bound* driver.
+    backend.send_keys(first.window_id, "alt+y")
+    assert drivers[-1].keys_sent == ["alt+y"]
+
+    other = backend.attach(hwnd=0x10002)
+    assert other.window_id != first.window_id, (
+        "a different window is a different binding, and still gets its own id"
+    )
+
+
 def test_detaching_releases_the_window_and_leaves_the_process_alone():
     """R2's answer, and the reason `close()` no longer just clears a dict."""
     from tests._fakedriver import FakeDriver
