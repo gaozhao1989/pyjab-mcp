@@ -15,6 +15,21 @@ mcp-name: io.github.gaozhao1989/pyjab-mcp
 the point: launch parameters, classpaths and dependency JARs stay exactly as they are,
 which is what makes this usable against a production Java client that you cannot change.
 
+**The alternative is to put an agent inside the target JVM.** An agent is attached to a JVM
+that is already running, or named on the command line with `-javaagent` when the application
+starts, and either way the tool's code sits inside someone else's process — a JVM it did not
+launch and does not control. This server does neither: it loads nothing into the application
+and reads the accessibility tree through Java Access Bridge from outside it, which is how it
+can attach to a process it did not launch.
+
+The dynamic half of that — attaching an agent to a JVM that is already running — is the half
+the JDK has a direction on, with no release date attached.
+[JEP 451](https://openjdk.org/jeps/451) shipped in JDK 21 as the preparation stage: loading an
+agent into an already-running JVM now warns. The JEP states its aim as *"prepare users for a
+future release which disallows the dynamic loading of agents by default"*, a release that has
+not been named; its own non-goals leave agents named with `-javaagent` at startup, and any use
+of the Attach API that is not loading an agent, outside that direction.
+
 ## Status
 
 **Released on PyPI** — 15 tools: `java_diagnostics`, `java_list_windows`,
