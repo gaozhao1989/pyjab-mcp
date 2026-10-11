@@ -257,10 +257,11 @@ artifact and attaches nothing, which is how the bundle is checked *before* a tag
 handshake through the bundle's own `server/entry.py` with the interpreter of the leg, so each
 vendored `server/vendor/cp3XX` tree is imported rather than listed. It is part of default CI, so it
 runs before a merge. **It is not L3 and it does not replace it**: there is no JDK, no Java Access
-Bridge and no Java application in it, so what it proves is that the bundle *starts and answers
-`tools/list`* on Windows with a plain interpreter — it proves nothing about a live window and it
-exercises no tool call against one. That remains `windows-gui.yml`'s job, and the pipeline still
-requires a green run of it on the tagged commit.
+Bridge and no Java application in it, so what it proves is that the bundle *starts, answers
+`tools/list` and answers one tool call* — `java_diagnostics`, the one tool that needs no
+window — on Windows with a plain interpreter. It proves nothing about a live window: no Java
+tool is called and no window is driven. That remains `windows-gui.yml`'s job, and the pipeline
+still requires a green run of it on the tagged commit.
 
 ## After the tag
 

@@ -23,9 +23,11 @@ would then import the host's copy and pass -- a green job over the exact defect 
 exists to catch. A `.mcpb` is also installable on a machine with no package manager, which is
 the claim being measured, so "nothing installed" is the right environment to measure it in.
 
-**What this does not prove.** The server starts and answers ``tools/list`` on Windows with a
-plain interpreter -- no JDK, no Java Access Bridge, no Java application, and no tool call
-against a real window. That is L3 and only L3 (``.github/workflows/windows-gui.yml``).
+**What this does not prove.** The server starts, answers ``tools/list`` and answers **one tool
+call** -- ``java_diagnostics``, which reports the environment and so needs no window -- on
+Windows with a plain interpreter. There is still no JDK, no Java Access Bridge, no Java
+application, and **no tool call against a real window**: that is L3 and only L3
+(``.github/workflows/windows-gui.yml``).
 
 The bundle under test comes from ``PYJAB_MCP_BUNDLE``, which only the ``mcpb-runs`` job in
 ``.github/workflows/ci.yml`` sets. Unset means **skipped**, so the default suite on a machine
@@ -149,6 +151,11 @@ def expected_tools() -> "list[str]":
 async def handshake(entry: Path, cwd: Path) -> "list[str]":
     """One real MCP session over the bundle's own entry script: the tool names it answers with.
 
+    It also makes **one tool call**, because ``initialize()`` plus ``tools/list`` cannot tell a
+    bundle that runs from one that starts, lists its tools and then dies on the first request
+    (issue #47). ``java_diagnostics`` is the one tool callable here: it reports the environment,
+    so it needs no window, no JDK and no bridge and answers on a runner with no desktop.
+
     The mechanism is ``tests/test_stdio_server.py``'s -- ``stdio_client`` and ``ClientSession``,
     no hand-rolled framing -- pointed at the unpacked ``server/entry.py`` instead of the console
     script.
@@ -168,11 +175,31 @@ async def handshake(entry: Path, cwd: Path) -> "list[str]":
             )
 
             tools = await session.list_tools()
-            return [tool.name for tool in tools.tools]
+            names = [tool.name for tool in tools.tools]
+
+            # A tool call over the wire, not just `tools/list`: without it a bundle that
+            # started, listed every tool and then died on its first request passed this test
+            # (issue #47). `java_diagnostics` is the callable one here -- it needs no window,
+            # no JDK and no bridge. **L2**: this proves the tool body runs and its report
+            # crosses the wire. It says nothing about a live application, because no Java tool
+            # is called and no window is driven. That is L3
+            # (`.github/workflows/windows-gui.yml`).
+            called = await session.call_tool("java_diagnostics", {})
+            assert called.is_error is False, (
+                "the bundle answered initialize() and tools/list, then failed its first tool "
+                f"call (java_diagnostics): {called.content}"
+            )
+            # Not merely "no error came back": the report's own first line is what shows the
+            # tool body ran and its answer reached the client rather than an empty success.
+            report = called.content[0].text
+            assert "pyjab-mcp environment diagnostics" in report, (
+                f"java_diagnostics answered without its report: {report!r}"
+            )
+            return names
 
 
 def test_the_bundled_entry_script_answers_a_real_mcp_handshake():
-    """The handshake, the server name and the tool count -- through ``server/entry.py``."""
+    """The handshake, the server name, the tool count and one tool call -- through the bundle."""
     bundle = bundle_path()
     expected = expected_tools()
     root = Path(tempfile.mkdtemp(prefix="pyjab-mcpb-"))
