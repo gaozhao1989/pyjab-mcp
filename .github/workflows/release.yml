@@ -256,8 +256,9 @@ jobs:
 
       # The packer checks each vendored tree against the *target* interpreter's PEP 508 markers
       # -- `pip --python-version` changes which wheels are eligible and nothing else -- and that
-      # needs `packaging`. It is a declared dependency of `build` and `twine`, so it arrives
-      # through the project's own dev extra rather than being named a second time here.
+      # needs `packaging`. It is declared in the project's own dev extra **for its own sake**,
+      # not relied on as a dependency of `build` and `twine`, so this job installs `".[dev]"`
+      # and names nothing a second time here.
       - name: Install the build tooling
         run: |
           python -m pip install --upgrade pip
