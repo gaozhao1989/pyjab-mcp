@@ -37,6 +37,7 @@ and gets a skip reports green while nothing ran, and a skip is how a gate stops 
 
 from __future__ import annotations
 
+import asyncio
 import glob
 import os
 import shutil
@@ -49,7 +50,11 @@ import pytest
 from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
-pytestmark = pytest.mark.asyncio
+#: No `pytestmark = pytest.mark.asyncio`: the test below is **synchronous** and drives exactly
+#: one event loop itself. The first version was `async def` and called the sync tool-surface
+#: authority from inside that loop, which is `RuntimeError: asyncio.run() cannot be called from
+#: a running event loop` -- the `mcpb-runs` job caught it on all four legs, before the bundle's
+#: own handshake had run once. One loop, started once, is the shape that cannot do that.
 
 #: The variable the CI job sets, and the only thing that decides skip-or-run. Pinned by
 #: ``tests/test_guards.py`` against the value the workflow actually sets, so the two ends
@@ -125,7 +130,11 @@ def expected_tools() -> "list[str]":
     ``tools/check_documented_surface.py`` reads it out of the *running server* rather than out
     of the source text, and the documented-surface guard already compares that with the
     architecture page. Taking it from there is what keeps this test from owning a second copy
-    of a list that would then have to be kept in step by hand.
+    of a list that would then have to be kept in step by hand -- and keeping it *separate* from
+    the bundle is what stops the comparison being vacuous.
+
+    It owns an ``asyncio.run``, so it has to be called with no loop running: the test below is
+    synchronous for that reason.
     """
     from tools import check_documented_surface as docs_guard
 
@@ -137,9 +146,35 @@ def expected_tools() -> "list[str]":
     return tools
 
 
-async def test_the_bundled_entry_script_answers_a_real_mcp_handshake():
+async def handshake(entry: Path, cwd: Path) -> "list[str]":
+    """One real MCP session over the bundle's own entry script: the tool names it answers with.
+
+    The mechanism is ``tests/test_stdio_server.py``'s -- ``stdio_client`` and ``ClientSession``,
+    no hand-rolled framing -- pointed at the unpacked ``server/entry.py`` instead of the console
+    script.
+    """
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=[*ISOLATION_ARGS, str(entry)],
+        cwd=str(cwd),
+    )
+
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            initialized = await session.initialize()
+            assert initialized.server_info.name == "pyjab_mcp", (
+                f"the bundle answered initialize() as {initialized.server_info.name!r}, not "
+                "'pyjab_mcp'"
+            )
+
+            tools = await session.list_tools()
+            return [tool.name for tool in tools.tools]
+
+
+def test_the_bundled_entry_script_answers_a_real_mcp_handshake():
     """The handshake, the server name and the tool count -- through ``server/entry.py``."""
     bundle = bundle_path()
+    expected = expected_tools()
     root = Path(tempfile.mkdtemp(prefix="pyjab-mcpb-"))
     try:
         unpack(bundle, root)
@@ -161,23 +196,7 @@ async def test_the_bundled_entry_script_answers_a_real_mcp_handshake():
             f"{sorted(p.name for p in (root / VENDOR_DIR).iterdir())}"
         )
 
-        expected = expected_tools()
-        params = StdioServerParameters(
-            command=sys.executable,
-            args=[*ISOLATION_ARGS, str(entry)],
-            cwd=str(root),
-        )
-
-        async with stdio_client(params) as (read, write):
-            async with ClientSession(read, write) as session:
-                initialized = await session.initialize()
-                assert initialized.server_info.name == "pyjab_mcp", (
-                    f"the bundle answered initialize() as "
-                    f"{initialized.server_info.name!r}, not 'pyjab_mcp'"
-                )
-
-                tools = await session.list_tools()
-                names = [tool.name for tool in tools.tools]
+        names = asyncio.run(handshake(entry, root))
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
