@@ -10,6 +10,65 @@ under **Unreleased** until it is tagged.
 
 Nothing yet.
 
+## [0.2.1] - 2026-10-11
+
+**A patch release about telling the truth.** Every fix in it is one of this project's own claims
+turning out to be wrong: a diagnostics message that reported two pyjab capabilities as missing when
+1.11.0 had already released them, a bundle smoke test that never asked the bundle to do anything, a
+citation rule blind to Windows paths, and a release gate that could not fail the release it was
+guarding. None of it changes what the server does on a working Windows desktop; all of it changes
+what this repository says about itself, which is the part a user has to be able to trust.
+
+### Fixed
+
+* **`java_diagnostics` no longer reports capabilities the installed pyjab has.** pyjab **1.11.0**
+  released the last two APIs this project was waiting on — `JABDriver.send_keys()` (R4) and
+  `Win32Utils.set_window_foreground()` with `JABDriver.focus()`/`JABElement.focus()` (R5) — so the
+  pin is `pyjab>=1.11.0` and both moved into `RETIRED_REQUIREMENTS`. `java_send_keys` needed no code
+  change at all: it probes for the method rather than importing it, which is why the contract tests
+  pinned the shape before the release and 1.11.0 surprised nothing here. An install below the pin is
+  still told which release has it. This was verified by parsing the released wheel, because
+  `check_pyjab_readiness.py` cannot measure either API off Windows — it reports
+  `cannot be imported here: No module named 'pythoncom'`, which is a blind spot and not an absence.
+  `java_focus_window`, which R5 unblocks, is deliberately **not** built yet (issue #57). (issue #56)
+* **The bundle smoke test asks the bundle to do something.** It drove `initialize()` and
+  `tools/list` and asserted the tool list, so a bundle that started, listed 15 tools and then died
+  on its first request still passed. It now calls `java_diagnostics` over the wire and asserts the
+  report came back, not merely that no error did. The failure path was shown rather than asserted:
+  with a built bundle's entry script mutated so the request raised, the **old** assertion passed and
+  the new one failed; so did answering with an error instead of raising. (issue #47)
+* **A citation written with Windows separators is caught.** The published-references rule matched
+  forward slashes only, so a backslash-separated citation of a maintainer-only file — for example
+  the `manifest-schema.md` that lives only under the notes, which a reader on Windows could follow
+  — was invisible to it. It normalises separators now, and a bare drive spelling that carries such
+  a file's tail fires for the same reason the forward-slash absolute form already did. One limit is recorded
+  rather than solved: the resolving half of that rule needs the local-only files on disk, so CI —
+  which checks out none of them — exercises the name half only, and the guard's own "0 on this
+  repository" test passes vacuously there. (issues #48, #49)
+* **The changelog guard's sources are authoritative, and the release path is strict.** An explicit
+  `--changelog PATH` that did not exist was silently skipped in favour of the fallback chain, so a
+  caller asking about one specific file was told it was fine; and `release.yml` ran the guard
+  without `--strict` while `ci.yml` ran it with it, which made the tag — where it matters most —
+  the one path where the check could not fail the release. (issue #64)
+
+### Changed
+
+* **The suite says which guards it invokes, and invokes the ones it did not.** The command-line
+  coverage test covered four of the eleven guards; three of the rest were already invoked through
+  their own argument forms, and four were genuinely missing. They now run, the argument-taking ones
+  as refusal cases, and the docstring names which guards are left to CI and why. (issue #40)
+* **`packaging` is declared, not inherited.** `tools/build_mcpb.py` evaluates PEP 508 markers with
+  it, and it used to arrive only through `build` and `twine`: the day either stopped carrying it,
+  the packer would fail naming a missing module rather than the missing declaration. It is now
+  named in the dev extra for its own sake. This makes the dependency explicit rather than newly
+  present — it was already installed by those two lines. (issue #41)
+* **The release documentation says what the publish gate actually guarantees.** It claimed no agent
+  could satisfy the `pypi` environment's review, including one holding the maintainer's credentials.
+  0.2.0 showed that is false as written: the maintainer approved in the session and the decision was
+  carried out through the API. What the gate guarantees is that **a human is asked and the answer is
+  kept** — the decision is recorded on the deployment — and the failure it still prevents is an
+  agent publishing on its own initiative. (issue #52)
+
 ## [0.2.0] - 2026-10-11
 
 **A minor release with a new way to install the server, and two release gates that now refuse
