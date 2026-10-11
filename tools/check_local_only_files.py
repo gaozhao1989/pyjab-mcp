@@ -20,6 +20,13 @@ Adding a file to one and not the other is invisible until somebody publishes —
 exactly the shape of mistake this project's rules are about, so the list lives here once
 and both mechanisms are checked against it.
 
+A tree where git cannot be asked at all is a third state, and it is a **refusal** rather than
+a pass: an extracted sdist has ``.gitignore`` and ``MANIFEST.in`` and no ``.git``, and it is
+exactly the artifact a maintainer inspects when asking "did anything local-only get shipped?".
+``.gitignore`` is a claim and ``git check-ignore`` is the behaviour, so a guard whose summary
+sentence is about git must not print that sentence having never invoked git.  A caller that
+wants the sdist half alone asks for it explicitly, with ``check(use_git=False)``.
+
 Usage
 -----
 
@@ -48,6 +55,10 @@ LOCAL_ONLY: Sequence[str] = (
     "docs/RELEASE_READINESS.md",
     ".agents/",
 )
+
+#: The prefix of a refusal: git could not be asked, so the git half of the check has no
+#: verdict.  It is not ``False`` -- see ``_git_ignores``.
+GIT_UNREADABLE = "GIT UNREADABLE"
 
 
 def _gitignore_covers(path: str, text: str) -> bool:
@@ -86,6 +97,11 @@ def _git_ignores(path: str, repo: Path = REPO_ROOT) -> Optional[bool]:
 
     The file's own text is a claim; this is the behaviour.  They disagree more often than
     people expect -- a negation later in the file, or a directory that never matched.
+
+    ``git check-ignore`` exits 0 for ignored, 1 for not ignored, and something else when it
+    could not answer at all (128 outside a repository, for one).  Only the first two are
+    verdicts: the third is the unreadable state, which must not be spelled ``False`` -- that
+    reads as "git says no" and is a different thing from "git never said anything".
     """
     if not (repo / ".git").exists():
         return None
@@ -96,7 +112,20 @@ def _git_ignores(path: str, repo: Path = REPO_ROOT) -> Optional[bool]:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    return result.returncode == 0
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    return None
+
+
+def _git_can_be_asked(repo: Path) -> bool:
+    """True when ``git check-ignore`` answers for *repo* at all.
+
+    Measured: ``check-ignore`` answers for a path that is not on disk, so this is a question
+    about git and the repository, not about whether the file is present in this checkout.
+    """
+    return _git_ignores(".gitignore", repo) is not None
 
 
 def check(
@@ -105,10 +134,24 @@ def check(
     local_only: Sequence[str] = LOCAL_ONLY,
     use_git: bool = True,
 ) -> List[str]:
-    """Return every local-only path that is not kept out of both git and the sdist."""
+    """Return every local-only path that is not kept out of both git and the sdist.
+
+    With *use_git* left true -- the default, and what the command line does -- a tree where
+    git cannot be asked is a refusal, because the summary this check prints is a claim about
+    git.  ``use_git=False`` is the explicit way to ask for the sdist half alone.
+    """
     gitignore = (repo / ".gitignore").read_text(encoding="utf-8")
     manifest = (repo / "MANIFEST.in").read_text(encoding="utf-8")
     problems: List[str] = []
+
+    git_ok = use_git and _git_can_be_asked(repo)
+    if use_git and not git_ok:
+        problems.append(
+            f"{GIT_UNREADABLE}: git is not available in {repo}, so the git half of this "
+            "check did not run. .gitignore is a claim and `git check-ignore` is the "
+            "behaviour, and it was never asked. Run this in a git checkout, or call "
+            "check(use_git=False) for the sdist half alone."
+        )
 
     for path in local_only:
         if not _gitignore_covers(path, gitignore):
@@ -122,28 +165,39 @@ def check(
                 "not exclude or prune it. .gitignore does not protect an sdist -- it is "
                 "built from the working tree."
             )
-        if use_git and (repo / path.rstrip("/")).exists():
+        if git_ok:
             ignored = _git_ignores(path, repo)
             if ignored is False:
                 problems.append(
                     f"GIT DISAGREES: .gitignore looks like it covers {path}, but "
                     "`git check-ignore` says it does not."
                 )
+            elif ignored is None:
+                problems.append(
+                    f"{GIT_UNREADABLE}: `git check-ignore` could not answer for {path}, so "
+                    "whether git ignores it was not established."
+                )
     return problems
 
 
-def main() -> int:
+def main(repo: Path = REPO_ROOT) -> int:
     print(f"{len(LOCAL_ONLY)} local-only path(s) that must stay out of git and the sdist:")
     for path in LOCAL_ONLY:
         print(f"  {path}")
 
-    problems = check()
+    problems = check(repo=repo)
     if problems:
         print()
         for problem in problems:
             print(f"::error:: {problem}")
         print()
-        print("FAILED: a maintainer document would be published.")
+        if _git_can_be_asked(repo):
+            print("FAILED: a maintainer document would be published.")
+        else:
+            print(
+                f"FAILED: git is not available in {repo}, so the git half of this check "
+                "did not run."
+            )
         return 1
 
     print("\nPASSED: every one is ignored by git and excluded from the sdist.")
