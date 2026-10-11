@@ -162,9 +162,12 @@ def test_server_json_satisfies_the_registry_schema_it_names():
 def test_the_registry_accepts_server_json():
     """The authority on the schema is the registry, so this asks it when asked to.
 
-    Off by default because it needs a downloaded binary and a network round trip, and it is
-    *on* in the release workflow, where publishing metadata the registry rejects would
-    otherwise be discovered after PyPI already had the package.
+    Off by default because it needs a downloaded binary and a network round trip, and nothing
+    under `.github/` sets `PYJAB_MCP_REGISTRY`, so this test runs only when a person sets it.
+    The release's protection is the same validator run directly: `publish-registry.yml` has a
+    `mcp-publisher validate` step of its own before `publish`, which is why a schema rejection
+    cannot reach PyPI. That is not this test. Run this one by hand with `PYJAB_MCP_REGISTRY=1`
+    and `mcp-publisher` on `PATH`; `docs/RELEASING.md` documents it.
     """
     import shutil
     import subprocess
