@@ -45,24 +45,24 @@ from pyjab_mcp.backend import (                               # noqa: E402
 )
 from pyjab_mcp.diagnostics import one_line as _one_line   # noqa: E402
 
-#: What this project is waiting for:
-#: ``(key, fact name, requirement key, resolved in a release)``.
+#: What this project waits on -- ``(key, fact name, requirement key, resolved in a release)``.
 #:
 #: Two kinds of question, and they are answered differently:
 #:
 #: * **a release question** -- nothing has it yet, so the probe on the installed pyjab is the
-#:   answer (``resolved_in`` is None);
+#:   answer (``resolved_in`` is None, and ``requirement_key`` names the open gap);
 #: * **a pin question** -- a named release has it, so the answer is whether the pin requires
-#:   that release. The tree walk is this kind: 1.9.0 shipped it, ``pyjab>=1.9.0`` requires
-#:   it, and there is nothing left to wait for. Probing is still reported, but it cannot
-#:   fail the check off Windows, where the Windows-only module cannot be imported at all.
+#:   that release. **All five are this kind now**, the last two since pyjab 1.11.0 released
+#:   ``send_keys`` (R4) and ``set_window_foreground`` (R5). Probing is still reported, but it
+#:   cannot fail the check off Windows, where the Windows-only module cannot be imported at
+#:   all.
 WAITING = (
     ("list_windows", "public java-window listing", None, "1.10.0"),
     ("detach", "non-destructive detach", None, "1.10.0"),
     ("walk", "tree walk (JABElement.walk)", None, "1.9.0"),
-    ("send_keys", "public key/shortcut sending", "send_keys", None),
+    ("send_keys", "public key/shortcut sending", None, "1.11.0"),
     ("bring_to_foreground", "public way to bring a window to the foreground",
-     "bring_to_foreground", None),
+     None, "1.11.0"),
 )
 
 WALK_NOTE = (
@@ -133,13 +133,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"  {key.ljust(width)}  {verdict:<9}  {_one_line(detail)}")
 
     print()
-    for key, _fact_name, requirement_key, _resolved in WAITING:
+    for key, _fact_name, requirement_key, resolved_in in WAITING:
         verdict, _ = table[key]
         if verdict in (READY, RESOLVED):
             continue
-        if requirement_key is None:
-            print(f"  {key}: waiting on a pyjab release for the tree walk")
-            print(f"      {WALK_NOTE}")
+        if resolved_in is not None:
+            # A pin question, and this branch only runs on an install below the floor: the
+            # release that has it is named so the next step is `pip install -U pyjab`.
+            print(f"  {key}: released in pyjab {resolved_in}, which pyproject.toml requires; "
+                  "the installed pyjab is older — python -m pip install -U pyjab")
+            if key == "walk":
+                print(f"      {WALK_NOTE}")
             continue
         wanted = requirement(requirement_key)
         print(f"  {key}: waiting on pyjab for {wanted.wanted}")

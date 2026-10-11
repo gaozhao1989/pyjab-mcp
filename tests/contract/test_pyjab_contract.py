@@ -285,12 +285,13 @@ def _driver_class():
 
 
 def test_the_driver_can_send_a_chord_when_the_release_carries_it():
-    """R4's shape, pinned before this project depends on it.
+    """R4's shape, pinned before this project depended on it and now a released API.
 
-    The API is on pyjab's development branch and not on PyPI (gaozhao1989/pyjab#168, closed as
-    completed on 2026-10-10). `windows-gui` installs the pin, so this skips there;
-    `.github/workflows/pyjab-drift.yml` installs `pyjab@master`, so it **runs** there -- which
-    is the whole reason to pin the shape before the release rather than after.
+    The name, the single argument and the two sentences of documentation below were pinned
+    against `pyjab@master` (gaozhao1989/pyjab#168, closed as completed on 2026-10-10) while
+    the pin was still 1.10.0 -- which is why the 1.11.0 release surprised nothing here. The
+    feature-detect stays: `.github/workflows/pyjab-drift.yml` installs `pyjab@master`, and
+    `windows-gui.yml` installs the pin, so this runs in both jobs now that 1.11.0 is out.
 
     What is asserted is what this server relies on: the name, the single argument, and the
     two sentences of documentation that say the chord goes to whatever has focus and that an
@@ -302,8 +303,8 @@ def test_the_driver_can_send_a_chord_when_the_release_carries_it():
 
     if not hasattr(driver, "send_keys"):
         pytest.skip(
-            "this pyjab has no public send_keys; it is merged upstream and unreleased, and "
-            "the drift job (pyjab@master) is where this test is expected to run"
+            "this pyjab has no public send_keys; it was released in 1.11.0, so a supported "
+            "install has it and this is an older pyjab"
         )
 
     assert list(inspect.signature(driver.send_keys).parameters) == ["self", "keys"], (
@@ -325,8 +326,8 @@ def test_an_unknown_key_name_is_an_error_rather_than_a_silent_no_op():
         pytest.skip("win32utils cannot be imported on this platform")
 
     sender = getattr(Win32Utils, "send_keys", None)
-    if sender is None:  # pragma: no cover - needs the unreleased API
-        pytest.skip("this pyjab has no public send_keys yet")
+    if sender is None:  # pragma: no cover - needs the API, released in 1.11.0
+        pytest.skip("this pyjab has no public send_keys (it is in 1.11.0)")
     if sys.platform != "win32":  # pragma: no cover - needs Windows
         pytest.skip("win32utils needs Windows to construct")
 

@@ -34,7 +34,6 @@ from .backend import (
     PyjabApiGap,
     PyjabUnavailable,
     open_backend,
-    requirement,
 )
 from .bridge import BridgeClosed, BridgeNotStarted, BridgeStartupError, BridgeThread
 from .diagnostics import collect
@@ -1065,20 +1064,22 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
         to avoid exactly that.
 
         So if a call seems to do nothing, the window probably does not have focus — and
-        **attaching does not focus it** (measured in pyjab#180). What does bring a window
-        forward is an interactive call: `java_click` something harmless in it, then send the
-        chord. There is no public way to focus a window as such yet, which is
-        [#24](https://github.com/gaozhao1989/pyjab-mcp/issues/24).
+        **attaching does not focus it** (measured in pyjab#180). pyjab 1.11.0 can bring a
+        window forward (`Win32Utils.set_window_foreground`, `JABDriver.focus()`), but this
+        server does not expose that as a tool yet — that is
+        [#57](https://github.com/gaozhao1989/pyjab-mcp/issues/57) — so today the way to give a
+        window focus is an interactive call: `java_click` something harmless in it, then send
+        the chord.
 
         Chords are written with `+` between key names and are case-insensitive:
         `ctrl`, `alt`, `shift`, `tab`, `enter`, `escape`, `spacebar`, the arrow keys, and
         single letters or digits. A name that is not a key is an error rather than a silent
         no-op — a wrong chord acts on somebody else's application and cannot be taken back.
 
-        Whether this works depends on the pyjab you have installed: the API was written and
-        merged upstream (gaozhao1989/pyjab#168) after 1.10.0, which is the newest release on
-        PyPI. It is probed rather than assumed, so the release that carries it makes this tool
-        work with no change here; until then it answers with the requirement.
+        This needs pyjab 1.11.0, which released `JABDriver.send_keys`
+        (gaozhao1989/pyjab#168 went in after 1.10.0). The call is probed rather than assumed,
+        like every pyjab capability here: an install below the pin is told which release has
+        the method instead of raising an `AttributeError`.
 
         Args:
             session_id: From java_attach_window.
@@ -1090,8 +1091,8 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
 
         Errors:
             ``is_error`` for an unknown session, a chord whose key names pyjab does not
-            recognise (with the name it did not recognise), or a pyjab without the API —
-            which names the requirement and what to do instead.
+            recognise (with the name it did not recognise), or a pyjab below the pin — which
+            names the release that has the API and what to do instead.
         """
         try:
             bridge = await state.started_bridge()
@@ -1115,11 +1116,12 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
             raise _tool_error(exc) from exc
         return (
             f"Sent {keys!r}. The chord goes to whichever window has the keyboard focus, and "
-            "nothing focused one for you: if the application did not react, click something "
-            "harmless in it first — an interactive call is what brings a window forward in "
-            f"pyjab. There is no public way to focus one yet "
-            f"({requirement('bring_to_foreground').expected_in}). Then check the result with "
-            "java_get_text, java_snapshot or java_wait_for."
+            "nothing focused one for you: pyjab 1.11.0 can bring a window forward, but this "
+            "server does not expose that as a tool yet "
+            "(https://github.com/gaozhao1989/pyjab-mcp/issues/57), so if the application did "
+            "not react, click something harmless in it first — an interactive call is what "
+            "brings a window forward. Then check the result with java_get_text, "
+            "java_snapshot or java_wait_for."
         )
 
     # -----------------------------------------------------------------------------

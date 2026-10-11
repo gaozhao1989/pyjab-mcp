@@ -315,23 +315,35 @@ def _report(status: str, detail: str = "because", version: str = "9.9.9"):
 def test_readiness_is_resolved_by_the_pin_and_measured_otherwise():
     """Three answers, and the difference matters: resolved by the pin, ready by probe, or not.
 
-    ``list_windows``, ``detach`` and ``walk`` are pin questions now -- pyjab released them,
-    so what guarantees them is the floor in pyproject.toml rather than a probe on whatever
-    machine happens to be running. ``send_keys`` is still a release question.
+    **All five are pin questions now** -- pyjab has released each one, so what guarantees it
+    is the floor in pyproject.toml rather than a probe on whatever machine happens to be
+    running. ``send_keys`` and ``bring_to_foreground`` joined the list in 1.11.0. The probe
+    still decides when the installed version is *below* that floor, which is how a checkout or
+    a pre-release that has the API reports READY rather than NOT READY.
     """
-    verdicts = readiness_guard.readiness(_report("available"))
+    current = readiness_guard.readiness(_report("available"))
 
-    assert verdicts["list_windows"][0] == readiness_guard.RESOLVED
-    assert verdicts["walk"][0] == readiness_guard.RESOLVED
-    assert verdicts["send_keys"][0] == readiness_guard.READY
+    for key in ("list_windows", "detach", "walk", "send_keys", "bring_to_foreground"):
+        assert current[key][0] == readiness_guard.RESOLVED, key
+
+    older = readiness_guard.readiness(_report("available", version="1.9.0"))
+    assert older["walk"][0] == readiness_guard.RESOLVED, (
+        "1.9.0 does have the walk, and the pin's floor is what says so"
+    )
+    assert older["send_keys"][0] == readiness_guard.READY, (
+        "below the floor the probe is the measurement -- that is the drift job's pyjab@master"
+    )
 
     old = readiness_guard.readiness(_report("missing", version="1.9.0"))
     assert old["list_windows"][0] == readiness_guard.NOT_READY, (
         "an install below the pin must not be reported as having the release"
     )
-    assert old["walk"][0] == readiness_guard.RESOLVED, (
-        "1.9.0 does have the walk, and the pin's floor is what says so"
-    )
+
+    before_1_11 = readiness_guard.readiness(_report("missing", version="1.10.0"))
+    for key in ("send_keys", "bring_to_foreground"):
+        assert before_1_11[key][0] == readiness_guard.NOT_READY, (
+            f"{key} is a 1.11.0 API, and 1.10.0 must not be reported as having it"
+        )
 
 
 @pytest.mark.parametrize("status", ["missing", "unknown"])

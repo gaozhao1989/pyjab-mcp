@@ -167,16 +167,15 @@ SURFACE: Dict[Touchpoint, Entry] = {
         "module's __all__.",
     ),
     ("pyjab.jabdriver", "JABDriver.send_keys"): Entry(
-        UNRELEASED, "",
+        PUBLIC, "1.11.0",
         "Probed with getattr and called only when it is there: the public chord primitive "
         "this project asked for as R4, written and merged in gaozhao1989/pyjab#168 (closed "
-        "as completed on 2026-10-10) but **not on PyPI** -- and this project depends only on "
-        "released pyjab. JABDriver.send_keys(keys), JABElement.send_keys(keys) and "
-        "Win32Utils.send_keys(keys) all exist on pyjab's development branch; the driver form "
-        "is the one this server calls, because java_send_keys takes no element. The day it is "
-        "released, java_send_keys starts working with no change here -- which is the whole "
-        "reason the call site probes instead of raising the requirement unconditionally. "
-        "See backend.REQUIREMENTS key 'send_keys'.",
+        "as completed on 2026-10-10) and released in 1.11.0. JABDriver.send_keys(keys), "
+        "JABElement.send_keys(keys) and Win32Utils.send_keys(keys) all exist; the driver form "
+        "is the one this server calls, because java_send_keys takes no element. The call site "
+        "still probes rather than importing the attribute, so an install below the pin is told "
+        "which release has it (backend.predates_the_pin) instead of raising an "
+        "AttributeError. See RETIRED_REQUIREMENTS key 'send_keys'.",
     ),
     ("pyjab.jabdriver", "JABDriver.detach"): Entry(
         PUBLIC, "1.10.0",
@@ -311,7 +310,8 @@ SURFACE: Dict[Touchpoint, Entry] = {
         PUBLIC, "1.8.0",
         "Text entry: the JAB setTextContents action, or simulated keystrokes with "
         "simulate=True. Note what it is not -- it types text, so it cannot express a modifier "
-        "chord, which is why java_send_keys is blocked on requirement 'send_keys'.",
+        "chord, which is why java_send_keys needs JABDriver.send_keys (R4, released in 1.11.0) "
+        "rather than send_text.",
     ),
     ("pyjab.jabdriver", "JABDriver.find_element_by_xpath() -> clear"): Entry(
         PUBLIC, "1.8.0",

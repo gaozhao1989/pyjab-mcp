@@ -14,6 +14,13 @@
 # A marker written without a commit is keyed by its text, so rewording it forces a fresh
 # answer rather than inheriting the previous one.
 #
+# **A follow-up is a second entry with the same id**, written after the first: a marker is
+# answered once when it appears, and answered again when the world moves under that answer --
+# a release landing, say. `load_acknowledged()` keys entries by id and keeps the last one, so
+# the follow-up is the live answer, and the entry above it is left **verbatim** as the record
+# of what was true when it was written. Do not rewrite the earlier text to say something it
+# did not say.
+#
 # `context` below is **not enforced** and is not a place to avoid answering a marker: it
 # records pyjab work from before the marker convention existed, so that the reasons this
 # project pins what it pins are not lost. Anything listed there that later gets a marker
@@ -36,6 +43,20 @@ acknowledged:
       on PyPI, so no supported install changes today; the drift job's contract tests against
       pyjab@master, where this change already is, are the backstop if this reasoning is wrong
       (last green: run 38047937968).
+
+  # Follow-up, same id: 1.11.0 is on PyPI now, which is the one thing the entry above said
+  # would change the answer. The text above is kept as written.
+  - commit: line:4541adb8685e
+    what: >-
+      Follow-up, 2026-10-11: **1.11.0 is released**, so the closing sentence above has expired
+      and the reading it recorded is what a supported install now runs. `0.2.1` (issue #56)
+      moved the pin to `pyjab>=1.11.0`, so every supported install takes the armed path -- and
+      the five calls named above still need no handler here, for the reason already recorded:
+      this package catches no JABException, and the broad `except Exception` handlers treat a
+      failed read as a failed read. The backstop improved rather than weakened: the weekly
+      drift job against `pyjab@master` used to be the only place this reasoning executed, and
+      the default suite and `windows-gui` now install a pyjab that has the change. No code
+      change beyond the pin.
 
   # Found by the guard on 2026-10-10, mid-session, while the release this marker belongs to had
   # not happened: the drift machinery doing its job rather than a change anyone announced.
@@ -62,6 +83,20 @@ acknowledged:
         value reads as `0`. That is the one place where "the property refused" and "there are no
         children" could still collapse -- it is `as_record()`'s contract rather than this
         property's, and the contract test is what should pin it when the pin moves.
+
+  # Follow-up, same id: 1.11.0 is released, which is exactly the event the entry above
+  # pre-registered a trigger for. Its text is kept as written.
+  - commit: line:504876b8fb65
+    what: >-
+      Follow-up, 2026-10-11: **pyjab 1.11.0 is released and `0.2.1` (issue #56) pins
+      `pyjab>=1.11.0`**, so `visible_children_count` now returns `0` on every supported install
+      instead of raising. Nothing changes here, for the reason recorded above -- this project
+      never touches that property -- but **the pre-registered trigger has fired**: the record
+      reader still writes `int(raw.get("children_count") or 0)`, so a missing or `None` value
+      reads as `0`, and "the property refused" can still collapse into "there are no children".
+      Filed as **#58**, which is where the `as_record()` contract test that pins it belongs;
+      deliberately not added in #56, because a new contract test is not part of a patch release
+      that only moves the pin and retires R4/R5.
 
   # Keyed by `line:<digest>` rather than a commit, because pyjab's marker for this change
   # carries a release rather than a hash. That is the point of the fallback: the marker was

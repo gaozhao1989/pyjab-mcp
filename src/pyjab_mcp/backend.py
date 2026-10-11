@@ -12,10 +12,12 @@ not to reach in -- it is to record the requirement (:data:`REQUIREMENTS`), add t
 pyjab, release it, and bump the pin.  So the gap is a **reported state** here, never a
 private import.
 
-Two gaps are known and both are recorded below with the reason a workaround is not
-acceptable.  They are re-derived from the installed pyjab at runtime
-(:func:`probe_public_api`), not from a version number, so the day pyjab grows the public
-API this file starts working before anyone edits it.
+No gap is open any more: the last two -- R4 (``send_keys``) and R5 (bringing a window to the
+foreground) -- were both answered by pyjab 1.11.0, which :data:`RETIRED_REQUIREMENTS` records
+and the pin now requires.  What is left is re-derived from the installed pyjab at runtime
+(:func:`probe_public_api`), not from a version number, so a newer pyjab starts working before
+anyone edits it, and an install *older* than the pin is a reported state rather than an
+``AttributeError``.
 """
 
 from __future__ import annotations
@@ -48,7 +50,7 @@ from .windows import JavaWindow
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------------
-# What pyjab does not yet provide, and why the obvious workaround is not one.
+# What this project asks of pyjab, as data: the open gaps (none) and the answered ones.
 # ---------------------------------------------------------------------------------
 
 
@@ -77,56 +79,29 @@ class Requirement:
         )
 
 
-REQUIREMENTS: "tuple[Requirement, ...]" = (
-    Requirement(
-        key="bring_to_foreground",
-        blocks=(
-            "java_focus_window, and every flow where a chord has to reach a window that is "
-            "not the focused one"
-        ),
-        wanted=(
-            "a public way to bring an attached window to the foreground: "
-            "Win32Utils._set_window_foreground(hwnd) is private and used from twelve places "
-            "inside jabelement.py"
-        ),
-        why=(
-            "java_send_keys sends to whatever has the keyboard focus, and the only supported "
-            "way to give a window focus today is an interactive call -- a click -- which "
-            "activates whatever it lands on. That is precisely the side effect a shortcut "
-            "exists to avoid, so 'click something harmless first' is a workaround and not a "
-            "feature. Measured upstream in gaozhao1989/pyjab#180: attaching a window does not "
-            "focus it, and an interactive call does."
-        ),
-        expected_in="a pyjab release after 1.10.0; tracked as gaozhao1989/pyjab#180",
-    ),
-    Requirement(
-        key="send_keys",
-        blocks="java_send_keys, and therefore any shortcut that is not plain text",
-        wanted="a public way to send a key sequence or shortcut (e.g. alt+y) to a window",
-        why=(
-            "every key helper pyjab has is private -- Win32Utils._press_key, _send_keys, "
-            "_press_hold_release_key, _release_key -- and send_text() types *text*, so it "
-            "cannot express a modifier chord. Driving the private helpers would mean "
-            "depending on method names nobody promised, in the one area where a wrong key "
-            "does something irreversible to the application."
-        ),
-        expected_in=(
-            "the pyjab release after 1.10.0: the API is written and merged "
-            "(gaozhao1989/pyjab#168 is closed as completed) but it is not on PyPI yet, and "
-            "this project only depends on released pyjab"
-        ),
-    ),
-)
+#: The open gaps -- **empty since 0.2.1.**  R4 (``send_keys``) and R5 (bring-a-window-to-the-
+#: foreground) were the last two, and pyjab 1.11.0 answered both; they moved to
+#: :data:`RETIRED_REQUIREMENTS`, which is where a reader now finds the release that did it.
+#: The tuple stays because the next gap goes *here* rather than into an error message, and
+#: :func:`requirement` still raises for a key that is no longer one -- the honest answer when
+#: a call site has not been updated with it.
+REQUIREMENTS: "tuple[Requirement, ...]" = ()
 
 #: Requirements that were answered, kept as the record of what was waited for and what
 #: answered it. R1 (`list_java_windows`) and R2 (`JABDriver.detach`) were both released in
-#: pyjab 1.10.0; R3 (the tree walk) in 1.9.0. They are not requirements any more -- nothing
-#: reads this list -- but deleting the history outright is how a project forgets why its pin
-#: is where it is.
+#: pyjab 1.10.0; R3 (the tree walk) in 1.9.0; R4 (`send_keys`) and R5 (bring-to-foreground)
+#: in 1.11.0. They are not requirements any more -- nothing reads this list for a decision --
+#: but deleting the history outright is how a project forgets why its pin is where it is,
+#: and :func:`predates_the_pin` is what an install below the floor is told.
 RETIRED_REQUIREMENTS: "Mapping[str, str]" = {
     "list_java_windows": "released in pyjab 1.10.0 as pyjab.list_java_windows()",
     "detach": "released in pyjab 1.10.0 as JABDriver.detach()",
     "walk": "released in pyjab 1.9.0 as JABElement.walk() / JABTree",
+    "send_keys": "released in pyjab 1.11.0 as JABDriver.send_keys(keys)",
+    "bring_to_foreground": (
+        "released in pyjab 1.11.0 as Win32Utils.set_window_foreground(hwnd), with "
+        "JABDriver.focus() / JABElement.focus() returning whether the window came forward"
+    ),
 }
 
 
@@ -137,16 +112,40 @@ def requirement(key: str) -> Requirement:
     raise KeyError(key)
 
 
+def predates_the_pin(key: str) -> str:
+    """What to say to an install older than the release that answered ``key``.
+
+    A retired requirement is still reachable: nothing stops a user installing a pyjab below
+    the floor, and the probes feature-detect rather than version-compare, so the tool meets
+    that install and has to answer rather than raise ``AttributeError`` (§6.3).  Naming the
+    release from :data:`RETIRED_REQUIREMENTS` is what keeps this message and the record from
+    drifting apart.
+    """
+    return (
+        f"{RETIRED_REQUIREMENTS[key]}, which pyproject.toml now requires; the installed pyjab "
+        "predates it. Upgrade it: python -m pip install -U pyjab"
+    )
+
+
 class PyjabUnavailable(RuntimeError):
     """pyjab cannot be used here at all: not installed, not Windows, or not importable."""
 
 
 class PyjabApiGap(RuntimeError):
-    """pyjab is present but its public API does not yet expose something we need."""
+    """pyjab is present but its public API does not expose something this project needs.
 
-    def __init__(self, missing: Requirement) -> None:
-        super().__init__(missing.message())
-        self.requirement = missing
+    ``missing`` is a :class:`Requirement` for an open gap, or the sentence
+    :func:`predates_the_pin` writes for one that has been answered: the same state a user
+    meets, from the same place.
+    """
+
+    def __init__(self, missing: "Requirement | str") -> None:
+        if isinstance(missing, Requirement):
+            super().__init__(missing.message())
+            self.requirement: "Optional[Requirement]" = missing
+        else:
+            super().__init__(missing)
+            self.requirement = None
 
 
 class ElementChanged(RuntimeError):
@@ -232,7 +231,7 @@ def probe_public_api() -> PyjabApiReport:
             "public java-window listing",
             AVAILABLE if hasattr(pyjab, "list_java_windows") else MISSING,
             "pyjab.list_java_windows()" if hasattr(pyjab, "list_java_windows")
-            else requirement("list_java_windows").expected_in,
+            else predates_the_pin("list_java_windows"),
         ),
         _probe_walk(),
         _probe_keys(),
@@ -276,8 +275,10 @@ def _probe_walk() -> Fact:
 def _probe_keys() -> Fact:
     """Whether a key sequence or shortcut can be sent through public API.
 
-    The names checked are a guess at the shape the public API would take, and the fact says
-    so when it finds none: pyjab 1.9.0 has key helpers, and every one of them is private.
+    The names checked are the shapes the public API could take, and pyjab 1.11.0 has
+    ``Win32Utils.send_keys`` -- which is the release R4 was waiting on.  When none is found
+    the install is below the pin, and the fact says which release has it rather than
+    implying pyjab has nothing.
     """
     name = "public key/shortcut sending"
     try:
@@ -296,17 +297,18 @@ def _probe_keys() -> Fact:
         MISSING,
         "every key helper pyjab has is private (Win32Utils._press_key, _send_keys, ...), and "
         "send_text() types text rather than a modifier chord; "
-        + requirement("send_keys").expected_in,
+        + predates_the_pin("send_keys"),
     )
 
 
 def _probe_foreground() -> Fact:
     """Whether an attached window can be brought to the foreground through public API.
 
-    The candidate names are guesses at the shape it would take, and the fact says so when it
-    finds none -- the same shape as the key probe. pyjab#180 is where the gap is recorded
-    upstream; what this project needs from it is a supported way to do what
-    ``_set_window_foreground`` does, without reaching into the private helper.
+    The candidate names are the shapes it could take, and pyjab 1.11.0 has
+    ``Win32Utils.set_window_foreground`` -- R5's answer, with ``JABDriver.focus()`` and
+    ``JABElement.focus()`` alongside it and returning whether the window came forward.  The
+    gap this project measured upstream as pyjab#180 is closed; when no candidate is found the
+    install is below the pin, and the fact names the release that has it.
     """
     name = "public way to bring a window to the foreground"
     try:
@@ -333,7 +335,7 @@ def _probe_foreground() -> Fact:
         MISSING,
         "every foreground helper pyjab has is private (Win32Utils._set_window_foreground), and "
         "the supported way to give a window focus is an interactive call -- which activates "
-        "what it lands on; " + requirement("bring_to_foreground").expected_in,
+        "what it lands on; " + predates_the_pin("bring_to_foreground"),
     )
 
 
@@ -341,9 +343,9 @@ def _probe_detach() -> Fact:
     """Whether a bound window can be released without terminating its process.
 
     ``JABDriver.__exit__`` sends ``SIGTERM`` to the bound pid, so it is not a detach.  The
-    names checked are a guess at the shape the public API would take -- the requirement is
-    recorded in :data:`REQUIREMENTS` as ``detach`` -- and the fact says so when it is
-    missing, rather than implying pyjab has nothing.
+    names checked are the shapes the public API could take -- R2 was answered by
+    ``JABDriver.detach`` in pyjab 1.10.0 -- and a fact that finds none says which release has
+    it, rather than implying pyjab has nothing.
     """
     name = "non-destructive detach"
     try:
@@ -357,7 +359,7 @@ def _probe_detach() -> Fact:
         name,
         MISSING,
         "only __exit__, which terminates the bound process by pid; "
-        + requirement("detach").expected_in,
+        + predates_the_pin("detach"),
     )
 
 
@@ -929,12 +931,12 @@ def act_driver(driver: Any, locator: str, expected: Record, action: str, *,
 def send_keys_driver(driver: Any, keys: str) -> None:
     """Send a keyboard chord -- ``alt+y`` -- to whichever window has the keyboard focus.
 
-    pyjab 1.10.0 has no public way to do this, and pyjab's development branch has had one
-    since gaozhao1989/pyjab#168 closed: ``JABDriver.send_keys(keys)`` (and the same on
-    ``JABElement`` and ``Win32Utils``). It is not on PyPI, and this project depends only on
-    released pyjab -- so the call is **probed rather than assumed**, exactly like the window
-    listing and ``detach()`` before their releases. When the attribute is absent the
-    requirement is reported instead, which is the honest answer rather than a private import.
+    pyjab 1.11.0 released ``JABDriver.send_keys(keys)`` (and the same on ``JABElement`` and
+    ``Win32Utils``), which is what R4 was waiting on after gaozhao1989/pyjab#168 closed. The
+    call is still **probed rather than assumed**, exactly like the window listing and
+    ``detach()`` before their releases: an install below the pin is reachable, and a missing
+    API is a reported state rather than an ``AttributeError``. The probe stays; only the
+    sentence changes, and it names the release that has the method.
 
     Two things about the semantics belong in this docstring, because they are what a caller
     gets wrong:
@@ -950,7 +952,7 @@ def send_keys_driver(driver: Any, keys: str) -> None:
     """
     send = getattr(driver, "send_keys", None)
     if send is None:
-        raise PyjabApiGap(requirement("send_keys"))
+        raise PyjabApiGap(predates_the_pin("send_keys"))
     send(keys)
 
 
