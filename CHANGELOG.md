@@ -8,6 +8,20 @@ under **Unreleased** until it is tagged.
 
 ## Unreleased
 
+Nothing yet.
+
+## [0.2.0] - 2026-10-11
+
+**A minor release with a new way to install the server, and two release gates that now refuse
+instead of relying on someone remembering.** The bundle is the headline: `pyjab-mcp` installs as a
+single `.mcpb` that carries its dependency closure per supported interpreter, and CI now *executes*
+it on Windows for every one of them — the check that found a `cp310` tree missing `exceptiongroup`,
+which would have killed a 3.10 user's server at import while every static check passed. The release
+pipeline gained two refusals (a version already on PyPI, and a tag whose commit has no green L3 run),
+the guards gained one more (a sentence *about* pyjab's marker convention that the changelog check
+used to read as a marker), and the bundle's own pages stopped claiming a release set that does not
+have it.
+
 ### Changed
 
 * **The release pipeline refuses a tag for a version that is already on PyPI.** The pre-flight
@@ -129,6 +143,17 @@ under **Unreleased** until it is tagged.
   that already refuses a maintainer note and `__pycache__`. `tests/test_packaging.py` reads the
   built archive for it, tests the removal, and tests the refusal.
 
+### Fixed
+
+* **The pyjab changelog check no longer reads a sentence *about* the marker convention as a
+  marker.** pyjab's released 1.11.0 section says of one change that *"No separate `Affects:
+  pyjab-mcp` marker is needed"* — because the entry above it already carries the marker — and the
+  check, which matched the phrase anywhere in a line, read that sentence as a marker and turned the
+  guards job red on `main`, which would have refused this release. The documented convention is a
+  line **beginning** with the phrase, so the check now implements it, tolerating the indentation,
+  bullet and emphasis pyjab actually writes. Two cases were added: that sentence must produce no
+  marker, and a document carrying both the note and the sentence must produce exactly one, so
+  "stopped finding markers at all" cannot pass either. (issue #43)
 
 ## [0.1.2] - 2026-10-10
 
