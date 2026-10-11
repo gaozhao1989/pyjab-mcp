@@ -574,6 +574,70 @@ def test_detaching_releases_the_window_and_leaves_the_application_running(live, 
     print("\n[L3] detach() released the window and the application kept running")
 
 
+@pytest.mark.asyncio
+async def test_attaching_the_same_window_twice_keeps_the_first_session_usable(live, main_window):
+    """#71 measured on a real window: a second attach keeps the id the first session holds.
+
+    ``PyjabBackend.attach`` releases the earlier binding for an ``hwnd`` that is already bound,
+    deliberately -- one JAB context per window -- and it used to issue a fresh window id while
+    doing it. A session is recorded against the id the backend returned, so the second attach
+    left the first session naming a window the backend no longer held: every later call on it
+    answered ``window 'w1' is not attached`` though the caller had done nothing wrong (#71).
+    The L1 tests pin the reused id against a stubbed ``pyjab.jabdriver``; what is left open
+    there is whether a *real* ``JABDriver`` re-binds the same window cleanly once the earlier
+    one is detached, and whether the re-bound window is still readable through the session that
+    named it. That is this test, and it is the only layer that can answer it.
+
+    Both attaches are the same window by construction rather than by title matching: the first
+    by title, the second by the ``hwnd`` the first returned. Then the **first** session makes a
+    real tool call, because "the id is still in the backend's dict" and "a call through it
+    reaches the window" are not the same claim.
+    """
+    from pyjab_mcp.server import ServerState, create_server
+
+    bridge, backend = live
+    state = ServerState(bridge=bridge)
+    server = create_server(state=state)
+
+    first = await tool(server, "java_attach_window", {"title": MAIN_TITLE})
+    first_session = first.split(" ", 1)[0]
+    first_attached = state.session(first_session)
+
+    second = await tool(server, "java_attach_window", {"hwnd": first_attached.hwnd})
+    second_session = second.split(" ", 1)[0]
+    second_attached = state.session(second_session)
+
+    # The evidence before the assertion (§3). The failure this test exists to catch is about a
+    # session and a window id, and without this line the log would carry neither.
+    print(
+        f"\n[L3] attach 1: session {first_session} -> {first_attached}\n"
+        f"[L3] attach 2: session {second_session} -> {second_attached}\n"
+        f"[L3] the backend holds {sorted(backend._drivers)}"
+    )
+
+    assert first_attached.window_id == second_attached.window_id, (
+        f"both attaches bound hwnd={first_attached.hwnd}, so session {first_session} "
+        f"({first_attached.window_id!r}) and session {second_session} "
+        f"({second_attached.window_id!r}) must name one window id -- the id is what a caller "
+        f"holds, and issuing a fresh one retires the older session. The backend holds "
+        f"{sorted(backend._drivers)}"
+    )
+
+    snapshot = await tool(
+        server, "java_snapshot",
+        {"session_id": first_session, "depth": 12, "max_nodes": 200},
+    )
+    assert "push button" in snapshot and "[e:" in snapshot, (
+        f"session {first_session} named {first_attached.window_id!r} before the second attach, "
+        f"so this call has to reach the re-bound window. It returned: {snapshot[:400]!r}"
+    )
+    print(
+        f"\n[L3] the first session ({first_session} -> {first_attached.window_id}) still drives "
+        f"the window after a second attach to the same hwnd; java_snapshot returned "
+        f"{len(snapshot)} characters"
+    )
+
+
 def boundary_tree(bridge, backend, window_id: str) -> str:
     """Every element of the boundary window as ``role "name"``, for a failure worth reading.
 
