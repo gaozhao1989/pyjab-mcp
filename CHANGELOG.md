@@ -13,7 +13,7 @@ Nothing yet.
 ## [0.3.1] - 2026-10-12
 
 **A release about this repository's description of itself, and about what its published artifact
-actually contains.** 9 changes, and not one of them alters what the server does when it drives
+actually contains.** Nine changes, and not one of them alters what the server does when it drives
 a window. Two are worth naming. A documentation audit by a reader who had not written any of it found
 that the table of guards in `docs/ARCHITECTURE.md` was two guards behind -- a table headed "the rules
 that are enforced rather than remembered", which a reader takes as the list of them -- and that the
