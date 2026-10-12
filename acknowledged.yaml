@@ -209,3 +209,17 @@ context:
       this project has no screenshot tool yet -- and the pin moved to 1.9.0 for the tree
       walk, not for this. When `java_screenshot` is built (M6) it should use
       `get_screenshot_as_png`/`_as_base64`, which are not deprecated.
+
+  - commit: line:8315f72bd1ed
+    what: >-
+      pyjab 1.12.0 removed `pyjab.common.actorscheduler` -- an `ActorScheduler` singleton with one
+      public method and zero callers, which drove the Windows message pump until 1.3.0 replaced that
+      with `Win32Utils.pump_messages()` (pyjab#244). **Nothing to change here.** Nothing in this
+      repository ever imported or called it: `git grep -n "ActorScheduler\|actorscheduler"` finds no
+      tracked file, and `tools/check_pyjab_api_surface.py` records no touchpoint on it, so there is no
+      entry to retire. The only references anywhere were two prose notes, which named a module that no
+      longer exists and are corrected rather than deleted, each in the shape its file deserves:
+      `docs/PLAN.md`'s dated analysis keeps its text and gains a removal note (a record of what was
+      measured then), and the bridge-threading skill's live guidance keeps the rule -- a cooperative
+      generator scheduler cannot keep a pump running -- while saying where the example went. No pin
+      change: `pyjab>=1.11.0` already admits 1.12.0, and the installed 1.11.0 is what CI runs.
