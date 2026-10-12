@@ -190,12 +190,12 @@ acknowledged:
       with `Win32Utils.pump_messages()` (pyjab#244). **Nothing to change here.** Nothing in this
       repository ever imported or called it: `git grep -n "ActorScheduler\|actorscheduler"` finds no
       tracked file, and `tools/check_pyjab_api_surface.py` records no touchpoint on it, so there is no
-      entry to retire. The only references anywhere were two prose notes, which named a module that no
-      longer exists and are corrected rather than deleted, each in the shape its file deserves:
-      `docs/PLAN.md`'s dated analysis keeps its text and gains a removal note (a record of what was
-      measured then), and the bridge-threading skill's live guidance keeps the rule -- a cooperative
-      generator scheduler cannot keep a pump running -- while saying where the example went. No pin
-      change: `pyjab>=1.11.0` already admits 1.12.0, and the installed 1.11.0 is what CI runs.
+      entry to retire. The only references anywhere were two prose notes, both of them in files this
+      repository does not publish; each is corrected in the shape its file deserves rather than deleted.
+      One is a dated plan whose text stays as the record of what was measured at the time, with a note
+      that the module is gone; the other is a live skill, where the rule survives its example -- a
+      cooperative generator scheduler cannot keep a pump running. No pin change: `pyjab>=1.11.0` already
+      admits 1.12.0, and the installed 1.11.0 is what CI runs.
 
 context:
   - commit: a5dacfb
