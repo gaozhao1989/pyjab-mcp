@@ -40,3 +40,22 @@ docs/RELEASE_READINESS.md
 # MANIFEST.in prunes the directory as well: an sdist is built from the working tree, so
 # .gitignore does not protect it. Keep the two in step.
 /.agents/
+
+# --- harness state, if it is ever created inside the checkout ------------------------
+#
+# DSH keeps its own state under ~/.dsh; a .dsh/ here would be a checkout-local copy, and it
+# holds session and workspace records. Ignored for the same reason as .agents/, and named in
+# tools/check_local_only_files.py's LOCAL_ONLY so the guard enforces both mechanisms.
+/.dsh/
+
+# --- security material, which never belongs in a repository --------------------------
+#
+# Credentials come from the environment; a file that carries one is an accident waiting to
+# be committed. These are excluded from the sdist too -- see MANIFEST.in -- and the guard's
+# SECRET_PATTERNS records why the pattern list is not part of its own check.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+credentials*

@@ -54,6 +54,22 @@ LOCAL_ONLY: Sequence[str] = (
     "docs/DESIGN.md",
     "docs/RELEASE_READINESS.md",
     ".agents/",
+    ".dsh/",
+)
+
+#: Patterns that are security-related rather than merely local.  They are excluded by
+#: ``.gitignore`` and ``MANIFEST.in`` like the list above, but they are **not** checked by
+#: this guard: ``_gitignore_covers`` compares a path's own line, and a glob such as ``*.pem``
+#: matches by a rule the comparison does not evaluate.  Saying so here is the point -- a
+#: reader should know which mechanism covers which, rather than assuming this list is all of
+#: it (AGENTS.md section 8).
+SECRET_PATTERNS: Sequence[str] = (
+    ".env",
+    ".env.*",
+    "*.pem",
+    "*.key",
+    "*.p12",
+    "credentials*",
 )
 
 #: The prefix of a refusal: git could not be asked, so the git half of the check has no
