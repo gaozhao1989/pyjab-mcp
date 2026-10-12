@@ -209,7 +209,7 @@ def test_the_documented_surface_guard_catches_a_documented_tool_that_is_missing(
     page.write_text(MINIMAL_ARCHITECTURE, encoding="utf-8")
 
     problems = docs_guard.check(
-        architecture=page, package=REPO_ROOT / "src" / "pyjab_mcp",
+        architecture=page, guards=[], package=REPO_ROOT / "src" / "pyjab_mcp",
         registered=["java_diagnostics"],
     )
 
@@ -221,7 +221,7 @@ def test_the_documented_surface_guard_catches_an_undocumented_tool(tmp_path):
     page.write_text(MINIMAL_ARCHITECTURE, encoding="utf-8")
 
     problems = docs_guard.check(
-        architecture=page, package=REPO_ROOT / "src" / "pyjab_mcp",
+        architecture=page, guards=[], package=REPO_ROOT / "src" / "pyjab_mcp",
         registered=["java_diagnostics", "java_list_windows", "java_attach_window",
                     "java_surprise"],
     )
@@ -234,7 +234,7 @@ def test_the_documented_surface_guard_catches_a_planned_tool_already_registered(
     page.write_text(MINIMAL_ARCHITECTURE, encoding="utf-8")
 
     problems = docs_guard.check(
-        architecture=page, package=REPO_ROOT / "src" / "pyjab_mcp",
+        architecture=page, guards=[], package=REPO_ROOT / "src" / "pyjab_mcp",
         registered=["java_diagnostics", "java_list_windows", "java_attach_window",
                     "java_click"],
     )
@@ -247,7 +247,7 @@ def test_the_documented_surface_guard_catches_an_undocumented_module(tmp_path):
     page.write_text(MINIMAL_ARCHITECTURE, encoding="utf-8")
 
     problems = docs_guard.check(
-        architecture=page, package=REPO_ROOT / "src" / "pyjab_mcp", registered=[]
+        architecture=page, guards=[], package=REPO_ROOT / "src" / "pyjab_mcp", registered=[]
     )
 
     assert any("UNDOCUMENTED MODULE" in problem for problem in problems)
@@ -269,14 +269,14 @@ def test_the_documented_surface_guard_reads_a_release_mark_as_shipping(tmp_path)
     )
 
     shipped = docs_guard.check(
-        architecture=page, package=REPO_ROOT / "src" / "pyjab_mcp",
+        architecture=page, guards=[], package=REPO_ROOT / "src" / "pyjab_mcp",
         registered=["java_diagnostics", "java_list_windows", "java_attach_window",
                     "java_snapshot", "java_screenshot", "java_focus_window"],
     )
     assert not any("java_focus_window" in problem for problem in shipped), shipped
 
     unregistered = docs_guard.check(
-        architecture=page, package=REPO_ROOT / "src" / "pyjab_mcp",
+        architecture=page, guards=[], package=REPO_ROOT / "src" / "pyjab_mcp",
         registered=["java_diagnostics"],
     )
     assert any("MISSING TOOL: java_focus_window" in problem for problem in unregistered), (
@@ -2731,3 +2731,46 @@ def test_a_name_that_is_not_a_citation_of_this_tree_stays_silent(
     })
 
     assert references_guard.check(root) == []
+
+GUARDS_PAGE = MINIMAL_ARCHITECTURE + """
+## Guards
+
+| guard | the rule it makes mechanical |
+|---|---|
+| `check_a.py` | a rule |
+"""
+
+
+def test_the_documented_surface_guard_catches_a_guard_missing_from_the_table(tmp_path):
+    page = tmp_path / "ARCHITECTURE.md"
+    page.write_text(GUARDS_PAGE, encoding="utf-8")
+
+    problems = docs_guard.check(
+        architecture=page, guards=["check_a.py", "check_b.py"], package=REPO_ROOT / "src" / "pyjab_mcp",
+        registered=["java_diagnostics", "java_list_windows", "java_attach_window",
+                    "java_snapshot", "java_screenshot", "java_click"],
+    )
+
+    assert any("UNDOCUMENTED GUARD: tools/check_b.py" in problem for problem in problems)
+
+
+def test_the_documented_surface_guard_catches_a_guard_row_that_has_no_script(tmp_path):
+    page = tmp_path / "ARCHITECTURE.md"
+    page.write_text(
+        MINIMAL_ARCHITECTURE + """
+## Guards
+
+| guard | the rule it makes mechanical |
+|---|---|
+| `check_a.py` | a rule |
+| `check_gone.py` | a rule whose script was deleted |
+""", encoding="utf-8")
+
+    problems = docs_guard.check(
+        architecture=page, guards=["check_a.py"], package=REPO_ROOT / "src" / "pyjab_mcp",
+        registered=["java_diagnostics", "java_list_windows", "java_attach_window",
+                    "java_snapshot", "java_screenshot", "java_click"],
+    )
+
+    assert any("STALE DOC: the guards table names tools/check_gone.py" in problem
+               for problem in problems)

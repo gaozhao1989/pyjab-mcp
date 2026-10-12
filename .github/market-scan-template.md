@@ -3,8 +3,8 @@
 **A scan is due.** This is a research work order: look outward, and report what you found as
 **evidence**.
 
-It is deliberately self-contained, because this file travels in the published sdist and a reader there
-cannot open the maintainer's local notes. Keep it that way: **do not add references to files outside
+It is deliberately self-contained: this file is published in the repository, it is read by whoever runs
+the scan, and neither reader can open the maintainer's local notes. Keep it that way: **do not add references to files outside
 this repository's tracked tree** — a check (`tools/check_published_references.py`) refuses the release
 when a shipped file points at one.
 

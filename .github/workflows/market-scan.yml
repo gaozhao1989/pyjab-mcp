@@ -5,7 +5,7 @@ name: Market and feedback scan
 # opens one issue, so the cadence is mechanical instead of remembered (a rule kept by hand is kept until someone is in a hurry) and lands in the
 # one list this project reads before starting work (the list this project reads before starting work). The research itself is a work order
 # for the market-researcher role in this project's local roster; `.github/market-scan-template.md` is
-# what the issue says, and it is self-contained on purpose -- this file ships in the sdist, so it must
+# what the issue says, and it is self-contained on purpose -- this file is published in the repository, so it must
 # not point a reader at a file they cannot open (tools/check_published_references.py enforces that).
 #
 # Why an issue rather than a failing job: a scheduled job that goes red is a job people learn to

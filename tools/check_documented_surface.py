@@ -125,6 +125,34 @@ def _table_rows(text: str, heading: str) -> List[List[str]]:
     return rows[1:] if rows else []                            # drop the header row
 
 
+GUARDS_HEADING = "## Guards"
+
+
+def documented_guards(architecture: Path = ARCHITECTURE) -> Set[str]:
+    """The guard scripts the guards table of *architecture* lists.
+
+    The table is headed "The rules that are enforced rather than remembered", so a reader
+    takes it as the list of them -- and it had silently fallen two guards behind, because
+    nothing checked it.  This is the check.
+    """
+    text = architecture.read_text(encoding="utf-8")
+    if GUARDS_HEADING not in text:
+        # No table at all.  The comparison then reports every guard as undocumented, which
+        # is the right answer for the real page: deleting the heading deletes the list.
+        return set()
+    rows = _table_rows(text, GUARDS_HEADING)
+    found: Set[str] = set()
+    for row in rows:
+        if row:
+            found.update(_BACKTICKED.findall(row[0]))
+    return found
+
+
+def guard_scripts(repo: Path = REPO_ROOT) -> Set[str]:
+    """Every ``tools/check_*.py`` in *repo*."""
+    return {path.name for path in (repo / "tools").glob("check_*.py")}
+
+
 def documented_modules(architecture: Path = ARCHITECTURE) -> Set[str]:
     """Package-relative module paths named in the file table, e.g. ``server.py``."""
     rows = _table_rows(architecture.read_text(encoding="utf-8"), MODULE_HEADING)
@@ -180,6 +208,7 @@ def check(
     architecture: Path = ARCHITECTURE,
     package: Path = PACKAGE,
     registered: Optional[Sequence[str]] = None,
+    guards: Optional[Sequence[str]] = None,
 ) -> List[str]:
     """Return every disagreement between the page and the code."""
     registered = list(registered_tools() if registered is None else registered)
@@ -220,6 +249,21 @@ def check(
             f"MISSING TOOL: {name} is documented as shipping ({documented[name]}) but the "
             "server does not register it. A documented tool that is not there fails at the "
             "first call."
+        )
+
+    on_disk_guards = {Path(name).name for name in (guard_scripts() if guards is None else guards)}
+    in_page_guards = documented_guards(architecture)
+    for name in sorted(on_disk_guards - in_page_guards):
+        problems.append(
+            f"UNDOCUMENTED GUARD: tools/{name} exists but the guards table of "
+            f"{_label(architecture)} does not list it. The table is headed 'the rules that "
+            "are enforced rather than remembered', so a missing row reads as a guard that "
+            "does not exist."
+        )
+    for name in sorted(in_page_guards - on_disk_guards):
+        problems.append(
+            f"STALE DOC: the guards table names tools/{name}, which does not exist. A guard "
+            "that was deleted or renamed leaves a page claiming a rule is enforced."
         )
     return problems
 

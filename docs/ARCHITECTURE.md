@@ -122,8 +122,8 @@ a wheel contains only the package.
 
 ## Tool surface
 
-Deliberately small. Mapping pyjab's sixty-odd methods onto sixty-odd tools would dilute
-the model's tool selection for no gain. The `ships` column is checked against what
+Deliberately small. Giving each of pyjab's public methods its own tool would dilute the
+model's tool selection for no gain. The `ships` column is checked against what
 `create_server()` actually registers, so a tool cannot be documented as available when it
 is not, or registered without being documented.
 
@@ -135,7 +135,7 @@ is not, or registered without being documented.
 | observe | `java_find`, `java_get_element`, `java_get_text` | M3 |
 | observe | `java_get_table` | M4 |
 | act | `java_click`, `java_set_text`, `java_select`, `java_fill_form` | M5 |
-| act | `java_send_keys` | M5 — sends a chord where pyjab provides one, probed rather than assumed, and answers with requirement R4 where it does not |
+| act | `java_send_keys` | M5 — sends a chord where pyjab provides one, probed rather than assumed, and names the release that has it (`JABDriver.send_keys`, pyjab 1.11.0) where it does not |
 | act | `java_focus_window` | 0.3.0 — brings a window forward and reports whether it came forward, because "asked for focus" and "got focus" are two different facts (issue #57) |
 | wait | `java_wait_for` | M6 |
 | observe | `java_screenshot` | M6 |
@@ -145,9 +145,9 @@ through the JVM's own `AccessibleTable` interface, with paging, rather than thro
 platform bridge that does not carry that information.
 
 **Status.** M1 to M6 have shipped: `java_diagnostics`, `java_list_windows`,
-`java_attach_window`, `java_snapshot`, `java_find`, `java_get_element`, `java_get_text`,
-`java_get_table`, `java_click`, `java_set_text`, `java_select`, `java_fill_form`,
-`java_send_keys`, and `java_focus_window` — the last one after the plan's milestones, which is
+`java_attach_window`, `java_snapshot`, `java_screenshot`, `java_wait_for`, `java_find`,
+`java_get_element`, `java_get_text`, `java_get_table`, `java_click`, `java_set_text`,
+`java_select`, `java_fill_form`, `java_send_keys`, and `java_focus_window` — the last one after the plan's milestones, which is
 why its `ships` cell names the release rather than a milestone.
 
 Every action verifies first and acts on the element it verified, inside one element lifetime,
@@ -202,8 +202,9 @@ places, which is exactly what a report that cannot tell "missing" from "unreadab
 wrong. The application it drives is pyjab's own test app, compiled from the sdist of the
 installed pyjab, because that is the only Swing application a hosted runner has.
 
-The one test in that file worth knowing about is the last one: it starts a **second JVM after
-the executor has been idle** and requires its window to appear. A pump on the wrong thread
+The one test in that file worth knowing about is `test_a_window_that_opens_later_is_seen`,
+which is not the file's last test but is the one to know: it starts a **second JVM after the
+executor has been idle** and requires its window to appear. A pump on the wrong thread
 passes every other test in the repository and fails that one.
 
 **L1 needs a fake built before the thing it fakes.** pyjab's reference-counting test
@@ -223,14 +224,16 @@ report a problem is decoration.
 | guard | the rule it makes mechanical |
 |---|---|
 | `check_pyjab_api_surface.py` | Every pyjab name this project touches is recorded with its public/released status. A private name, an unrecorded touchpoint, or a dependency on something unreleased fails the build. |
-| `check_documented_surface.py` | The tool table above and the code agree, in both directions: a tool documented as shipping but not registered fails, and so does the reverse. |
+| `check_documented_surface.py` | The three lists on this page and the code agree, in both directions: the **file table** (a module on disk with no row, or a row whose module is gone), the **tool table** (a tool documented as shipping but not registered, and the reverse), and the **guards table** (a `tools/check_*.py` with no row, or a row whose script was deleted). |
 | `check_local_only_files.py` | The maintainer's own notes are excluded from git **and** from the sdist. `git check-ignore` is the behaviour rather than the claim, because `.gitignore` does not protect an sdist — it is built from the working tree. |
 | `check_dist_contents.py` | The artifact, not the rules: a built sdist must contain the package, tests and guards and no maintainer note; a wheel must contain only the package, with a working `entry_points.txt`. |
 | `check_published_references.py` | A shipped file may state a rule or link to a public document, but may not send a reader to a maintainer note they cannot open — in the repository or in an installed sdist. |
 | `check_changelog_immutable.py` | A released changelog section is published inside its sdist, so editing one afterwards makes this repository describe a release that never happened. |
 | `check_release_version.py` | The tag, the package version, `server.json` and the changelog have to agree before anything is uploaded, because a PyPI version cannot be unpublished. It also writes the release notes. |
+| `check_release_l3.py` | The release needs a **green L3 run on the commit being tagged**, where L3 is `windows-gui.yml`, which is not a pull-request status check. It refuses on a missing run, a failed one, an unreadable answer, and a conclusion that is anything but success. |
+| `check_release_unpublished.py` | **A version already on PyPI cannot be replaced.** Called immediately after the version guard: 404 proceeds, 200 refuses and names both versions, and anything else refuses as unread, because during a release "I could not check" is not "nothing is there". |
 | `check_pyjab_changelog.py` | Every pyjab change marked as affecting this project has a written answer here, and no answer outlives its marker. |
-| `check_pyjab_readiness.py` | What pyjab still owes this project, made re-checkable: it reports whether an expected API exists yet and whether the declared version pin resolves it. Report-only, because a job that fails until somebody else publishes is a job people learn to ignore. |
+| `check_pyjab_readiness.py` | Which pyjab APIs this project's pin expects, made re-checkable: it reports whether each exists yet and whether the declared version resolves it. All five are RESOLVED and `REQUIREMENTS` is empty, so this is a tripwire for the next pin move rather than a list of what is missing. Report-only, because a job that fails until somebody else publishes is a job people learn to ignore. |
 
 Two are not guards but the other half of the same idea: `tests/contract/` pins the *behaviour*
 this project reads from pyjab, so a break is caught whether or not anybody wrote it down, and
