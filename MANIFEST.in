@@ -41,3 +41,10 @@ exclude docs/RELEASE_READINESS.md
 # on, and the same reasoning as above. Pruned by directory rather than by file, so a new
 # skill cannot be forgotten here.
 prune .agents
+prune .dsh
+exclude .env
+exclude .env.*
+exclude *.pem
+exclude *.key
+exclude *.p12
+exclude credentials*
