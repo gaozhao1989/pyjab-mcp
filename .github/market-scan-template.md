@@ -33,17 +33,19 @@ when a shipped file points at one.
    registry's `status`/`isLatest`, stars and issue counts; and the gaps our own docs admit, which are
    the cheapest true signal there is.
 
-## What to report
+## The report stays local; this issue is a summary
 
-At most a page of prose, plus at most **three** issue drafts:
+**This is a published page, and a scan produces competitive analysis, market measurements and
+quotations from other projects. None of that belongs here.** Keep the report itself in the maintainer's
+working notes and put only the following on this issue:
 
-1. **What I measured** — numbers, each with the query or file that produced it.
-2. **What I read** — sources, each with link, date and the relevant words.
-3. **What I inferred** — clearly separated, with the reasoning that would make it wrong.
-4. **Where I looked and found nothing.**
-5. **At most three candidate issues**, each with the smallest change that would answer it,
-   **acceptance criteria** a person can check, a rough cost, and **what would make it not worth doing**.
-6. **What would change my mind.**
+1. one line saying the scan ran, and the date;
+2. whichever candidate issues were accepted, **linked**;
+3. any decision taken, with its reasoning and **what would change it**.
 
-The scan files nothing itself. Whoever runs it reports back; the accepted candidates become issues that
-link to this one, so this issue is the record of that scan's inputs. Closing it means the report is in.
+The full report -- the numbers, the sources, the per-line verdicts, the quotations -- stays local. If a
+candidate needs a number to be understood, put the number in the candidate's own issue and nothing else,
+and never a competitor's name or figure: this project does not publish its competitive position, and a
+tracker is not a place to start.
+
+If you are unsure whether something is safe to write here, leave it out and say so in the summary.
