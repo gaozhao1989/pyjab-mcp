@@ -8,6 +8,22 @@ under **Unreleased** until it is tagged.
 
 ## Unreleased
 
+Nothing yet.
+
+## [0.3.1] - 2026-10-12
+
+**A release about this repository's description of itself, and about what its published artifact
+actually contains.** Nine changes, and not one of them alters what the server does when it drives
+a window. Two are worth naming. A documentation audit by a reader who had not written any of it found
+that the table of guards in `docs/ARCHITECTURE.md` was two guards behind -- a table headed "the rules
+that are enforced rather than remembered", which a reader takes as the list of them -- and that the
+shipped sdist could not run two of its own checks, because the record one of them reads and the Java
+fixture another compiles were not in the manifest at all. Both are fixed, and the first is fixed by
+making the guard check its own table, so the next guard cannot fall behind it in silence. The rest is a
+corrective pass over claims a reader could check and find false, plus the privacy work of 2026-10-12:
+the scan template no longer asks for a competitive analysis on a public tracker, and the harness's own
+state and security material are excluded from git and from the sdist by both mechanisms.
+
 **One subject: what this project says it is waiting for, and where its own documents claim things
 live.** Every entry below was found by exporting this repository's shipped documentation to a reader
 who had not written it, and each is a sentence a reader could have checked and found false. Nothing
@@ -52,6 +68,13 @@ here changes what the server does; one changes a message a user reads.
 
 ### Changed
 
+* **pyjab 1.12.0's marker for this project is answered**, which it had to be: the guard that reads those
+  markers refuses to pass until somebody writes down what was done about it, so `main` was red and every
+  open pull request with it. Nothing needed changing -- nothing here ever imported the removed module,
+  and `pyjab>=1.11.0` already admits 1.12.0 -- and the two prose notes that mentioned it are corrected
+  in the shape each file deserves, with the answer recorded where the guard can read it. (pyjab#244)
+
+
 * **The market-scan template keeps the report local.** It used to say "this issue is the record of that
   scan's inputs", and the first scan followed it: a competitive analysis -- other projects' download
   figures, repository measurements, quotations from their documentation -- went into a comment on a
@@ -66,7 +89,6 @@ here changes what the server does; one changes a message a user reads.
   is **not** covered by its own comparison and why. The files themselves name the patterns -- this entry
   does not, because a reader of the sdist has never seen that directory and a guard refuses a shipped file
   that cites it.
-
 
 ## [0.3.0] - 2026-10-12
 
