@@ -75,7 +75,9 @@ class Requirement:
             f"  why not a workaround: {self.why}\n"
             f"  expected in:    {self.expected_in}\n"
             "  This is a gap in the dependency rather than in this server: the tool has\n"
-            "  nothing to call. See the issue above for its state."
+            "  nothing to call. See the requirement described above for its state rather\n"
+            "  than a tracker item: this server has none to point at, because no\n"
+            "  requirement is open."
         )
 
 
