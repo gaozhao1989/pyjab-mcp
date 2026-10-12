@@ -24,8 +24,9 @@ name: CI
 #     green run of this file says nothing about a live application, and a red one blocks
 #     nothing. Add it when there is a server to drive.
 #
-# There is also no release job: nothing is published yet, and a pipeline written before the
-# first release encodes guesses.
+  # What this workflow does not do: publish. Releases are the tag-driven `.github/workflows/
+  # release.yml`, which runs its own guards and suite against the tagged commit and refuses a
+  # tag whose commit has no green L3 run; this file stays the fast, default-branch safety net.
 
 on:
   push:

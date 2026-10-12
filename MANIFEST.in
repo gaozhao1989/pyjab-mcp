@@ -8,10 +8,16 @@ include pyproject.toml
 include acknowledged.yaml
 recursive-include src *.py
 recursive-include tests *.py
+# The Java fixtures the shipped end-to-end test compiles and launches; without
+# them that test cannot run from an sdist, and the README cites the path.
+recursive-include tests *.java
 # The guards and verification scripts. sdist only, like pyjab's tools/: they are maintainer
 # tools, and a wheel contains only the package. tools/check_dist_contents.py enforces both
 # halves of that sentence.
 recursive-include tools *.py
+# The record check_changelog_immutable.py reads. Without it the shipped guard
+# exits 1 inside its own sdist, saying the record is not there.
+include tools/released_changelog_sections.json
 # The MCPB entry script. It is not a tool and it is not part of the package: the packer copies
 # it into the bundle verbatim, so an sdist that ships tools/build_mcpb.py without it ships a
 # packer that cannot run where it was published. It is listed in SDIST_REQUIRED in

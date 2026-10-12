@@ -374,30 +374,20 @@ The first is in `README.md`, which is also what PyPI renders as the project page
 documented here. `docs/CLIENTS.md`
 gives the per-client configuration.
 
-**Aggregator directories are deliberately not a release step.** They were a criterion in the plan
-and were removed on 2026-10-10, for reasons that were measured rather than assumed:
+**Aggregator directories are deliberately not a release step.** They were a criterion in the plan and
+were removed on 2026-10-10, for reasons that were measured rather than assumed. The measurements, the
+per-site notes and the wording of the directories' own documentation are kept **locally** with the rest
+of this project's distribution-channel research; what belongs in a shipped document is the decision:
 
-* they are **downstream consumers**: the Registry's own documentation says they *scrape its
-  read-only REST API* "on a regular but infrequent basis (e.g., once per hour)". The registry
-  entry is live (`io.github.gaozhao1989/pyjab-mcp`, `status: active`), so the one channel that
-  costs nothing is already open — and a site that becomes useful later will pick the server up
-  **without any action here**;
-* of the four the plan named, one was **paused** ("New server submissions and listing changes are
-  still paused"), one is **not a form at all** (Smithery publishes a public Streamable HTTP URL —
-  blocked by this project's deliberate stdio-only decision — or a local MCPB bundle), and two ask
-  for an account or a third-party issue;
+* they are **downstream consumers** of the Registry, and the registry entry is already live
+  (`io.github.gaozhao1989/pyjab-mcp`, `status: active`), so the one channel that costs nothing is already
+  open — and a directory that becomes useful later picks the server up **without any action here**;
+* of the four the plan named, none is a plain form that takes a submission and nothing else: one is
+  paused, one is not a submission form at all (it wants a public Streamable HTTP endpoint, which this
+  project has deliberately declined), and two ask for an account or a third-party issue;
 * what they would add is *browsing discovery* for a Windows-only, JAB-dependent tool whose users
   arrive knowing what they want to automate. The cost — an issue here, an account there, a bundle
   to build — is real and the benefit is speculative.
-
-If someone does want to revisit it, this is the state as measured on 2026-10-10:
-
-| site | what it asks for |
-|---|---|
-| LobeHub | an issue in [`lobehub/lobehub`](https://github.com/lobehub/lobehub/issues) titled `[Server Submission]: <name>`; its template asks for the **official Registry name**, transport and licence |
-| PulseMCP | nothing right now — submissions paused, reopening unannounced; it crawls the registry itself |
-| Smithery | a public **Streamable HTTP** endpoint, or an **MCPB bundle** for local use |
-| mcp.so | a `/submit` form and an account |
 
 Anything submitted should copy the description from `server.json` verbatim — it is already written
 to the registry's rules — and should state the two facts a reviewer asks for: Windows with Java

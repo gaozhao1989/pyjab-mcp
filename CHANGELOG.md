@@ -15,10 +15,14 @@ here changes what the server does; one changes a message a user reads.
 
 ### Fixed
 
-* **The below-pin error message no longer points at a tracker item that does not exist.** It ended
-  "See the issue above for its state", and `Requirement` has five fields -- `key`, `blocks`, `wanted`,
-  `why`, `expected_in` -- none of which can name an issue, so the sentence promised a document nobody
-  could open. It now names the requirement and says plainly that no requirement is open. (issue #93)
+* **The message for an *open* requirement no longer points at a tracker item that does not exist.**
+  `Requirement.message()` ended "See the issue above for its state", and the class has five fields --
+  `key`, `blocks`, `wanted`, `why`, `expected_in` -- none of which can name an issue, so the sentence
+  promised a document nobody could open. It now names the requirement and says plainly that no
+  requirement is open. Two things worth saying exactly: this is **not** the below-pin message, which
+  `predates_the_pin()` builds and which was not touched (`git log -S "predates it. Upgrade it"`
+  over the release is empty); and with `REQUIREMENTS` empty the branch is unreachable today, so this
+  is a latent ambiguity corrected rather than a live wrong answer. (issue #93)
 
 * **The guards table in `docs/ARCHITECTURE.md` was two guards behind** -- `check_release_l3.py` and
   `check_release_unpublished.py` had no row in a table headed "the rules that are enforced rather than
@@ -55,11 +59,13 @@ here changes what the server does; one changes a message a user reads.
   accepted candidates and any decision with its reasoning; and the template says outright that
   competitive names and figures are not to be written on a tracker.
 
-* **`.dsh/` and security material are excluded from git and from the sdist.** `.dsh/` joins the
-  local-only list in `tools/check_local_only_files.py`, which fails unless a path is excluded by **both**
-  `.gitignore` and `MANIFEST.in`; `.env`, `.env.*`, `*.pem`, `*.key`, `*.p12` and `credentials*` are
-  excluded by both files, with a note in the guard recording that the pattern list is **not** covered by
-  its own comparison and why.
+* **The harness's own state directory and security material are excluded from git and from the sdist.**
+  The state directory joins the local-only list in `tools/check_local_only_files.py`, which fails unless a
+  path is excluded by **both** `.gitignore` and `MANIFEST.in`; environment files, private keys and
+  credential files are excluded by both as well, with a note in the guard recording that the pattern list
+  is **not** covered by its own comparison and why. The files themselves name the patterns -- this entry
+  does not, because a reader of the sdist has never seen that directory and a guard refuses a shipped file
+  that cites it.
 
 
 ## [0.3.0] - 2026-10-12

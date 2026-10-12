@@ -122,8 +122,8 @@ a wheel contains only the package.
 
 ## Tool surface
 
-Deliberately small. Mapping pyjab's sixty-odd methods onto sixty-odd tools would dilute
-the model's tool selection for no gain. The `ships` column is checked against what
+Deliberately small. Giving each of pyjab's public methods its own tool would dilute the
+model's tool selection for no gain. The `ships` column is checked against what
 `create_server()` actually registers, so a tool cannot be documented as available when it
 is not, or registered without being documented.
 
@@ -145,9 +145,9 @@ through the JVM's own `AccessibleTable` interface, with paging, rather than thro
 platform bridge that does not carry that information.
 
 **Status.** M1 to M6 have shipped: `java_diagnostics`, `java_list_windows`,
-`java_attach_window`, `java_snapshot`, `java_find`, `java_get_element`, `java_get_text`,
-`java_get_table`, `java_click`, `java_set_text`, `java_select`, `java_fill_form`,
-`java_send_keys`, and `java_focus_window` — the last one after the plan's milestones, which is
+`java_attach_window`, `java_snapshot`, `java_screenshot`, `java_wait_for`, `java_find`,
+`java_get_element`, `java_get_text`, `java_get_table`, `java_click`, `java_set_text`,
+`java_select`, `java_fill_form`, `java_send_keys`, and `java_focus_window` — the last one after the plan's milestones, which is
 why its `ships` cell names the release rather than a milestone.
 
 Every action verifies first and acts on the element it verified, inside one element lifetime,
@@ -202,8 +202,9 @@ places, which is exactly what a report that cannot tell "missing" from "unreadab
 wrong. The application it drives is pyjab's own test app, compiled from the sdist of the
 installed pyjab, because that is the only Swing application a hosted runner has.
 
-The one test in that file worth knowing about is the last one: it starts a **second JVM after
-the executor has been idle** and requires its window to appear. A pump on the wrong thread
+The one test in that file worth knowing about is `test_a_window_that_opens_later_is_seen`,
+which is not the file's last test but is the one to know: it starts a **second JVM after the
+executor has been idle** and requires its window to appear. A pump on the wrong thread
 passes every other test in the repository and fails that one.
 
 **L1 needs a fake built before the thing it fakes.** pyjab's reference-counting test

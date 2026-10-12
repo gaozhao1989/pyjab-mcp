@@ -69,12 +69,9 @@ last one is the reason the layer exists — a message pump on the wrong thread p
 other test in this repository. What it still cannot cover is your application: the run drives
 pyjab's test app, and the one that matters is the one you care about.
 
-It needs `pyjab>=1.11.0`, which brought the APIs this project spent M1 and M2 waiting on:
-`list_java_windows()`, so the window list comes from the bridge directly rather than through
-pyjab's CLI; `JABDriver.detach()`, so a bound driver can be released **without terminating the
-application** — the only teardown before it killed the bound process; and, in 1.11.0,
-`JABDriver.send_keys()`, so `java_send_keys` sends a real chord, and `JABDriver.focus()`, which
-`java_focus_window` uses to bring a window forward and report whether it came forward. That
+It needs the same `pyjab>=1.11.0` the tool list above pins, and for the releases named there;
+the one addition worth repeating here is `JABDriver.focus()`, which `java_focus_window` uses to
+bring a window forward **and report whether it came forward**. That
 return value is why the tool exists at all: what a caller needs to know before sending a chord
 is where the keyboard focus actually is, not that focus was requested.
 
@@ -187,7 +184,7 @@ one reads, the Windows path problem that makes most setups fail, and what to do 
 answers with an error.
 
 Start with `java_diagnostics`. It reports which part of the environment is missing —
-Java Access Bridge not enabled, no bridge DLL, a 32-bit interpreter against a 64-bit JVM —
+Java Access Bridge not enabled, no bridge DLL, a 32-bit interpreter (which makes it search for the 32-bit bridge DLL) —
 instead of leaving a tool call to fail with a locator error.
 
 ## What it does, and what it cannot
@@ -270,7 +267,7 @@ green default CI run still says nothing about a live window.
 ## Releasing
 
 Tag-driven: bump `src/pyjab_mcp/__init__.py`, move the changelog's `Unreleased` section under
-the new version, set `server.json`, then `python tools/check_release_version.py v0.1.0` and tag.
+the new version, set `server.json`, then `python tools/check_release_version.py vX.Y.Z` and tag.
 [`docs/RELEASING.md`](docs/RELEASING.md) has the whole procedure, the two one-time setups (a
 PyPI pending publisher and the registry namespace), and what the four release jobs do.
 
@@ -283,9 +280,15 @@ python tools/check_documented_surface.py   # docs/ARCHITECTURE.md's tool table a
 python tools/check_local_only_files.py     # maintainer notes stay unpublished
 python tools/check_pyjab_readiness.py      # which pyjab APIs the pin expects, and whether it resolves them
 python tools/check_pyjab_changelog.py      # every marked pyjab change has an answer here
+python tools/check_published_references.py # shipped files do not cite unpublished ones
+python tools/check_changelog_immutable.py  # a released changelog section is frozen
+python tools/check_release_version.py vX.Y.Z  # the four places a version lives agree
 python -m pytest tests/contract/           # the pyjab shapes this project depends on
 python -m build && python tools/check_dist_contents.py --dist dist
 ```
+
+Two more -- `check_release_l3.py` and `check_release_unpublished.py` -- only mean anything with a
+tag or a run to read, so they run inside the release pipeline rather than by hand.
 
 The guards are the project's rules made mechanical, in the same shape pyjab uses for its own:
 a registry of what is allowed, checked in both directions, so adding a call site fails until
