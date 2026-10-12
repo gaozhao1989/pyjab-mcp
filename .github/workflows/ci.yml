@@ -114,7 +114,7 @@ jobs:
 
       # Report-only on purpose: this one goes red the day pyjab ships the release, and a
       # job that fails until somebody else publishes is a job people learn to ignore.
-      - name: Report what pyjab still owes this project
+      - name: Report which pyjab APIs the pin expects, and whether it resolves them
         run: python tools/check_pyjab_readiness.py
 
   package:

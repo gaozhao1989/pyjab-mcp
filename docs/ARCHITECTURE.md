@@ -135,7 +135,7 @@ is not, or registered without being documented.
 | observe | `java_find`, `java_get_element`, `java_get_text` | M3 |
 | observe | `java_get_table` | M4 |
 | act | `java_click`, `java_set_text`, `java_select`, `java_fill_form` | M5 |
-| act | `java_send_keys` | M5 — sends a chord where pyjab provides one, probed rather than assumed, and answers with requirement R4 where it does not |
+| act | `java_send_keys` | M5 — sends a chord where pyjab provides one, probed rather than assumed, and names the release that has it (`JABDriver.send_keys`, pyjab 1.11.0) where it does not |
 | act | `java_focus_window` | 0.3.0 — brings a window forward and reports whether it came forward, because "asked for focus" and "got focus" are two different facts (issue #57) |
 | wait | `java_wait_for` | M6 |
 | observe | `java_screenshot` | M6 |
@@ -223,14 +223,16 @@ report a problem is decoration.
 | guard | the rule it makes mechanical |
 |---|---|
 | `check_pyjab_api_surface.py` | Every pyjab name this project touches is recorded with its public/released status. A private name, an unrecorded touchpoint, or a dependency on something unreleased fails the build. |
-| `check_documented_surface.py` | The tool table above and the code agree, in both directions: a tool documented as shipping but not registered fails, and so does the reverse. |
+| `check_documented_surface.py` | The three lists on this page and the code agree, in both directions: the **file table** (a module on disk with no row, or a row whose module is gone), the **tool table** (a tool documented as shipping but not registered, and the reverse), and the **guards table** (a `tools/check_*.py` with no row, or a row whose script was deleted). |
 | `check_local_only_files.py` | The maintainer's own notes are excluded from git **and** from the sdist. `git check-ignore` is the behaviour rather than the claim, because `.gitignore` does not protect an sdist — it is built from the working tree. |
 | `check_dist_contents.py` | The artifact, not the rules: a built sdist must contain the package, tests and guards and no maintainer note; a wheel must contain only the package, with a working `entry_points.txt`. |
 | `check_published_references.py` | A shipped file may state a rule or link to a public document, but may not send a reader to a maintainer note they cannot open — in the repository or in an installed sdist. |
 | `check_changelog_immutable.py` | A released changelog section is published inside its sdist, so editing one afterwards makes this repository describe a release that never happened. |
 | `check_release_version.py` | The tag, the package version, `server.json` and the changelog have to agree before anything is uploaded, because a PyPI version cannot be unpublished. It also writes the release notes. |
+| `check_release_l3.py` | The release needs a **green L3 run on the commit being tagged**, where L3 is `windows-gui.yml`, which is not a pull-request status check. It refuses on a missing run, a failed one, an unreadable answer, and a conclusion that is anything but success. |
+| `check_release_unpublished.py` | **A version already on PyPI cannot be replaced.** Called immediately after the version guard: 404 proceeds, 200 refuses and names both versions, and anything else refuses as unread, because during a release "I could not check" is not "nothing is there". |
 | `check_pyjab_changelog.py` | Every pyjab change marked as affecting this project has a written answer here, and no answer outlives its marker. |
-| `check_pyjab_readiness.py` | What pyjab still owes this project, made re-checkable: it reports whether an expected API exists yet and whether the declared version pin resolves it. Report-only, because a job that fails until somebody else publishes is a job people learn to ignore. |
+| `check_pyjab_readiness.py` | Which pyjab APIs this project's pin expects, made re-checkable: it reports whether each exists yet and whether the declared version resolves it. All five are RESOLVED and `REQUIREMENTS` is empty, so this is a tripwire for the next pin move rather than a list of what is missing. Report-only, because a job that fails until somebody else publishes is a job people learn to ignore. |
 
 Two are not guards but the other half of the same idea: `tests/contract/` pins the *behaviour*
 this project reads from pyjab, so a break is caught whether or not anybody wrote it down, and

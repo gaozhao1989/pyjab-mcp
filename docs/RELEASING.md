@@ -370,7 +370,8 @@ download for the same reason.
 | **PyPI** | `pip install pyjab-mcp` — and `uvx pyjab-mcp` for a client that takes a command | a clean venv installed `0.1.1` and the console script answered `--version`. `uvx` itself was **not** exercised (no `uv` on the machine that checked); it is a wrapper over the same install. |
 | **GitHub** | `pip install "git+https://github.com/gaozhao1989/pyjab-mcp"` | a clean venv installed from `main` and reported `0.1.1` with all 15 tools registered. |
 
-Both are in `README.md`, which is also what PyPI renders as the project page, and `docs/CLIENTS.md`
+The first is in `README.md`, which is also what PyPI renders as the project page; the second is
+documented here. `docs/CLIENTS.md`
 gives the per-client configuration.
 
 **Aggregator directories are deliberately not a release step.** They were a criterion in the plan

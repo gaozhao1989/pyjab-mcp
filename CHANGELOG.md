@@ -8,7 +8,59 @@ under **Unreleased** until it is tagged.
 
 ## Unreleased
 
-Nothing yet.
+**One subject: what this project says it is waiting for, and where its own documents claim things
+live.** Every entry below was found by exporting this repository's shipped documentation to a reader
+who had not written it, and each is a sentence a reader could have checked and found false. Nothing
+here changes what the server does; one changes a message a user reads.
+
+### Fixed
+
+* **The below-pin error message no longer points at a tracker item that does not exist.** It ended
+  "See the issue above for its state", and `Requirement` has five fields -- `key`, `blocks`, `wanted`,
+  `why`, `expected_in` -- none of which can name an issue, so the sentence promised a document nobody
+  could open. It now names the requirement and says plainly that no requirement is open. (issue #93)
+
+* **The guards table in `docs/ARCHITECTURE.md` was two guards behind** -- `check_release_l3.py` and
+  `check_release_unpublished.py` had no row in a table headed "the rules that are enforced rather than
+  remembered", which a reader takes as the list of them. The rows are added, and
+  `tools/check_documented_surface.py` now checks the table in both directions, so the next guard cannot
+  be added without one: a guard with no row fails, and a row whose script was deleted fails too. Two
+  cases in `tests/test_guards.py` prove the check can fail, and removing a row from the real page was
+  shown to turn it red before this was committed.
+
+* **`docs/ARCHITECTURE.md` said `java_send_keys` "answers with requirement R4 where it does not".**
+  R4 was retired by pyjab 1.11.0, and the below-pin reply names a **release**, never a requirement id --
+  so a reader looking for R4 in the message would not find it. It now says the reply names the release
+  that has the API.
+
+* **Three places still described "what pyjab still owes this project".** Nothing is owed: all five
+  entries in the readiness check report RESOLVED and `REQUIREMENTS` is empty. The README comment, the
+  `docs/ARCHITECTURE.md` row and the CI step name now say what the script actually reports -- which
+  pyjab APIs the pin expects, and whether it resolves them.
+
+* **`docs/RELEASING.md` said both install channels are "in `README.md`".** Only the PyPI one is; the
+  GitHub channel (`pip install "git+https://..."`) is documented in `docs/RELEASING.md` itself.
+
+* **The market-scan template claimed it "travels in the published sdist".** It does not: the sdist
+  contains no `.github/`, and `check_dist_contents.py` never required it. The self-containment rule
+  stays and its reason is now the true one -- the file is published in the repository and is read by
+  whoever runs the scan, and that reader cannot open a maintainer note either.
+
+### Changed
+
+* **The market-scan template keeps the report local.** It used to say "this issue is the record of that
+  scan's inputs", and the first scan followed it: a competitive analysis -- other projects' download
+  figures, repository measurements, quotations from their documentation -- went into a comment on a
+  public issue. The report now stays in the maintainer's notes; the issue carries the reminder, the
+  accepted candidates and any decision with its reasoning; and the template says outright that
+  competitive names and figures are not to be written on a tracker.
+
+* **`.dsh/` and security material are excluded from git and from the sdist.** `.dsh/` joins the
+  local-only list in `tools/check_local_only_files.py`, which fails unless a path is excluded by **both**
+  `.gitignore` and `MANIFEST.in`; `.env`, `.env.*`, `*.pem`, `*.key`, `*.p12` and `credentials*` are
+  excluded by both files, with a note in the guard recording that the pattern list is **not** covered by
+  its own comparison and why.
+
 
 ## [0.3.0] - 2026-10-12
 

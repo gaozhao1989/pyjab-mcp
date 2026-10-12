@@ -281,7 +281,7 @@ python -m pytest tests/                    # the portable suite, any platform
 python tools/check_pyjab_api_surface.py    # every pyjab call is public, released, recorded
 python tools/check_documented_surface.py   # docs/ARCHITECTURE.md's tool table and the code agree
 python tools/check_local_only_files.py     # maintainer notes stay unpublished
-python tools/check_pyjab_readiness.py      # what pyjab still owes this project
+python tools/check_pyjab_readiness.py      # which pyjab APIs the pin expects, and whether it resolves them
 python tools/check_pyjab_changelog.py      # every marked pyjab change has an answer here
 python -m pytest tests/contract/           # the pyjab shapes this project depends on
 python -m build && python tools/check_dist_contents.py --dist dist
