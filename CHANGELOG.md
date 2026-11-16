@@ -18,6 +18,15 @@ under **Unreleased** until it is tagged.
   one call to `JABDriver.send_keys(keys)`, which is also why pyjab 1.12.1's change needed only
   an acknowledgement — function keys start working with no change here.
 
+* **The two listings a stranger meets first did not say the server needs Windows.** The MCP
+  registry's description (`server.json`) and PyPI's summary (`pyproject.toml`) said what the
+  server does and nothing about where it runs, while pyjab imports `ctypes.windll` at import
+  time and this server attaches to applications that are already running on a desktop session —
+  nothing in it works on macOS or Linux. Both now say "on Windows", and
+  `test_the_two_listings_a_stranger_meets_first_say_what_the_server_needs` fails if a future
+  edit drops it. The GitHub About line carried the same sentence and was changed the same day,
+  as a repository setting rather than a commit (#109).
+
 ## [0.3.1] - 2026-10-12
 
 **A release about this repository's description of itself, and about what its published artifact

@@ -155,6 +155,34 @@ def test_server_json_satisfies_the_registry_schema_it_names():
     assert package["transport"] == {"type": "stdio"}, "this server is stdio only"
 
 
+def test_the_two_listings_a_stranger_meets_first_say_what_the_server_needs():
+    """The registry description and the PyPI summary, not only the README (#109).
+
+    pyjab imports ``ctypes.windll`` at import time, and this server attaches to applications
+    that are already running on a desktop session, so nothing in it works on macOS or Linux.
+    That belongs in the line a reader meets *before* opening the README, and both of these are
+    that line: the registry shows the description and nothing else, and PyPI shows the summary
+    wherever a package is listed. The bundle's own manifest already says it two lines into its
+    "what this needs" list, which is why it is not in this test.
+    """
+    server = json.loads((REPO_ROOT / "server.json").read_text(encoding="utf-8"))
+    summary = re.search(
+        r'^description = "(.+)"$',
+        (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    assert summary, "pyproject.toml has no project summary to check"
+
+    for where, text in (
+        ("server.json's description (the registry listing)", server["description"]),
+        ("pyproject.toml's summary (the PyPI listing)", summary.group(1)),
+    ):
+        assert "Windows" in text, (
+            f"{where} does not say what the server needs: it runs only on Windows, and that is "
+            "the sentence a stranger reads before the README"
+        )
+
+
 @pytest.mark.skipif(
     not os.environ.get("PYJAB_MCP_REGISTRY"),
     reason="needs the mcp-publisher binary and the network; set PYJAB_MCP_REGISTRY=1",
