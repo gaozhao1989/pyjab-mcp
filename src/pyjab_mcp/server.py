@@ -1074,10 +1074,12 @@ def create_server(*, state: Optional[ServerState] = None) -> MCPServer:
         shipped text, because it activated whatever it landed on and went through a locator
         that could have gone stale — which is the thing a shortcut exists to avoid.)
 
-        Chords are written with `+` between key names and are case-insensitive:
-        `ctrl`, `alt`, `shift`, `tab`, `enter`, `escape`, `spacebar`, the arrow keys, and
-        single letters or digits. A name that is not a key is an error rather than a silent
-        no-op — a wrong chord acts on somebody else's application and cannot be taken back.
+        Chords are written with `+` between key names and are case-insensitive: `ctrl`, `alt`,
+        `shift`, `tab`, `enter`, `esc`, `spacebar`, the arrow keys, and single letters or
+        digits. Names may be written in any case; the function keys (`F1`–`F24`) and `escape`
+        as another spelling of `esc` need pyjab 1.12.1, and `plus` for a literal `+` needs
+        1.12.2. A name that is not a key is an error rather than a silent no-op — a wrong
+        chord acts on somebody else's application and cannot be taken back.
 
         This needs pyjab 1.11.0, which released `JABDriver.send_keys`
         (gaozhao1989/pyjab#168 went in after 1.10.0). The call is probed rather than assumed,
