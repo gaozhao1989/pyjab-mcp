@@ -8,7 +8,15 @@ under **Unreleased** until it is tagged.
 
 ## Unreleased
 
-Nothing yet.
+### Fixed
+
+* **`java_send_keys`' docstring named `escape` as a key, and the table spells it `esc`.** pyjab
+  1.12.1 (2026-11-16) added `escape` as an accepted spelling, so before it the name was refused
+  — and this project's floor is `pyjab>=1.11.0`, which admits the releases that refuse it. The
+  docstring now names `esc` and says which release each alias needs (`F1`–`F24` and `escape` in
+  1.12.1, `plus` for a literal `+` in 1.12.2). No code changed: `java_send_keys` has always been
+  one call to `JABDriver.send_keys(keys)`, which is also why pyjab 1.12.1's change needed only
+  an acknowledgement — function keys start working with no change here.
 
 ## [0.3.1] - 2026-10-12
 
