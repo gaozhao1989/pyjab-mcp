@@ -8,6 +8,19 @@ under **Unreleased** until it is tagged.
 
 ## Unreleased
 
+Nothing yet.
+
+## [0.3.2] - 2026-11-17
+
+**Two sentences this project ships were wrong, and both are fixed here.** The first is in
+`java_send_keys`' docstring: it named `escape` as a key while pyjab's table spells it `esc`, and
+`escape` only became an accepted spelling in pyjab 1.12.1 -- so with a floor of `pyjab>=1.11.0`
+the sentence was wrong for releases the pin still admits. The second is the line a stranger meets
+before the README: the MCP registry's description and PyPI's summary said what the server does and
+nothing about where it runs, while nothing in it works off Windows. Both now say the true thing,
+and each has a check that fails if it drifts back. Nothing about how this server drives a window
+changed.
+
 ### Fixed
 
 * **`java_send_keys`' docstring named `escape` as a key, and the table spells it `esc`.** pyjab
