@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pyjab-mcp"
 dynamic = ["version"]
-description = "Drive Java desktop applications from an AI agent, through the JVM's own accessibility tree"
+description = "Drive Java desktop applications on Windows from an AI agent, through the JVM's own accessibility tree"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
